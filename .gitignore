@@ -1,0 +1,5 @@
+arm/build/
+*.o
+*.core
+__pycache__/
+*.pyc
