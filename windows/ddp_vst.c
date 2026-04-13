@@ -21,10 +21,10 @@
 #include "vst2_abi.h"
 
 #define DDP_UNIQUE_ID       0x44445031
-#define DDP_VERSION         110
+#define DDP_VERSION         120
 #define DDP_NUM_CHANNELS    2
 #define DDP_LATENCY_SAMPLES 512
-#define MAX_BLOCK_SIZE      8192
+#define CHUNK_SIZE          256    /* DDP internal processing block size */
 #define READY_MAGIC         0xDD901DAA
 #define CMD_SHUTDOWN        0xFFFFFFFF
 
@@ -213,6 +213,10 @@ static void stop_wsl(DDPState* st) {
 
 /* ── processReplacing ────────────────────────────────────────────────── */
 
+/* DDP processes in fixed 256-frame chunks internally.
+ * EqualizerAPO may send up to 65536 frames per call.
+ * We loop through in CHUNK_SIZE pieces. */
+
 static void ddp_processReplacing(struct AEffect* effect,
                                   float** inputs, float** outputs,
                                   int32_t sampleFrames) {
@@ -235,50 +239,63 @@ static void ddp_processReplacing(struct AEffect* effect,
         return;
     }
 
-    int frames = sampleFrames;
-    if (frames > MAX_BLOCK_SIZE) frames = MAX_BLOCK_SIZE;
+    /* Process entire buffer in CHUNK_SIZE-frame pieces */
+    int offset = 0;
+    while (offset < sampleFrames) {
+        int chunk = sampleFrames - offset;
+        if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
 
-    for (int i = 0; i < frames; i++) {
-        float l = inputs[0][i], r = inputs[1][i];
-        if (l > 1.0f) l = 1.0f; if (l < -1.0f) l = -1.0f;
-        if (r > 1.0f) r = 1.0f; if (r < -1.0f) r = -1.0f;
-        st->pcm_in[i*2]   = (int16_t)(l * 32767.0f);
-        st->pcm_in[i*2+1] = (int16_t)(r * 32767.0f);
-    }
+        /* Float → int16 interleaved */
+        for (int i = 0; i < chunk; i++) {
+            float l = inputs[0][offset + i];
+            float r = inputs[1][offset + i];
+            if (l >  1.0f) l =  1.0f; if (l < -1.0f) l = -1.0f;
+            if (r >  1.0f) r =  1.0f; if (r < -1.0f) r = -1.0f;
+            st->pcm_in[i*2]   = (int16_t)(l * 32767.0f);
+            st->pcm_in[i*2+1] = (int16_t)(r * 32767.0f);
+        }
 
-    uint32_t fc = (uint32_t)frames;
-    DWORD pcm_bytes = frames * 2 * sizeof(int16_t);
+        uint32_t fc = (uint32_t)chunk;
+        DWORD pcm_bytes = chunk * 2 * sizeof(int16_t);
 
-    if (!pipe_write(st->hStdinWrite, &fc, sizeof(fc)) ||
-        !pipe_write(st->hStdinWrite, st->pcm_in, pcm_bytes)) {
-        logf_(st, "Pipe write FAILED at block %d\n", st->block_count);
-        st->bypass = 1;
-        memcpy(outputs[0], inputs[0], sampleFrames * sizeof(float));
-        memcpy(outputs[1], inputs[1], sampleFrames * sizeof(float));
-        return;
-    }
+        if (!pipe_write(st->hStdinWrite, &fc, sizeof(fc)) ||
+            !pipe_write(st->hStdinWrite, st->pcm_in, pcm_bytes)) {
+            logf_(st, "Pipe write FAILED at block %d offset %d\n",
+                  st->block_count, offset);
+            st->bypass = 1;
+            /* Fill remaining output with input (passthrough) */
+            for (int i = offset; i < sampleFrames; i++) {
+                outputs[0][i] = inputs[0][i];
+                outputs[1][i] = inputs[1][i];
+            }
+            return;
+        }
 
-    if (!pipe_read(st->hStdoutRead, st->pcm_out, pcm_bytes)) {
-        logf_(st, "Pipe read FAILED at block %d\n", st->block_count);
-        st->bypass = 1;
-        memcpy(outputs[0], inputs[0], sampleFrames * sizeof(float));
-        memcpy(outputs[1], inputs[1], sampleFrames * sizeof(float));
-        return;
-    }
+        if (!pipe_read(st->hStdoutRead, st->pcm_out, pcm_bytes)) {
+            logf_(st, "Pipe read FAILED at block %d offset %d\n",
+                  st->block_count, offset);
+            st->bypass = 1;
+            for (int i = offset; i < sampleFrames; i++) {
+                outputs[0][i] = inputs[0][i];
+                outputs[1][i] = inputs[1][i];
+            }
+            return;
+        }
 
-    const float scale = 1.0f / 32767.0f;
-    for (int i = 0; i < frames; i++) {
-        outputs[0][i] = (float)st->pcm_out[i*2]   * scale;
-        outputs[1][i] = (float)st->pcm_out[i*2+1] * scale;
-    }
-    for (int i = frames; i < sampleFrames; i++) {
-        outputs[0][i] = 0.0f;
-        outputs[1][i] = 0.0f;
+        /* Int16 → float */
+        const float scale = 1.0f / 32767.0f;
+        for (int i = 0; i < chunk; i++) {
+            outputs[0][offset + i] = (float)st->pcm_out[i*2]   * scale;
+            outputs[1][offset + i] = (float)st->pcm_out[i*2+1] * scale;
+        }
+
+        offset += chunk;
     }
 
     st->block_count++;
     if (st->block_count <= 5 || st->block_count % 10000 == 0)
-        logf_(st, "Block %d OK: frames=%d\n", st->block_count, frames);
+        logf_(st, "Block %d OK: frames=%d chunks=%d\n",
+              st->block_count, sampleFrames, (sampleFrames + CHUNK_SIZE - 1) / CHUNK_SIZE);
 }
 
 /* ── getParameter / setParameter ─────────────────────────────────────── */
@@ -304,8 +321,8 @@ static intptr_t ddp_dispatcher(struct AEffect* effect,
           st->logfp = fopen(lp, "a"); }
         logf_(st, "\n===== DolbyX VST opened =====\n");
         load_config(st);
-        st->pcm_in  = (int16_t*)calloc(MAX_BLOCK_SIZE * 2, sizeof(int16_t));
-        st->pcm_out = (int16_t*)calloc(MAX_BLOCK_SIZE * 2, sizeof(int16_t));
+        st->pcm_in  = (int16_t*)calloc(CHUNK_SIZE * 2, sizeof(int16_t));
+        st->pcm_out = (int16_t*)calloc(CHUNK_SIZE * 2, sizeof(int16_t));
         if (start_wsl(st) != 0)
             logf_(st, "effOpen: start_wsl failed, will retry lazily\n");
         return 0;
