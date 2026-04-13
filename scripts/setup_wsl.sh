@@ -68,7 +68,7 @@ echo
 # ── Build Windows VST ──────────────────────────────────────────────
 echo "[5/5] Building Windows VST plugin..."
 cd "$PROJECT_DIR/windows"
-if x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll ddp_vst.c -static 2>&1; then
+if x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll ddp_vst.c -lws2_32 -static 2>&1; then
     echo "✓ DolbyDDP.dll built!"
 else
     echo "  MinGW build failed — you can build with MSVC later."
