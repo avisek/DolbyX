@@ -260,6 +260,14 @@ int main(int argc, char* argv[]) {
     log_msg("Waiting for VST connections on %s\n", PIPE_NAME);
     log_msg("Press Ctrl+C to stop\n\n");
 
+    /* Create a security descriptor that allows ALL local processes
+     * to connect, including audiodg.exe (runs as LOCAL SERVICE).
+     * A NULL DACL = unrestricted access for any local account. */
+    SECURITY_DESCRIPTOR sd;
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    SetSecurityDescriptorDacl(&sd, TRUE, NULL /* NULL DACL = allow all */, FALSE);
+    SECURITY_ATTRIBUTES pipe_sa = { sizeof(pipe_sa), &sd, FALSE };
+
     /* Main loop: create named pipe instances and accept connections */
     for (;;) {
         HANDLE hPipe = CreateNamedPipeA(
@@ -267,10 +275,10 @@ int main(int argc, char* argv[]) {
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             PIPE_UNLIMITED_INSTANCES,
-            1024 * 1024,  /* output buffer */
-            1024 * 1024,  /* input buffer */
-            0,            /* default timeout */
-            NULL          /* default security (accessible by any local process) */
+            1024 * 1024,
+            1024 * 1024,
+            0,
+            &pipe_sa      /* permissive security — lets audiodg.exe connect */
         );
 
         if (hPipe == INVALID_HANDLE_VALUE) {
