@@ -29,7 +29,7 @@ echo
 echo "[4/4] Building Windows components..."
 cd "$PROJECT_DIR/windows"
 x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll ddp_vst.c -static 2>&1 && echo "  ✓ DolbyDDP.dll"
-x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c -static 2>&1 && echo "  ✓ dolbyx-bridge.exe"
+x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c -static -ladvapi32 2>&1 && echo "  ✓ dolbyx-bridge.exe"
 echo
 
 # Smoke test
