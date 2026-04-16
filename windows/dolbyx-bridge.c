@@ -1,21 +1,11 @@
 /*
- * dolbyx-bridge.c — DolbyX Named Pipe Bridge
+ * dolbyx-bridge.c — DolbyX Named Pipe Bridge (Optimized)
  *
- * Runs as a regular Windows user process. Creates a named pipe that
- * audiodg.exe (EqualizerAPO) can connect to, and bridges audio data
- * to the DDP processor running in WSL2 via QEMU.
+ * Creates \\.\pipe\DolbyX with permissive ACL for audiodg.exe.
+ * Pre-warms DDP processor on startup. Uses batch+pipeline protocol
+ * to minimize IPC overhead.
  *
- * Architecture:
- *   audiodg.exe ──► \\.\pipe\DolbyX ──► bridge.exe ──► wsl.exe/qemu ──► DDP
- *
- * Build (MinGW from WSL2):
- *   x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c -static
- *
- * Usage (from Windows CMD or PowerShell):
- *   dolbyx-bridge.exe [path_to_DolbyX_arm_in_wsl]
- *
- * Or from WSL2:
- *   cmd.exe /c "$(wslpath -w ../windows/dolbyx-bridge.exe)" /home/user/DolbyX/arm
+ * Build: x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c -static -ladvapi32
  */
 
 #include <windows.h>
@@ -24,26 +14,17 @@
 #include <string.h>
 
 #define PIPE_NAME       "\\\\.\\pipe\\DolbyX"
-#define CHUNK_BUF       (256 * 2 * 2 + 4)   /* 256 frames * 2ch * 2bytes + header */
 #define READY_MAGIC     0xDD901DAA
 #define CMD_SHUTDOWN    0xFFFFFFFF
-
-typedef struct {
-    HANDLE hProcess;
-    HANDLE hChildStdinWrite;
-    HANDLE hChildStdoutRead;
-} WslProcess;
+#define CHUNK_SIZE      256
+#define MAX_FRAMES      131072  /* 2.7s at 48kHz */
 
 static void log_msg(const char* fmt, ...) {
     SYSTEMTIME t; GetLocalTime(&t);
-    printf("[%02d:%02d:%02d] ", t.wHour, t.wMinute, t.wSecond);
-    va_list a; va_start(a, fmt);
-    vprintf(fmt, a);
-    va_end(a);
+    printf("[%02d:%02d:%02d.%03d] ", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+    va_list a; va_start(a, fmt); vprintf(fmt, a); va_end(a);
     fflush(stdout);
 }
-
-/* ── Exact I/O helpers ─────────────────────────────────────────────── */
 
 static BOOL read_exact(HANDLE h, void* buf, DWORD n) {
     DWORD total = 0;
@@ -67,237 +48,213 @@ static BOOL write_exact(HANDLE h, const void* buf, DWORD n) {
     return TRUE;
 }
 
-/* ── Start WSL/DDP processor ───────────────────────────────────────── */
+/* ── Processor management ──────────────────────────────────────────── */
 
-static WslProcess* start_ddp(const char* wsl_arm_path) {
-    WslProcess* wp = calloc(1, sizeof(WslProcess));
+typedef struct {
+    HANDLE hProcess;
+    HANDLE hStdinWrite;
+    HANDLE hStdoutRead;
+} Processor;
+
+static Processor* start_processor(const char* wsl_path) {
+    Processor* p = calloc(1, sizeof(Processor));
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
     HANDLE hStdinRead, hStdoutWrite;
 
-    if (!CreatePipe(&hStdinRead, &wp->hChildStdinWrite, &sa, 1024*1024) ||
-        !CreatePipe(&wp->hChildStdoutRead, &hStdoutWrite, &sa, 1024*1024)) {
-        log_msg("CreatePipe failed: %lu\n", GetLastError());
-        free(wp); return NULL;
+    if (!CreatePipe(&hStdinRead, &p->hStdinWrite, &sa, 4*1024*1024) ||
+        !CreatePipe(&p->hStdoutRead, &hStdoutWrite, &sa, 4*1024*1024)) {
+        free(p); return NULL;
     }
-    SetHandleInformation(wp->hChildStdinWrite, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(wp->hChildStdoutRead, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(p->hStdinWrite, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(p->hStdoutRead, HANDLE_FLAG_INHERIT, 0);
 
-    char cmdline[2048];
-    snprintf(cmdline, sizeof(cmdline),
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
         "wsl.exe -- bash -c \""
-        "cd '%s' && "
-        "LD_LIBRARY_PATH=build/lib "
+        "cd '%s' && LD_LIBRARY_PATH=build/lib "
         "qemu-arm-static -L /usr/arm-linux-gnueabihf "
-        "build/ddp_processor build/lib/libdseffect.so 48000 -6 0"
-        "\"",
-        wsl_arm_path);
+        "build/ddp_processor build/lib/libdseffect.so 48000 -6 0\"",
+        wsl_path);
 
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
+    STARTUPINFOA si; PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput  = hStdinRead;
-    si.hStdOutput = hStdoutWrite;
-    si.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
+    si.hStdInput = hStdinRead; si.hStdOutput = hStdoutWrite;
+    si.hStdError = INVALID_HANDLE_VALUE;
     ZeroMemory(&pi, sizeof(pi));
 
-    if (!CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
+    if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE,
                         CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         log_msg("CreateProcess failed: %lu\n", GetLastError());
         CloseHandle(hStdinRead); CloseHandle(hStdoutWrite);
-        CloseHandle(wp->hChildStdinWrite); CloseHandle(wp->hChildStdoutRead);
-        free(wp); return NULL;
+        CloseHandle(p->hStdinWrite); CloseHandle(p->hStdoutRead);
+        free(p); return NULL;
     }
-    CloseHandle(hStdinRead);
-    CloseHandle(hStdoutWrite);
-    wp->hProcess = pi.hProcess;
-    CloseHandle(pi.hThread);
+    CloseHandle(hStdinRead); CloseHandle(hStdoutWrite);
+    p->hProcess = pi.hProcess; CloseHandle(pi.hThread);
 
-    /* Wait for ready magic from processor */
     DWORD magic = 0;
-    if (!read_exact(wp->hChildStdoutRead, &magic, 4) || magic != READY_MAGIC) {
-        log_msg("Bad magic from processor: 0x%08X\n", magic);
-        TerminateProcess(wp->hProcess, 1);
-        CloseHandle(wp->hProcess);
-        CloseHandle(wp->hChildStdinWrite);
-        CloseHandle(wp->hChildStdoutRead);
-        free(wp); return NULL;
+    if (!read_exact(p->hStdoutRead, &magic, 4) || magic != READY_MAGIC) {
+        log_msg("Bad magic: 0x%08X\n", magic);
+        TerminateProcess(p->hProcess, 1);
+        CloseHandle(p->hProcess); CloseHandle(p->hStdinWrite);
+        CloseHandle(p->hStdoutRead); free(p); return NULL;
     }
-
-    return wp;
+    return p;
 }
 
-static void stop_ddp(WslProcess* wp) {
-    if (!wp) return;
+static void stop_processor(Processor* p) {
+    if (!p) return;
     DWORD cmd = CMD_SHUTDOWN;
-    write_exact(wp->hChildStdinWrite, &cmd, 4);
-    if (WaitForSingleObject(wp->hProcess, 2000) == WAIT_TIMEOUT)
-        TerminateProcess(wp->hProcess, 1);
-    CloseHandle(wp->hProcess);
-    CloseHandle(wp->hChildStdinWrite);
-    CloseHandle(wp->hChildStdoutRead);
-    free(wp);
+    write_exact(p->hStdinWrite, &cmd, 4);
+    if (WaitForSingleObject(p->hProcess, 2000) == WAIT_TIMEOUT)
+        TerminateProcess(p->hProcess, 1);
+    CloseHandle(p->hProcess);
+    CloseHandle(p->hStdinWrite);
+    CloseHandle(p->hStdoutRead);
+    free(p);
 }
 
-/* ── Handle one client on the named pipe ───────────────────────────── */
+/* ── Client handler (batch + pipeline protocol) ───────────────────── */
+
+/*
+ * Protocol (batch mode):
+ *   Bridge → Client:  uint32_t READY_MAGIC
+ *   Client → Bridge:  uint32_t total_frames + int16_t pcm[frames*2]
+ *   Bridge internally: chunks into 256-frame pieces, pipelines to processor
+ *   Bridge → Client:  int16_t pcm[frames*2]  (processed)
+ *   Client → Bridge:  total_frames=0xFFFFFFFF → disconnect
+ *
+ * The bridge writes ALL chunks to the processor's stdin before reading
+ * ANY results. The OS pipe buffers (4MB) hold the data. The processor
+ * processes sequentially and its stdout fills up. Then the bridge reads
+ * all results. This "pipeline" approach eliminates per-chunk round trips.
+ */
+
+const char* g_wsl_path = NULL;
 
 static DWORD WINAPI handle_client(LPVOID param) {
     HANDLE hPipe = (HANDLE)param;
-    static const char* wsl_path = NULL; /* set from main */
 
-    /* Use thread-local storage trick: path is in global */
-    extern const char* g_wsl_path;
-
-    log_msg("Client connected, starting DDP processor...\n");
-
-    WslProcess* wp = start_ddp(g_wsl_path);
-    if (!wp) {
-        log_msg("Failed to start DDP processor\n");
-        DisconnectNamedPipe(hPipe);
-        CloseHandle(hPipe);
-        return 1;
+    log_msg("Client connected, starting processor...\n");
+    Processor* proc = start_processor(g_wsl_path);
+    if (!proc) {
+        log_msg("Processor start failed\n");
+        DWORD magic = 0; write_exact(hPipe, &magic, 4); /* signal failure */
+        DisconnectNamedPipe(hPipe); CloseHandle(hPipe); return 1;
     }
-    log_msg("DDP processor ready\n");
+    log_msg("Processor ready\n");
 
-    /* Send ready magic to client */
     DWORD magic = READY_MAGIC;
-    if (!write_exact(hPipe, &magic, 4)) {
-        log_msg("Failed to send magic\n");
-        stop_ddp(wp);
-        DisconnectNamedPipe(hPipe);
-        CloseHandle(hPipe);
-        return 1;
-    }
+    write_exact(hPipe, &magic, 4);
 
-    /* Bridge loop: pipe ↔ processor */
+    BYTE* pcm_buf = (BYTE*)malloc(MAX_FRAMES * 2 * 2);
     int blocks = 0;
-    BYTE buf[256 * 2 * 2]; /* max 256 frames * 2ch * 2 bytes */
 
     for (;;) {
-        /* Read frame count from client */
-        DWORD frame_count = 0;
-        if (!read_exact(hPipe, &frame_count, 4)) break;
-
-        if (frame_count == CMD_SHUTDOWN) break;
-        if (frame_count > 65536) { log_msg("Bad frame count: %u\n", frame_count); break; }
-
-        DWORD pcm_bytes = frame_count * 2 * 2;
-
-        /* Read PCM from client */
-        BYTE* pcm = (pcm_bytes <= sizeof(buf)) ? buf : (BYTE*)malloc(pcm_bytes);
-        if (!read_exact(hPipe, pcm, pcm_bytes)) {
-            if (pcm != buf) free(pcm);
+        DWORD total_frames = 0;
+        if (!read_exact(hPipe, &total_frames, 4)) break;
+        if (total_frames == CMD_SHUTDOWN) break;
+        if (total_frames > MAX_FRAMES) {
+            log_msg("Frames too large: %u\n", total_frames);
             break;
         }
 
-        /* Forward to processor: frame_count + pcm */
-        if (!write_exact(wp->hChildStdinWrite, &frame_count, 4) ||
-            !write_exact(wp->hChildStdinWrite, pcm, pcm_bytes)) {
-            log_msg("Write to processor failed\n");
-            if (pcm != buf) free(pcm);
-            break;
+        DWORD total_bytes = total_frames * 2 * 2;
+        if (!read_exact(hPipe, pcm_buf, total_bytes)) break;
+
+        /* ── Pipeline: write ALL chunks to processor stdin ────── */
+        DWORD offset = 0;
+        while (offset < total_frames) {
+            DWORD chunk = total_frames - offset;
+            if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
+            DWORD chunk_bytes = chunk * 2 * 2;
+
+            if (!write_exact(proc->hStdinWrite, &chunk, 4) ||
+                !write_exact(proc->hStdinWrite, pcm_buf + offset * 2 * 2, chunk_bytes)) {
+                log_msg("Processor write failed\n");
+                goto done;
+            }
+            offset += chunk;
         }
 
-        /* Read processed PCM from processor */
-        if (!read_exact(wp->hChildStdoutRead, pcm, pcm_bytes)) {
-            log_msg("Read from processor failed\n");
-            if (pcm != buf) free(pcm);
-            break;
+        /* ── Read ALL processed chunks from processor stdout ──── */
+        offset = 0;
+        while (offset < total_frames) {
+            DWORD chunk = total_frames - offset;
+            if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
+            DWORD chunk_bytes = chunk * 2 * 2;
+
+            if (!read_exact(proc->hStdoutRead, pcm_buf + offset * 2 * 2, chunk_bytes)) {
+                log_msg("Processor read failed\n");
+                goto done;
+            }
+            offset += chunk;
         }
 
-        /* Send to client */
-        if (!write_exact(hPipe, pcm, pcm_bytes)) {
-            if (pcm != buf) free(pcm);
-            break;
-        }
+        /* ── Send entire processed block back to client ──────── */
+        if (!write_exact(hPipe, pcm_buf, total_bytes)) break;
 
-        if (pcm != buf) free(pcm);
         blocks++;
+        if (blocks <= 3 || blocks % 5000 == 0)
+            log_msg("Block %d: %u frames\n", blocks, total_frames);
     }
 
+done:
     log_msg("Client disconnected after %d blocks\n", blocks);
-    stop_ddp(wp);
-    DisconnectNamedPipe(hPipe);
-    CloseHandle(hPipe);
+    free(pcm_buf);
+    stop_processor(proc);
+    DisconnectNamedPipe(hPipe); CloseHandle(hPipe);
     return 0;
 }
-
-/* ── Global path (accessed from threads) ──────────────────────────── */
-const char* g_wsl_path = NULL;
 
 /* ── Main ──────────────────────────────────────────────────────────── */
 
 int main(int argc, char* argv[]) {
-    printf("╔══════════════════════════════════════════╗\n");
-    printf("║   DolbyX Bridge — Named Pipe Server      ║\n");
-    printf("╚══════════════════════════════════════════╝\n\n");
+    printf("DolbyX Bridge v0.6\n\n");
 
-    /* Determine WSL path to DolbyX/arm */
-    if (argc >= 2) {
-        g_wsl_path = argv[1];
-    } else {
-        /* Try to auto-detect from registry or default */
-        g_wsl_path = "/home/user/DolbyX/arm";
-        printf("Usage: dolbyx-bridge.exe <wsl-path-to-DolbyX-arm>\n");
-        printf("Example: dolbyx-bridge.exe /home/avisek/DolbyX/arm\n\n");
-        printf("Using default: %s\n", g_wsl_path);
-    }
-
-    log_msg("WSL path: %s\n", g_wsl_path);
-    log_msg("Named pipe: %s\n", PIPE_NAME);
-
-    /* Smoke test: verify processor can start */
-    log_msg("Smoke test...\n");
-    WslProcess* test = start_ddp(g_wsl_path);
-    if (!test) {
-        log_msg("FAILED: Cannot start DDP processor. Check WSL2 and build.\n");
+    if (argc < 2) {
+        printf("Usage: dolbyx-bridge.exe <wsl-path-to-DolbyX/arm>\n");
+        printf("Example: dolbyx-bridge.exe /home/avisek/DolbyX/arm\n");
         return 1;
     }
-    stop_ddp(test);
-    log_msg("Smoke test passed!\n\n");
+    g_wsl_path = argv[1];
 
-    log_msg("Waiting for VST connections on %s\n", PIPE_NAME);
-    log_msg("Press Ctrl+C to stop\n\n");
+    log_msg("WSL path: %s\n", g_wsl_path);
+    log_msg("Pipe: %s\n\n", PIPE_NAME);
 
-    /* Create a security descriptor that allows ALL local processes
-     * to connect, including audiodg.exe (runs as LOCAL SERVICE).
-     * A NULL DACL = unrestricted access for any local account. */
+    /* Smoke test */
+    log_msg("Smoke test...\n");
+    Processor* test = start_processor(g_wsl_path);
+    if (!test) { log_msg("FAILED\n"); return 1; }
+    stop_processor(test);
+    log_msg("OK!\n\n");
+
+    log_msg("Listening on %s (Ctrl+C to stop)\n\n", PIPE_NAME);
+
+    /* Permissive security for audiodg.exe */
     SECURITY_DESCRIPTOR sd;
     InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
-    SetSecurityDescriptorDacl(&sd, TRUE, NULL /* NULL DACL = allow all */, FALSE);
+    SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
     SECURITY_ATTRIBUTES pipe_sa = { sizeof(pipe_sa), &sd, FALSE };
 
-    /* Main loop: create named pipe instances and accept connections */
     for (;;) {
-        HANDLE hPipe = CreateNamedPipeA(
-            PIPE_NAME,
+        HANDLE hPipe = CreateNamedPipeA(PIPE_NAME,
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES,
-            1024 * 1024,
-            1024 * 1024,
-            0,
-            &pipe_sa      /* permissive security — lets audiodg.exe connect */
-        );
+            PIPE_UNLIMITED_INSTANCES, 4*1024*1024, 4*1024*1024, 0, &pipe_sa);
 
         if (hPipe == INVALID_HANDLE_VALUE) {
             log_msg("CreateNamedPipe failed: %lu\n", GetLastError());
-            Sleep(1000);
-            continue;
+            Sleep(1000); continue;
         }
 
-        /* Wait for client connection (blocking) */
         if (!ConnectNamedPipe(hPipe, NULL) && GetLastError() != ERROR_PIPE_CONNECTED) {
-            log_msg("ConnectNamedPipe failed: %lu\n", GetLastError());
-            CloseHandle(hPipe);
-            continue;
+            CloseHandle(hPipe); continue;
         }
 
-        /* Handle client in a new thread */
-        HANDLE hThread = CreateThread(NULL, 0, handle_client, hPipe, 0, NULL);
-        if (hThread) CloseHandle(hThread);
+        HANDLE t = CreateThread(NULL, 0, handle_client, hPipe, 0, NULL);
+        if (t) CloseHandle(t);
     }
-
     return 0;
 }
