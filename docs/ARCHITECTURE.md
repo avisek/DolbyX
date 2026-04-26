@@ -1,132 +1,116 @@
-# DolbyX Architecture Analysis & Optimization Plan
+# DolbyX Architecture
 
-## Current Performance Analysis
-
-### Why the VST seems slow despite 12× realtime test_ddp.py
-
-The key insight from the audiodg.exe log:
+## System Overview
 
 ```
-PID:3604 BlockSize: 480     ← audiodg.exe uses 480-frame blocks (10ms)
-PID:12348 BlockSize: 65536  ← Configuration Editor uses 65536 (1.37s analysis)
+┌──────────────────────────────────────────────────────────────────┐
+│  Windows                                                          │
+│                                                                   │
+│  Audio App → EqualizerAPO → DolbyDDP.dll (VST2 plugin)           │
+│                                  │                                │
+│                          \\.\pipe\DolbyX (named pipe)             │
+│                                  │                                │
+│  dolbyx-bridge.exe ──────────────┘                                │
+│      │                                                            │
+│      └── wsl.exe → qemu-arm-static → ddp_processor               │
+│                                          │                        │
+│                                    libdseffect.so (ARM32 binary)  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-The Configuration Editor's -2.2dB measurement and ~10% CPU came from processing
-65536 frames (1.37 seconds of audio) in its **one-shot analysis pass** — NOT from
-real-time audio. The actual audio path (audiodg.exe) processes in 480-frame
-blocks (10ms each), which is ~100× less work per call.
+## Why This Architecture?
 
-### Latency breakdown (480-frame blocks, batch protocol)
+**Why Named Pipes?**
+- `audiodg.exe` (Windows Audio Service) runs as LOCAL SERVICE
+- It cannot make TCP connections (error 10013 WSAEACCES)
+- It cannot spawn WSL processes (per-user service)
+- Named pipes with NULL DACL are accessible from all local accounts
 
-| Component | Time |
-|-----------|------|
-| Float→int16 conversion (480 samples) | ~0.01ms |
-| Named pipe write (4 + 1920 bytes) | ~0.05ms |
-| Bridge receive + chunk (2 × 256-frame chunks) | ~0.02ms |
-| Bridge→processor stdin write | ~0.05ms |
-| QEMU ARM emulation (480 frames of DDP) | ~1-2ms |
-| Processor→bridge stdout read | ~0.05ms |
-| Named pipe read (1920 bytes) | ~0.05ms |
-| Int16→float conversion | ~0.01ms |
-| **Total** | **~1.5-2.5ms** |
+**Why a Separate Bridge Process?**
+- `audiodg.exe` can't launch WSL2
+- The bridge runs as the user (can access WSL2)
+- It pre-warms the processor for instant startup
 
-With the batch protocol, this should be **excellent for gaming** — well under
-the 10ms perceptual threshold.
+**Why QEMU?**
+- `libdseffect.so` is a 32-bit ARM binary compiled for Android
+- QEMU user-mode translates ARM instructions to x86 at runtime
+- Performance: 6-12× realtime (sufficient for audio processing)
 
-### CPU usage
-
-The ~10% CPU was from the analysis pass processing 65536 frames through QEMU.
-Real-time at 480-frame blocks: QEMU processes ~100 blocks/second, each taking
-~1-2ms = ~15-20% of one core. This is the cost of ARM emulation.
-
----
-
-## Path to Standalone Plug-and-Play VST
-
-### Why we currently need WSL
+## Processing Pipeline
 
 ```
-Current: audiodg.exe → pipe → bridge.exe → wsl.exe → qemu-arm-static → DDP
-                                             ↑              ↑
-                                        WSL2 needed    Linux-only tool
+Input Audio (float32, 48kHz, stereo)
+  │
+  ├── VST: float32 → int16 conversion
+  │   └── Single pipe write (frame_count + PCM block)
+  │
+  ├── Bridge: chunk into 256-frame pieces
+  │   └── Pipeline all chunks to processor (no per-chunk waiting)
+  │
+  ├── Processor (ARM/QEMU):
+  │   ├── Pre-gain: -6dB (simulate phone volume)
+  │   ├── Zero output buffer (ACCUMULATE mode)
+  │   ├── libdseffect.so Effect_process()
+  │   │   ├── Forward QMF (20-band filterbank)
+  │   │   ├── Next Gen Surround (stereo → 5.1 upmix)
+  │   │   ├── Dialog Enhancer
+  │   │   ├── Volume Leveler
+  │   │   ├── Intelligent EQ (content-adaptive)
+  │   │   ├── Dolby Headphone (HRTF virtualizer)
+  │   │   ├── Audio Regulator (20-band compressor)
+  │   │   ├── Peak Limiter
+  │   │   └── Reverse QMF (reconstruct audio)
+  │   └── Post-gain: 0dB (raw DDP output)
+  │
+  ├── Bridge: collect all processed chunks
+  │   └── Single pipe write back to VST
+  │
+  └── VST: int16 → float32 conversion
+      └── Output Audio
 ```
 
-QEMU user-mode emulation (`qemu-arm-static`) is **Linux-only** — it translates
-Linux syscalls to host syscalls. It cannot run natively on Windows. This is
-confirmed in QEMU's official docs: "User mode is implemented for Linux and BSD."
+## Supported Sample Rates
 
-### Three paths to standalone
+| Rate | Native Support | Notes |
+|------|---------------|-------|
+| 32000 Hz | ✅ | Via Ds1ap::New hot-swap |
+| 44100 Hz | ✅ | Default EffectCreate rate |
+| **48000 Hz** | ✅ | **Default** (hot-swap technique) |
+| 96000+ Hz | ❌ | DSP core lacks filterbank coefficients |
 
-#### Path 1: Unicorn Engine (RECOMMENDED — Most Practical)
+## Key Technical Solutions
 
-**Unicorn** is a lightweight CPU emulator extracted from QEMU's TCG (Tiny Code
-Generator). It runs natively on Windows, macOS, and Linux as a C library.
+### Native 48kHz (Hot-Swap)
+`EffectCreate` always initializes at 44100Hz, and `SET_CONFIG` is permanently
+broken. DolbyX creates a fresh `Ds1ap::New(0, 48000, 2, 0)` and patches the
+effect context at runtime (Ds1ap pointer at offset +68, sample rates at +12/+44).
 
-```
-Standalone: audiodg.exe → DolbyDDP.dll → Unicorn ARM emulator → libdseffect.so
-                              ↑
-                     Everything in one DLL!
-```
+### Gain Staging
+On Android, audio enters DDP at system volume (~50%). On desktop, audio is
+typically at 0dBFS. Without pre-gain attenuation, the Volume Maximizer (+7.2dB)
+causes constant Peak Limiter activation. Default: -6dB pre-gain, 0dB post-gain.
 
-**What we'd build:**
-1. Custom ELF loader (parse libdseffect.so sections, map into memory)
-2. Stub resolver (hook android:: imports to our C++ stubs)
-3. ARM function caller (invoke EffectCreate, Effect_process via Unicorn)
-4. All packaged inside the DLL — zero external dependencies
+### Output Buffer Zeroing
+The DS1 effect uses ACCUMULATE mode — it adds to the output buffer. Without
+zeroing, leftover data creates crackling distortion.
 
-**Pros:** Truly plug-and-play, cross-platform, ~500KB DLL
-**Cons:** Complex to build (~2-3 weeks), ~5-10× slower than native QEMU
-**Feasibility:** HIGH — Unicorn is well-documented, actively maintained
+### ABI-Compatible Stubs
+`libdseffect.so` depends on Android-specific libraries. DolbyX provides
+binary-compatible implementations of `android::String8`, `android::VectorImpl`,
+and `android::SortedVectorImpl` matching AOSP 4.4-5.0 memory layout.
 
-#### Path 2: Static Binary Translation (Best Performance, Hardest)
+## Roadmap to Standalone (No WSL)
 
-Convert ARM machine code to x86 at build time using tools like rev.ng or RetDec.
+### Path 1: Unicorn Engine (Recommended)
+Embed the Unicorn CPU emulator (extracted from QEMU's TCG backend) directly
+in the DLL. Custom ELF loader + stub resolver = single-file plug-and-play VST.
+Performance: ~1.2-2× slower than QEMU (same JIT engine, minimal overhead
+without instrumentation hooks). Still 6-10× realtime.
 
-```
-Build-time: libdseffect.so (ARM) → translator → libdseffect_x86.dll (native)
-Runtime:    audiodg.exe → DolbyDDP.dll → libdseffect_x86.dll (native speed!)
-```
+### Path 2: Static Binary Translation
+Convert ARM machine code to x86 at build time. Native speed but extremely
+complex for optimized DSP code with NEON instructions.
 
-**Pros:** Native speed, zero emulation overhead, ~200KB DLL
-**Cons:** Extremely difficult for optimized ARM code, NEON instructions, 
-         self-modifying code. May take months. QMF filterbank uses fixed-point
-         ARM-specific math that's hard to translate automatically.
-**Feasibility:** MEDIUM — would need manual intervention for DSP-heavy code
-
-#### Path 3: Optimized Current Architecture (Quick Wins)
-
-Keep WSL but minimize overhead:
-1. ✅ Batch protocol (done in v0.6.0)
-2. Pre-warm processor (persistent bridge process)
-3. Shared memory instead of named pipes (further reduces IPC)
-4. Auto-start bridge as Windows service
-
-**Pros:** Works now, incremental improvement
-**Cons:** Still requires WSL2 setup
-**Feasibility:** HIGH — days, not weeks
-
-### Recommended Roadmap
-
-| Phase | Goal | Timeline |
-|-------|------|----------|
-| **v0.6** | Batch protocol + verify performance (**current**) | Done |
-| **v0.7** | Auto-start bridge, installer script | 1-2 days |
-| **v1.0** | Unicorn-based standalone DLL (no WSL) | 2-3 weeks |
-| **v1.1** | Parameter control UI (VST panel or standalone) | 1 week |
-| **v1.2** | macOS AudioUnit plugin | 1 week |
-| **v2.0** | Clean-room DSP reimplementation | 3-6 months |
-
----
-
-## Immediate Next Step: Verify Batch Protocol Performance
-
-After updating the bridge and VST, test with the following:
-
-1. Start bridge: `cd /mnt/c && ~/DolbyX/windows/dolbyx-bridge.exe /home/avisek/DolbyX/arm`
-2. Toggle VST in EqualizerAPO
-3. Play music — should hear DDP effect
-4. Check logs: `cat /mnt/c/Users/Public/DolbyDDP.log`
-5. Check bridge output for "Block 1: 480 frames" (confirms small blocks)
-
-The 480-frame blocks + batch protocol should give <3ms processing latency,
-which is invisible for gaming.
+### Path 3: Clean-Room Reimplementation
+Rewrite the DSP chain in portable C/Rust using extracted parameters and
+open-source equivalents. Legally safest, best performance, most effort (3-6mo).

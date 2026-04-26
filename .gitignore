@@ -1,5 +1,21 @@
+# Build artifacts
 arm/build/
 *.o
 *.core
+
+# Python
 __pycache__/
 *.pyc
+
+# Logs
+*.log
+
+# Editor files
+*.swp
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
