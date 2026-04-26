@@ -1,12 +1,10 @@
 /*
- * dolbyx-bridge.c — DolbyX Named Pipe Bridge
+ * dolbyx-bridge.c — DolbyX Named Pipe Bridge (Multi-client)
  *
  * Creates \\.\pipe\DolbyX with permissive ACL for audiodg.exe.
- * Maintains a persistent DDP processor — no startup delay on reconnect.
- * Uses batch+pipeline protocol for minimal IPC overhead.
- *
- * Architecture:
- *   audiodg.exe -> \\.\pipe\DolbyX -> bridge.exe -> wsl/qemu -> DDP
+ * Each client gets its own DDP processor in a separate thread.
+ * Handles multiple simultaneous connections (editor preview,
+ * editor analysis, and audiodg.exe all connect at once).
  *
  * Build:
  *   x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c \
@@ -24,7 +22,12 @@
 #define CHUNK_SIZE      256
 #define MAX_FRAMES      131072
 
+/* ── Logging ──────────────────────────────────────────────────────── */
+
+static CRITICAL_SECTION g_log_lock;
+
 static void log_msg(const char *fmt, ...) {
+    EnterCriticalSection(&g_log_lock);
     SYSTEMTIME t;
     GetLocalTime(&t);
     printf("[%02d:%02d:%02d.%03d] ", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
@@ -33,7 +36,10 @@ static void log_msg(const char *fmt, ...) {
     vprintf(fmt, a);
     va_end(a);
     fflush(stdout);
+    LeaveCriticalSection(&g_log_lock);
 }
+
+/* ── Exact I/O ────────────────────────────────────────────────────── */
 
 static BOOL read_exact(HANDLE h, void *buf, DWORD n) {
     DWORD total = 0;
@@ -63,19 +69,19 @@ typedef struct {
     HANDLE process;
     HANDLE stdin_wr;
     HANDLE stdout_rd;
-    BOOL   alive;
 } Processor;
 
 static const char *g_wsl_path = NULL;
 
-static BOOL processor_start(Processor *p) {
+static Processor *processor_start(void) {
+    Processor *p = (Processor *)calloc(1, sizeof(Processor));
     SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
     HANDLE stdin_rd, stdout_wr;
 
     if (!CreatePipe(&stdin_rd, &p->stdin_wr, &sa, 4 * 1024 * 1024) ||
         !CreatePipe(&p->stdout_rd, &stdout_wr, &sa, 4 * 1024 * 1024)) {
-        log_msg("CreatePipe failed: %lu\n", GetLastError());
-        return FALSE;
+        free(p);
+        return NULL;
     }
     SetHandleInformation(p->stdin_wr, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(p->stdout_rd, HANDLE_FLAG_INHERIT, 0);
@@ -100,12 +106,12 @@ static BOOL processor_start(Processor *p) {
 
     if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE,
                         CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        log_msg("CreateProcess failed: %lu\n", GetLastError());
         CloseHandle(stdin_rd);
         CloseHandle(stdout_wr);
         CloseHandle(p->stdin_wr);
         CloseHandle(p->stdout_rd);
-        return FALSE;
+        free(p);
+        return NULL;
     }
 
     CloseHandle(stdin_rd);
@@ -115,20 +121,19 @@ static BOOL processor_start(Processor *p) {
 
     DWORD magic = 0;
     if (!read_exact(p->stdout_rd, &magic, 4) || magic != READY_MAGIC) {
-        log_msg("Bad magic: 0x%08X\n", magic);
         TerminateProcess(p->process, 1);
         CloseHandle(p->process);
         CloseHandle(p->stdin_wr);
         CloseHandle(p->stdout_rd);
-        return FALSE;
+        free(p);
+        return NULL;
     }
 
-    p->alive = TRUE;
-    return TRUE;
+    return p;
 }
 
 static void processor_stop(Processor *p) {
-    if (!p->alive) return;
+    if (!p) return;
     DWORD cmd = CMD_SHUTDOWN;
     write_exact(p->stdin_wr, &cmd, 4);
     if (WaitForSingleObject(p->process, 2000) == WAIT_TIMEOUT)
@@ -136,15 +141,42 @@ static void processor_stop(Processor *p) {
     CloseHandle(p->process);
     CloseHandle(p->stdin_wr);
     CloseHandle(p->stdout_rd);
-    p->alive = FALSE;
+    free(p);
 }
 
-/* ── Client Session (batch + pipeline) ────────────────────────────── */
+/* ── Client Thread ────────────────────────────────────────────────── */
 
-static int serve_client(HANDLE pipe, Processor *proc) {
+typedef struct {
+    HANDLE pipe;
+    int    session_id;
+} ClientArgs;
+
+static DWORD WINAPI client_thread(LPVOID param) {
+    ClientArgs *args = (ClientArgs *)param;
+    HANDLE pipe = args->pipe;
+    int sid = args->session_id;
+    free(args);
+
+    log_msg("Session %d: starting processor...\n", sid);
+    Processor *proc = processor_start();
+    if (!proc) {
+        log_msg("Session %d: processor failed\n", sid);
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        return 1;
+    }
+    log_msg("Session %d: processor ready\n", sid);
+
+    /* Send ready magic to client */
     DWORD magic = READY_MAGIC;
-    if (!write_exact(pipe, &magic, 4)) return -1;
+    if (!write_exact(pipe, &magic, 4)) {
+        processor_stop(proc);
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        return 1;
+    }
 
+    /* Bridge loop: batch protocol */
     BYTE *buf = (BYTE *)malloc(MAX_FRAMES * 4);
     int blocks = 0;
 
@@ -157,49 +189,55 @@ static int serve_client(HANDLE pipe, Processor *proc) {
         DWORD total_bytes = total_frames * 4;
         if (!read_exact(pipe, buf, total_bytes)) break;
 
-        /* Pipeline: write ALL chunks to processor stdin */
+        /* Pipeline: write all chunks to processor */
         DWORD off = 0;
-        while (off < total_frames) {
+        BOOL ok = TRUE;
+        while (off < total_frames && ok) {
             DWORD chunk = total_frames - off;
             if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
             if (!write_exact(proc->stdin_wr, &chunk, 4) ||
-                !write_exact(proc->stdin_wr, buf + off * 4, chunk * 4)) {
-                log_msg("  Processor write failed\n");
-                free(buf);
-                return -1;
-            }
+                !write_exact(proc->stdin_wr, buf + off * 4, chunk * 4))
+                ok = FALSE;
             off += chunk;
         }
+        if (!ok) { log_msg("Session %d: proc write err\n", sid); break; }
 
-        /* Read ALL processed chunks from processor stdout */
+        /* Read all processed chunks */
         off = 0;
         while (off < total_frames) {
             DWORD chunk = total_frames - off;
             if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
             if (!read_exact(proc->stdout_rd, buf + off * 4, chunk * 4)) {
-                log_msg("  Processor read failed\n");
-                free(buf);
-                return -1;
+                log_msg("Session %d: proc read err\n", sid);
+                ok = FALSE;
+                break;
             }
             off += chunk;
         }
+        if (!ok) break;
 
         if (!write_exact(pipe, buf, total_bytes)) break;
 
         blocks++;
         if (blocks <= 3 || blocks % 5000 == 0)
-            log_msg("  Block %d: %u frames\n", blocks, total_frames);
+            log_msg("Session %d: block %d (%u frames)\n", sid, blocks, total_frames);
     }
 
+    log_msg("Session %d: done (%d blocks)\n", sid, blocks);
     free(buf);
-    return blocks;
+    processor_stop(proc);
+    DisconnectNamedPipe(pipe);
+    CloseHandle(pipe);
+    return 0;
 }
 
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    InitializeCriticalSection(&g_log_lock);
+
     printf(
-        "DolbyX Bridge v0.7\n"
+        "DolbyX Bridge v0.8\n"
         "==================\n\n"
     );
 
@@ -213,17 +251,19 @@ int main(int argc, char *argv[]) {
     log_msg("WSL path: %s\n", g_wsl_path);
     log_msg("Pipe: %s\n\n", PIPE_NAME);
 
-    /* Pre-warm the processor so first connection is instant */
-    log_msg("Starting DDP processor...\n");
-    Processor proc = {0};
-    if (!processor_start(&proc)) {
+    /* Smoke test */
+    log_msg("Smoke test...\n");
+    Processor *test = processor_start();
+    if (!test) {
         log_msg("FATAL: Cannot start processor\n");
         return 1;
     }
-    log_msg("Processor ready (pre-warmed)\n\n");
+    processor_stop(test);
+    log_msg("Smoke test passed\n\n");
+
     log_msg("Listening on %s (Ctrl+C to stop)\n\n", PIPE_NAME);
 
-    /* Permissive security for audiodg.exe (LOCAL SERVICE) */
+    /* Permissive security for audiodg.exe */
     SECURITY_DESCRIPTOR sd;
     InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
     SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
@@ -251,32 +291,21 @@ int main(int argc, char *argv[]) {
         }
 
         session++;
-        log_msg("Session %d connected\n", session);
+        ClientArgs *args = (ClientArgs *)malloc(sizeof(ClientArgs));
+        args->pipe = pipe;
+        args->session_id = session;
 
-        if (!proc.alive) {
-            log_msg("  Processor dead, restarting...\n");
-            if (!processor_start(&proc)) {
-                log_msg("  Restart failed\n");
-                DisconnectNamedPipe(pipe);
-                CloseHandle(pipe);
-                continue;
-            }
-        }
-
-        int blocks = serve_client(pipe, &proc);
-
-        if (blocks < 0) {
-            log_msg("Session %d: processor error, restarting\n", session);
-            processor_stop(&proc);
-            processor_start(&proc);
+        HANDLE t = CreateThread(NULL, 0, client_thread, args, 0, NULL);
+        if (t) {
+            CloseHandle(t); /* detach — thread manages its own lifetime */
         } else {
-            log_msg("Session %d: %d blocks\n", session, blocks);
+            log_msg("CreateThread failed\n");
+            free(args);
+            DisconnectNamedPipe(pipe);
+            CloseHandle(pipe);
         }
-
-        DisconnectNamedPipe(pipe);
-        CloseHandle(pipe);
     }
 
-    processor_stop(&proc);
+    DeleteCriticalSection(&g_log_lock);
     return 0;
 }

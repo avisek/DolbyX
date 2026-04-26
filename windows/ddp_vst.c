@@ -114,10 +114,28 @@ static void get_dll_dir(char *buf, size_t sz) {
 static int connect_bridge(DDPState *st) {
     if (st->connected) return 0;
 
-    st->pipe = CreateFileA(PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
-                           0, NULL, OPEN_EXISTING, 0, NULL);
+    /* Retry loop: if pipe is busy (another client just connected and the
+     * bridge hasn't created the next instance yet), wait and retry. */
+    for (int attempt = 0; attempt < 5; attempt++) {
+        st->pipe = CreateFileA(PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
+                               0, NULL, OPEN_EXISTING, 0, NULL);
+
+        if (st->pipe != INVALID_HANDLE_VALUE)
+            break; /* success */
+
+        DWORD err = GetLastError();
+        if (err == ERROR_PIPE_BUSY) {
+            /* Wait up to 2 seconds for the pipe to become available */
+            if (WaitNamedPipeA(PIPE_NAME, 2000))
+                continue; /* retry CreateFile */
+        }
+
+        logf_(st, "Pipe open failed: err=%lu (attempt %d)\n", err, attempt + 1);
+        return -1;
+    }
+
     if (st->pipe == INVALID_HANDLE_VALUE) {
-        logf_(st, "Pipe open failed: err=%lu\n", GetLastError());
+        logf_(st, "Pipe open failed after retries\n");
         return -1;
     }
 
