@@ -1,10 +1,13 @@
 /*
- * dolbyx-bridge.c — DolbyX Named Pipe Bridge (Multi-client)
+ * dolbyx-bridge.c — DolbyX Named Pipe Bridge (Multi-client + Control)
  *
- * Creates \\.\pipe\DolbyX with permissive ACL for audiodg.exe.
- * Each client gets its own DDP processor in a separate thread.
- * Handles multiple simultaneous connections (editor preview,
- * editor analysis, and audiodg.exe all connect at once).
+ * Creates two named pipes:
+ *   \\.\pipe\DolbyX     — audio processing (audiodg.exe connects)
+ *   \\.\pipe\DolbyXCtrl — control commands (Editor UI connects)
+ *
+ * Control commands from the UI are forwarded to ALL active audio
+ * processor instances, so parameter changes affect the live audio
+ * even though the UI runs in a different Windows process.
  *
  * Build:
  *   x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c \
@@ -17,10 +20,12 @@
 #include <string.h>
 
 #define PIPE_NAME       "\\\\.\\pipe\\DolbyX"
+#define CTRL_PIPE_NAME  "\\\\.\\pipe\\DolbyXCtrl"
 #define READY_MAGIC     0xDD901DAA
 #define CMD_SHUTDOWN    0xFFFFFFFF
 #define CHUNK_SIZE      256
 #define MAX_FRAMES      131072
+#define MAX_SESSIONS    8
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
@@ -69,17 +74,25 @@ typedef struct {
     HANDLE process;
     HANDLE stdin_wr;
     HANDLE stdout_rd;
+    CRITICAL_SECTION lock;  /* protects stdin/stdout from concurrent access */
 } Processor;
 
 static const char *g_wsl_path = NULL;
 
+/* Global list of active audio processors (for control command routing) */
+static Processor *g_audio_procs[MAX_SESSIONS];
+static int g_audio_proc_count = 0;
+static CRITICAL_SECTION g_proc_lock;
+
 static Processor *processor_start(void) {
     Processor *p = (Processor *)calloc(1, sizeof(Processor));
+    InitializeCriticalSection(&p->lock);
     SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
     HANDLE stdin_rd, stdout_wr;
 
     if (!CreatePipe(&stdin_rd, &p->stdin_wr, &sa, 4 * 1024 * 1024) ||
         !CreatePipe(&p->stdout_rd, &stdout_wr, &sa, 4 * 1024 * 1024)) {
+        DeleteCriticalSection(&p->lock);
         free(p);
         return NULL;
     }
@@ -110,6 +123,7 @@ static Processor *processor_start(void) {
         CloseHandle(stdout_wr);
         CloseHandle(p->stdin_wr);
         CloseHandle(p->stdout_rd);
+        DeleteCriticalSection(&p->lock);
         free(p);
         return NULL;
     }
@@ -125,6 +139,7 @@ static Processor *processor_start(void) {
         CloseHandle(p->process);
         CloseHandle(p->stdin_wr);
         CloseHandle(p->stdout_rd);
+        DeleteCriticalSection(&p->lock);
         free(p);
         return NULL;
     }
@@ -141,42 +156,72 @@ static void processor_stop(Processor *p) {
     CloseHandle(p->process);
     CloseHandle(p->stdin_wr);
     CloseHandle(p->stdout_rd);
+    DeleteCriticalSection(&p->lock);
     free(p);
 }
 
-/* ── Client Thread ────────────────────────────────────────────────── */
+/* Send a control command to a processor (thread-safe) */
+static BOOL processor_send_ctrl(Processor *p, const BYTE *data, int len,
+                                 BYTE *reply, int reply_len) {
+    EnterCriticalSection(&p->lock);
+    BOOL ok = write_exact(p->stdin_wr, data, len);
+    if (ok && reply && reply_len > 0)
+        ok = read_exact(p->stdout_rd, reply, reply_len);
+    LeaveCriticalSection(&p->lock);
+    return ok;
+}
+
+/* ── Named Pipe Security ─────────────────────────────────────────── */
+
+static SECURITY_ATTRIBUTES *get_permissive_sa(void) {
+    static SECURITY_DESCRIPTOR sd;
+    static SECURITY_ATTRIBUTES sa;
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = &sd;
+    sa.bInheritHandle = FALSE;
+    return &sa;
+}
+
+/* ── Audio Client Thread ──────────────────────────────────────────── */
 
 typedef struct {
     HANDLE pipe;
     int    session_id;
 } ClientArgs;
 
-static DWORD WINAPI client_thread(LPVOID param) {
+static DWORD WINAPI audio_client_thread(LPVOID param) {
     ClientArgs *args = (ClientArgs *)param;
     HANDLE pipe = args->pipe;
     int sid = args->session_id;
     free(args);
 
-    log_msg("Session %d: starting processor...\n", sid);
+    log_msg("Audio session %d: starting processor...\n", sid);
     Processor *proc = processor_start();
     if (!proc) {
-        log_msg("Session %d: processor failed\n", sid);
+        log_msg("Audio session %d: processor failed\n", sid);
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
         return 1;
     }
-    log_msg("Session %d: processor ready\n", sid);
+    log_msg("Audio session %d: processor ready\n", sid);
 
-    /* Send ready magic to client */
+    /* Register in global list for control command routing */
+    EnterCriticalSection(&g_proc_lock);
+    int slot = -1;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (!g_audio_procs[i]) { slot = i; break; }
+    }
+    if (slot >= 0) {
+        g_audio_procs[slot] = proc;
+        g_audio_proc_count++;
+    }
+    LeaveCriticalSection(&g_proc_lock);
+
     DWORD magic = READY_MAGIC;
-    if (!write_exact(pipe, &magic, 4)) {
-        processor_stop(proc);
-        DisconnectNamedPipe(pipe);
-        CloseHandle(pipe);
-        return 1;
-    }
+    write_exact(pipe, &magic, 4);
 
-    /* Bridge loop: audio + control commands */
     BYTE *buf = (BYTE *)malloc(MAX_FRAMES * 4);
     int blocks = 0;
 
@@ -185,52 +230,36 @@ static DWORD WINAPI client_thread(LPVOID param) {
         if (!read_exact(pipe, &frame_count, 4)) break;
         if (frame_count == CMD_SHUTDOWN) break;
 
-        /* ── Control commands (0xFFFFFFF0+) ──────────────────────── */
+        /* Control commands from audio pipe (forwarded inline) */
         if (frame_count >= 0xFFFFFFF0) {
-            /* Forward command to processor */
-            if (!write_exact(proc->stdin_wr, &frame_count, 4)) break;
+            BYTE ctrl_buf[16];
+            int extra = 0, reply_len = 4;
 
-            if (frame_count == 0xFFFFFFF0) {
-                /* CMD_SET_PARAM: read 4 extra bytes (uint16 index + int16 value) */
-                BYTE extra[4];
-                if (!read_exact(pipe, extra, 4)) break;
-                if (!write_exact(proc->stdin_wr, extra, 4)) break;
-                /* Read response: uint32 status */
-                DWORD status = 0;
-                if (!read_exact(proc->stdout_rd, &status, 4)) break;
-                if (!write_exact(pipe, &status, 4)) break;
-            }
-            else if (frame_count == 0xFFFFFFF1) {
-                /* CMD_SET_PROFILE: read 4 extra bytes (uint32 profile_id) */
-                DWORD pid = 0;
-                if (!read_exact(pipe, &pid, 4)) break;
-                if (!write_exact(proc->stdin_wr, &pid, 4)) break;
-                DWORD status = 0;
-                if (!read_exact(proc->stdout_rd, &status, 4)) break;
-                if (!write_exact(pipe, &status, 4)) break;
-            }
-            else if (frame_count == 0xFFFFFFF2) {
-                /* CMD_GET_VIS: no extra input, read 40 bytes (int16[20]) */
-                BYTE vis[40];
-                if (!read_exact(proc->stdout_rd, vis, 40)) break;
-                if (!write_exact(pipe, vis, 40)) break;
-            }
-            else if (frame_count == 0xFFFFFFFD) {
-                /* CMD_PING */
-                DWORD pong = 0;
-                if (!read_exact(proc->stdout_rd, &pong, 4)) break;
-                if (!write_exact(pipe, &pong, 4)) break;
-            }
+            if (frame_count == 0xFFFFFFF0) extra = 4;       /* SET_PARAM */
+            else if (frame_count == 0xFFFFFFF1) extra = 4;  /* SET_PROFILE */
+            else if (frame_count == 0xFFFFFFF2) reply_len = 40; /* GET_VIS */
+            else if (frame_count == 0xFFFFFFFD) reply_len = 4; /* PING */
+
+            if (extra > 0 && !read_exact(pipe, ctrl_buf + 4, extra)) break;
+            memcpy(ctrl_buf, &frame_count, 4);
+
+            BYTE reply[40] = {0};
+            EnterCriticalSection(&proc->lock);
+            write_exact(proc->stdin_wr, ctrl_buf, 4 + extra);
+            read_exact(proc->stdout_rd, reply, reply_len);
+            LeaveCriticalSection(&proc->lock);
+
+            write_exact(pipe, reply, reply_len);
             continue;
         }
 
-        /* ── Audio frame processing ──────────────────────────────── */
+        /* Audio processing */
         if (frame_count > MAX_FRAMES) break;
-
         DWORD total_bytes = frame_count * 4;
         if (!read_exact(pipe, buf, total_bytes)) break;
 
-        /* Pipeline: write all chunks to processor */
+        EnterCriticalSection(&proc->lock);
+
         DWORD off = 0;
         BOOL ok = TRUE;
         while (off < frame_count && ok) {
@@ -241,30 +270,43 @@ static DWORD WINAPI client_thread(LPVOID param) {
                 ok = FALSE;
             off += chunk;
         }
-        if (!ok) { log_msg("Session %d: proc write err\n", sid); break; }
 
-        /* Read all processed chunks */
-        off = 0;
-        while (off < frame_count) {
-            DWORD chunk = frame_count - off;
-            if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
-            if (!read_exact(proc->stdout_rd, buf + off * 4, chunk * 4)) {
-                log_msg("Session %d: proc read err\n", sid);
-                ok = FALSE;
-                break;
+        if (ok) {
+            off = 0;
+            while (off < frame_count) {
+                DWORD chunk = frame_count - off;
+                if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
+                if (!read_exact(proc->stdout_rd, buf + off * 4, chunk * 4)) {
+                    ok = FALSE;
+                    break;
+                }
+                off += chunk;
             }
-            off += chunk;
         }
-        if (!ok) break;
 
+        LeaveCriticalSection(&proc->lock);
+
+        if (!ok) break;
         if (!write_exact(pipe, buf, total_bytes)) break;
 
         blocks++;
         if (blocks <= 3 || blocks % 5000 == 0)
-            log_msg("Session %d: block %d (%u frames)\n", sid, blocks, frame_count);
+            log_msg("Audio session %d: block %d (%u frames)\n",
+                    sid, blocks, frame_count);
     }
 
-    log_msg("Session %d: done (%d blocks)\n", sid, blocks);
+    /* Unregister from global list */
+    EnterCriticalSection(&g_proc_lock);
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (g_audio_procs[i] == proc) {
+            g_audio_procs[i] = NULL;
+            g_audio_proc_count--;
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_proc_lock);
+
+    log_msg("Audio session %d: done (%d blocks)\n", sid, blocks);
     free(buf);
     processor_stop(proc);
     DisconnectNamedPipe(pipe);
@@ -272,44 +314,77 @@ static DWORD WINAPI client_thread(LPVOID param) {
     return 0;
 }
 
-/* ── Main ─────────────────────────────────────────────────────────── */
+/* ── Control Client Thread ────────────────────────────────────────── */
 
-int main(int argc, char *argv[]) {
-    InitializeCriticalSection(&g_log_lock);
+static DWORD WINAPI ctrl_client_thread(LPVOID param) {
+    HANDLE pipe = (HANDLE)param;
+    log_msg("Control client connected\n");
 
-    printf(
-        "DolbyX Bridge v0.8\n"
-        "==================\n\n"
-    );
+    /* Send ready magic */
+    DWORD magic = READY_MAGIC;
+    write_exact(pipe, &magic, 4);
 
-    if (argc < 2) {
-        printf("Usage: dolbyx-bridge.exe <wsl-path-to-DolbyX/arm>\n");
-        printf("Example: dolbyx-bridge.exe /home/avisek/DolbyX/arm\n");
-        return 1;
+    for (;;) {
+        DWORD cmd = 0;
+        if (!read_exact(pipe, &cmd, 4)) break;
+        if (cmd == CMD_SHUTDOWN) break;
+
+        BYTE ctrl_data[16];
+        int data_len = 0, reply_len = 4;
+        memcpy(ctrl_data, &cmd, 4);
+        data_len = 4;
+
+        if (cmd == 0xFFFFFFF0) {
+            /* SET_PARAM: +4 bytes (uint16 idx + int16 val) */
+            if (!read_exact(pipe, ctrl_data + 4, 4)) break;
+            data_len = 8;
+            reply_len = 4;
+        } else if (cmd == 0xFFFFFFF1) {
+            /* SET_PROFILE: +4 bytes (uint32 profile_id) */
+            if (!read_exact(pipe, ctrl_data + 4, 4)) break;
+            data_len = 8;
+            reply_len = 4;
+        } else if (cmd == 0xFFFFFFF2) {
+            /* GET_VIS: no extra, 40 byte reply */
+            reply_len = 40;
+        } else if (cmd == 0xFFFFFFFD) {
+            /* PING */
+            reply_len = 4;
+        } else {
+            continue;
+        }
+
+        /* Forward to ALL active audio processors */
+        BYTE reply[40] = {0};
+        BOOL any_sent = FALSE;
+
+        EnterCriticalSection(&g_proc_lock);
+        for (int i = 0; i < MAX_SESSIONS; i++) {
+            Processor *p = g_audio_procs[i];
+            if (!p) continue;
+            if (processor_send_ctrl(p, ctrl_data, data_len, reply, reply_len))
+                any_sent = TRUE;
+        }
+        LeaveCriticalSection(&g_proc_lock);
+
+        if (!any_sent) {
+            /* No audio processors running — return error */
+            memset(reply, 0xFF, reply_len);
+        }
+
+        write_exact(pipe, reply, reply_len);
     }
-    g_wsl_path = argv[1];
 
-    log_msg("WSL path: %s\n", g_wsl_path);
-    log_msg("Pipe: %s\n\n", PIPE_NAME);
+    log_msg("Control client disconnected\n");
+    DisconnectNamedPipe(pipe);
+    CloseHandle(pipe);
+    return 0;
+}
 
-    /* Smoke test */
-    log_msg("Smoke test...\n");
-    Processor *test = processor_start();
-    if (!test) {
-        log_msg("FATAL: Cannot start processor\n");
-        return 1;
-    }
-    processor_stop(test);
-    log_msg("Smoke test passed\n\n");
+/* ── Pipe Accept Threads ──────────────────────────────────────────── */
 
-    log_msg("Listening on %s (Ctrl+C to stop)\n\n", PIPE_NAME);
-
-    /* Permissive security for audiodg.exe */
-    SECURITY_DESCRIPTOR sd;
-    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
-    SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
-    SECURITY_ATTRIBUTES sa = {sizeof(sa), &sd, FALSE};
-
+static DWORD WINAPI audio_accept_thread(LPVOID param) {
+    SECURITY_ATTRIBUTES *sa = get_permissive_sa();
     int session = 0;
 
     for (;;) {
@@ -317,10 +392,9 @@ int main(int argc, char *argv[]) {
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             PIPE_UNLIMITED_INSTANCES,
-            4 * 1024 * 1024, 4 * 1024 * 1024, 0, &sa);
+            4 * 1024 * 1024, 4 * 1024 * 1024, 0, sa);
 
         if (pipe == INVALID_HANDLE_VALUE) {
-            log_msg("CreateNamedPipe failed: %lu\n", GetLastError());
             Sleep(1000);
             continue;
         }
@@ -336,17 +410,77 @@ int main(int argc, char *argv[]) {
         args->pipe = pipe;
         args->session_id = session;
 
-        HANDLE t = CreateThread(NULL, 0, client_thread, args, 0, NULL);
-        if (t) {
-            CloseHandle(t); /* detach — thread manages its own lifetime */
-        } else {
-            log_msg("CreateThread failed\n");
-            free(args);
-            DisconnectNamedPipe(pipe);
-            CloseHandle(pipe);
-        }
+        HANDLE t = CreateThread(NULL, 0, audio_client_thread, args, 0, NULL);
+        if (t) CloseHandle(t);
+        else { free(args); DisconnectNamedPipe(pipe); CloseHandle(pipe); }
     }
+    return 0;
+}
+
+static DWORD WINAPI ctrl_accept_thread(LPVOID param) {
+    SECURITY_ATTRIBUTES *sa = get_permissive_sa();
+
+    for (;;) {
+        HANDLE pipe = CreateNamedPipeA(CTRL_PIPE_NAME,
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_UNLIMITED_INSTANCES,
+            64 * 1024, 64 * 1024, 0, sa);
+
+        if (pipe == INVALID_HANDLE_VALUE) {
+            Sleep(1000);
+            continue;
+        }
+
+        if (!ConnectNamedPipe(pipe, NULL) &&
+            GetLastError() != ERROR_PIPE_CONNECTED) {
+            CloseHandle(pipe);
+            continue;
+        }
+
+        HANDLE t = CreateThread(NULL, 0, ctrl_client_thread, pipe, 0, NULL);
+        if (t) CloseHandle(t);
+        else { DisconnectNamedPipe(pipe); CloseHandle(pipe); }
+    }
+    return 0;
+}
+
+/* ── Main ─────────────────────────────────────────────────────────── */
+
+int main(int argc, char *argv[]) {
+    InitializeCriticalSection(&g_log_lock);
+    InitializeCriticalSection(&g_proc_lock);
+
+    printf("DolbyX Bridge v1.0\n==================\n\n");
+
+    if (argc < 2) {
+        printf("Usage: dolbyx-bridge.exe <wsl-path-to-DolbyX/arm>\n");
+        return 1;
+    }
+    g_wsl_path = argv[1];
+
+    log_msg("WSL path: %s\n", g_wsl_path);
+    log_msg("Audio pipe: %s\n", PIPE_NAME);
+    log_msg("Control pipe: %s\n\n", CTRL_PIPE_NAME);
+
+    /* Smoke test */
+    log_msg("Smoke test...\n");
+    Processor *test = processor_start();
+    if (!test) { log_msg("FATAL: Cannot start processor\n"); return 1; }
+    processor_stop(test);
+    log_msg("OK!\n\n");
+
+    /* Start accept threads */
+    HANDLE audio_thread = CreateThread(NULL, 0, audio_accept_thread, NULL, 0, NULL);
+    HANDLE ctrl_thread = CreateThread(NULL, 0, ctrl_accept_thread, NULL, 0, NULL);
+
+    log_msg("Listening (Ctrl+C to stop)\n\n");
+
+    /* Wait forever */
+    WaitForSingleObject(audio_thread, INFINITE);
+    WaitForSingleObject(ctrl_thread, INFINITE);
 
     DeleteCriticalSection(&g_log_lock);
+    DeleteCriticalSection(&g_proc_lock);
     return 0;
 }

@@ -76,27 +76,28 @@ typedef struct {
     HDC      memdc;
     HBITMAP  membmp;
     int      width, height;
+    float    dpi_scale;     /* 1.0 = 96dpi, 2.0 = 192dpi */
 
     /* DDP state (mirrored from processor) */
     int      power;
     int      profile;
     int16_t  params[DDP_PARAM_COUNT];
-    int      ieq_mode;      /* 0=open, 1=rich, 2=focused, 3=manual */
+    int      ieq_mode;
 
     /* Interaction */
-    int      drag_slider;   /* -1 = none, else param index */
-    int      hover_profile; /* -1 = none */
+    int      drag_slider;
+    int      hover_profile;
 
-    /* Visualizer bars (placeholder for Phase 4) */
+    /* Visualizer bars */
     float    vis_bars[20];
 
-    /* Command queue (shared with audio thread) */
-    CmdQueue *cmdq;
+    /* Control pipe (direct connection to bridge, crosses process boundary) */
+    HANDLE   ctrl_pipe;
 } DDPUI;
 
 /* ── Public API ───────────────────────────────────────────────────── */
 
-DDPUI *ddpui_create(HWND parent, CmdQueue *cmdq);
+DDPUI *ddpui_create(HWND parent);
 void   ddpui_destroy(DDPUI *ui);
 void   ddpui_idle(DDPUI *ui);
 

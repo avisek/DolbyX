@@ -144,27 +144,92 @@ static void draw_slider(HDC dc, int x, int y, int w,
     DeleteObject(pen);
 }
 
-/* ── Send command via queue ───────────────────────────────────────── */
+/* ── Control Pipe (direct connection to bridge) ───────────────────── */
+
+#define CTRL_PIPE_NAME  "\\\\.\\pipe\\DolbyXCtrl"
+
+static BOOL ctrl_read(HANDLE h, void *buf, DWORD n) {
+    DWORD t = 0;
+    while (t < n) {
+        DWORD r = 0;
+        if (!ReadFile(h, (BYTE *)buf + t, n - t, &r, NULL) || r == 0)
+            return FALSE;
+        t += r;
+    }
+    return TRUE;
+}
+
+static BOOL ctrl_write(HANDLE h, const void *buf, DWORD n) {
+    DWORD t = 0;
+    while (t < n) {
+        DWORD w = 0;
+        if (!WriteFile(h, (const BYTE *)buf + t, n - t, &w, NULL) || w == 0)
+            return FALSE;
+        t += w;
+    }
+    return TRUE;
+}
+
+static int ctrl_connect(DDPUI *ui) {
+    if (ui->ctrl_pipe != INVALID_HANDLE_VALUE) return 0;
+
+    for (int i = 0; i < 3; i++) {
+        ui->ctrl_pipe = CreateFileA(CTRL_PIPE_NAME,
+            GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+        if (ui->ctrl_pipe != INVALID_HANDLE_VALUE) break;
+        if (GetLastError() == ERROR_PIPE_BUSY)
+            WaitNamedPipeA(CTRL_PIPE_NAME, 1000);
+        else break;
+    }
+
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) return -1;
+
+    DWORD mode = PIPE_READMODE_BYTE;
+    SetNamedPipeHandleState(ui->ctrl_pipe, &mode, NULL, NULL);
+
+    DWORD magic = 0;
+    if (!ctrl_read(ui->ctrl_pipe, &magic, 4) || magic != DDP_READY_MAGIC) {
+        CloseHandle(ui->ctrl_pipe);
+        ui->ctrl_pipe = INVALID_HANDLE_VALUE;
+        return -1;
+    }
+    return 0;
+}
+
+static void ctrl_disconnect(DDPUI *ui) {
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) return;
+    DWORD cmd = DDP_CMD_SHUTDOWN;
+    ctrl_write(ui->ctrl_pipe, &cmd, 4);
+    CloseHandle(ui->ctrl_pipe);
+    ui->ctrl_pipe = INVALID_HANDLE_VALUE;
+}
 
 static void send_param(DDPUI *ui, int param_idx, int16_t value) {
-    if (!ui->cmdq) return;
     ui->params[param_idx] = value;
-    UICommand cmd = {
-        .type = DDP_CMD_SET_PARAM,
-        .param_idx = (uint16_t)param_idx,
-        .value = value
-    };
-    cmdq_push(ui->cmdq, &cmd);
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) ctrl_connect(ui);
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) return;
+
+    DWORD cmd = DDP_CMD_SET_PARAM;
+    uint16_t idx = (uint16_t)param_idx;
+    int16_t val = value;
+    ctrl_write(ui->ctrl_pipe, &cmd, 4);
+    ctrl_write(ui->ctrl_pipe, &idx, 2);
+    ctrl_write(ui->ctrl_pipe, &val, 2);
+    DWORD status = 0;
+    ctrl_read(ui->ctrl_pipe, &status, 4);
 }
 
 static void send_profile(DDPUI *ui, int profile_id) {
-    if (!ui->cmdq) return;
     ui->profile = profile_id;
-    UICommand cmd = {
-        .type = DDP_CMD_SET_PROFILE,
-        .profile_id = (uint32_t)profile_id
-    };
-    cmdq_push(ui->cmdq, &cmd);
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) ctrl_connect(ui);
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) return;
+
+    DWORD cmd = DDP_CMD_SET_PROFILE;
+    DWORD pid = (DWORD)profile_id;
+    ctrl_write(ui->ctrl_pipe, &cmd, 4);
+    ctrl_write(ui->ctrl_pipe, &pid, 4);
+    DWORD status = 0;
+    ctrl_read(ui->ctrl_pipe, &status, 4);
 }
 
 /* ── Main Paint ───────────────────────────────────────────────────── */
@@ -172,12 +237,29 @@ static void send_profile(DDPUI *ui, int profile_id) {
 static void paint(DDPUI *ui) {
     HDC dc = ui->memdc;
     int W = ui->width, H = ui->height;
+    float S = ui->dpi_scale;  /* scale factor for all coordinates */
+
+    /* Scaled layout values */
+    int header_h = (int)(header_h * S);
+    int prof_y = (int)(prof_y * S);
+    int prof_h = (int)(PROF_H * S);
+    int prof_margin = (int)(prof_margin * S);
+    int prof_gap = (int)(prof_gap * S);
+    int vis_y = (int)(vis_y * S);
+    int vis_h = (int)(vis_h * S);
+    int vis_margin = (int)(vis_margin * S);
+    int toggle_y = (int)(toggle_y * S);
+    int toggle_h = (int)(toggle_h * S);
+    int toggle_gap = (int)(toggle_gap * S);
+    int ieq_y = (int)(ieq_y * S);
+    int ieq_h = (int)(ieq_h * S);
+    int adv_y = (int)(adv_y * S);
 
     /* Background */
     fill_rect(dc, 0, 0, W, H, COL_BG);
 
     /* ── Header ───────────────────────────────────────────────────── */
-    fill_rect(dc, 0, 0, W, HEADER_H, COL_PANEL);
+    fill_rect(dc, 0, 0, W, header_h, COL_PANEL);
 
     /* Power indicator */
     HBRUSH pbr = CreateSolidBrush(ui->power ? COL_ACCENT : COL_BORDER);
@@ -196,13 +278,13 @@ static void paint(DDPUI *ui) {
         static const char *names[] = {
             "Movie", "Music", "Game", "Voice", "Custom 1", "Custom 2"
         };
-        int total_w = W - PROF_MARGIN * 2;
-        int btn_w = (total_w - (PROF_COLS - 1) * PROF_GAP) / PROF_COLS;
+        int total_w = W - prof_margin * 2;
+        int btn_w = (total_w - (6 - 1) * prof_gap) / 6;
 
         for (int i = 0; i < 6; i++) {
             int col = i;
-            int x = PROF_MARGIN + col * (btn_w + PROF_GAP);
-            int y = PROF_Y;
+            int x = prof_margin + col * (btn_w + prof_gap);
+            int y = prof_y;
             int active = (i == ui->profile);
 
             COLORREF bg = active ? RGB(0, 180, 216) : COL_SURFACE;
@@ -217,8 +299,8 @@ static void paint(DDPUI *ui) {
 
     /* ── Visualizer ───────────────────────────────────────────────── */
     {
-        int vx = VIS_MARGIN, vy = VIS_Y;
-        int vw = W - VIS_MARGIN * 2, vh = VIS_H;
+        int vx = vis_margin, vy = vis_y;
+        int vw = W - vis_margin * 2, vh = vis_h;
 
         fill_rect(dc, vx, vy, vw, vh, COL_PANEL);
 
@@ -249,11 +331,11 @@ static void paint(DDPUI *ui) {
         };
 
         for (int i = 0; i < 3; i++) {
-            int y = TOGGLE_Y + i * (TOGGLE_H + TOGGLE_GAP);
+            int y = toggle_y + i * (toggle_h + toggle_gap);
             int is_on = (ui->params[toggles[i].enable_param] > 0);
 
             /* Label */
-            draw_text_left(dc, PROF_MARGIN, y + 8,
+            draw_text_left(dc, prof_margin, y + 8,
                            toggles[i].label, ui->font_normal, COL_TEXT);
 
             /* Slider */
@@ -269,14 +351,14 @@ static void paint(DDPUI *ui) {
                            vbuf, ui->font_small, COL_TEXT_DIM);
 
             /* Toggle switch */
-            draw_toggle(dc, W - PROF_MARGIN - 52, y + 6, is_on);
+            draw_toggle(dc, W - prof_margin - 52, y + 6, is_on);
 
             /* Separator line */
             if (i < 2) {
                 HPEN sep = CreatePen(PS_SOLID, 1, RGB(20, 28, 40));
                 SelectObject(dc, sep);
-                MoveToEx(dc, PROF_MARGIN, y + TOGGLE_H + 1, NULL);
-                LineTo(dc, W - PROF_MARGIN, y + TOGGLE_H + 1);
+                MoveToEx(dc, prof_margin, y + toggle_h + 1, NULL);
+                LineTo(dc, W - prof_margin, y + toggle_h + 1);
                 DeleteObject(sep);
             }
         }
@@ -285,8 +367,8 @@ static void paint(DDPUI *ui) {
     /* ── IEQ Mode Selector ────────────────────────────────────────── */
     {
         static const char *modes[] = {"Open", "Rich", "Focused", "Manual"};
-        int total_w = W - PROF_MARGIN * 2;
-        int btn_w = (total_w - 3 * PROF_GAP) / 4;
+        int total_w = W - prof_margin * 2;
+        int btn_w = (total_w - 3 * prof_gap) / 4;
 
         /* Label */
         const char *mode_label = ui->ieq_mode == DDP_IEQ_MANUAL
@@ -294,40 +376,40 @@ static void paint(DDPUI *ui) {
         char label_buf[64];
         snprintf(label_buf, sizeof(label_buf), "%s:  %s",
                  mode_label, modes[ui->ieq_mode]);
-        draw_text_left(dc, PROF_MARGIN, IEQ_Y - 18,
+        draw_text_left(dc, prof_margin, ieq_y - 18,
                        label_buf, ui->font_small, COL_TEXT_DIM);
 
         for (int i = 0; i < 4; i++) {
-            int x = PROF_MARGIN + i * (btn_w + PROF_GAP);
-            int y = IEQ_Y;
+            int x = prof_margin + i * (btn_w + prof_gap);
+            int y = ieq_y;
             int active = (i == ui->ieq_mode);
 
             COLORREF bg = active ? RGB(0, 30, 50) : COL_SURFACE;
             COLORREF border = active ? COL_ACCENT : COL_BORDER;
             COLORREF text_col = active ? COL_ACCENT_BR : COL_TEXT;
 
-            draw_rounded_rect(dc, x, y, btn_w, IEQ_H, 10, bg, border);
-            draw_text_center(dc, x, y, btn_w, IEQ_H,
+            draw_rounded_rect(dc, x, y, btn_w, ieq_h, 10, bg, border);
+            draw_text_center(dc, x, y, btn_w, ieq_h,
                              modes[i], ui->font_normal, text_col);
         }
     }
 
     /* ── Advanced Section ─────────────────────────────────────────── */
     {
-        int y = ADV_Y;
-        draw_text_left(dc, PROF_MARGIN, y,
+        int y = adv_y;
+        draw_text_left(dc, prof_margin, y,
                        "Advanced", ui->font_small, COL_TEXT_DIM);
         y += 20;
 
         /* Pre-gain slider */
-        draw_text_left(dc, PROF_MARGIN, y + 4, "Pre-gain", ui->font_small, COL_TEXT_DIM);
-        draw_slider(dc, 120, y, 180, 6, 0, 12);  /* -6 mapped to 0-12 range */
-        draw_text_left(dc, 308, y + 4, "-6 dB", ui->font_small, COL_TEXT_DIM);
+        draw_text_left(dc, prof_margin, y + (int)(4*S), "Pre-gain", ui->font_small, COL_TEXT_DIM);
+        draw_slider(dc, (int)(120*S), y, (int)(180*S), 6, 0, 12);  /* -6 mapped to 0-12 range */
+        draw_text_left(dc, 308, y + (int)(4*S), "-6 dB", ui->font_small, COL_TEXT_DIM);
 
         /* Post-gain slider */
-        draw_text_left(dc, 360, y + 4, "Post-gain", ui->font_small, COL_TEXT_DIM);
-        draw_slider(dc, 460, y, 140, 0, 0, 12);
-        draw_text_left(dc, 608, y + 4, "0 dB", ui->font_small, COL_TEXT_DIM);
+        draw_text_left(dc, 360, y + (int)(4*S), "Post-gain", ui->font_small, COL_TEXT_DIM);
+        draw_slider(dc, (int)(460*S), y, (int)(140*S), 0, 0, 12);
+        draw_text_left(dc, 608, y + (int)(4*S), "0 dB", ui->font_small, COL_TEXT_DIM);
     }
 
     /* Update visualizer animation counter */
@@ -337,20 +419,26 @@ static void paint(DDPUI *ui) {
 /* ── Hit Testing ──────────────────────────────────────────────────── */
 
 static int hit_profile(DDPUI *ui, int mx, int my) {
-    if (my < PROF_Y || my > PROF_Y + PROF_H) return -1;
-    int total_w = ui->width - PROF_MARGIN * 2;
-    int btn_w = (total_w - (PROF_COLS - 1) * PROF_GAP) / PROF_COLS;
-    int col = (mx - PROF_MARGIN) / (btn_w + PROF_GAP);
+    float S = ui->dpi_scale;
+    int y0 = (int)(PROF_Y * S), y1 = y0 + (int)(PROF_H * S);
+    if (my < y0 || my > y1) return -1;
+    int margin = (int)(PROF_MARGIN * S);
+    int gap = (int)(PROF_GAP * S);
+    int total_w = ui->width - margin * 2;
+    int btn_w = (total_w - 5 * gap) / 6;
+    int col = (mx - margin) / (btn_w + gap);
     if (col < 0 || col >= 6) return -1;
     return col;
 }
 
 static int hit_toggle(DDPUI *ui, int mx, int my) {
-    /* Returns 0-2 for the toggle switch area, -1 for miss */
+    float S = ui->dpi_scale;
+    int margin = (int)(PROF_MARGIN * S);
     for (int i = 0; i < 3; i++) {
-        int y = TOGGLE_Y + i * (TOGGLE_H + TOGGLE_GAP);
-        int tx = ui->width - PROF_MARGIN - 52;
-        if (mx >= tx && mx <= tx + 48 && my >= y + 4 && my <= y + TOGGLE_H) {
+        int y = (int)(TOGGLE_Y * S) + i * ((int)(TOGGLE_H * S) + (int)(TOGGLE_GAP * S));
+        int tx = ui->width - margin - (int)(52 * S);
+        if (mx >= tx && mx <= tx + (int)(48 * S) &&
+            my >= y + (int)(4 * S) && my <= y + (int)(TOGGLE_H * S)) {
             return i;
         }
     }
@@ -358,21 +446,25 @@ static int hit_toggle(DDPUI *ui, int mx, int my) {
 }
 
 static int hit_slider(DDPUI *ui, int mx, int my) {
-    /* Returns 0-2 for slider area, -1 for miss */
+    float S = ui->dpi_scale;
+    int sx = (int)(280 * S), sw = (int)(180 * S);
     for (int i = 0; i < 3; i++) {
-        int y = TOGGLE_Y + i * (TOGGLE_H + TOGGLE_GAP);
-        if (mx >= 280 && mx <= 460 && my >= y && my <= y + TOGGLE_H) {
+        int y = (int)(TOGGLE_Y * S) + i * ((int)(TOGGLE_H * S) + (int)(TOGGLE_GAP * S));
+        if (mx >= sx && mx <= sx + sw && my >= y && my <= y + (int)(TOGGLE_H * S))
             return i;
-        }
     }
     return -1;
 }
 
 static int hit_ieq(DDPUI *ui, int mx, int my) {
-    if (my < IEQ_Y || my > IEQ_Y + IEQ_H) return -1;
-    int total_w = ui->width - PROF_MARGIN * 2;
-    int btn_w = (total_w - 3 * PROF_GAP) / 4;
-    int col = (mx - PROF_MARGIN) / (btn_w + PROF_GAP);
+    float S = ui->dpi_scale;
+    int y0 = (int)(IEQ_Y * S), y1 = y0 + (int)(IEQ_H * S);
+    if (my < y0 || my > y1) return -1;
+    int margin = (int)(PROF_MARGIN * S);
+    int gap = (int)(PROF_GAP * S);
+    int total_w = ui->width - margin * 2;
+    int btn_w = (total_w - 3 * gap) / 4;
+    int col = (mx - margin) / (btn_w + gap);
     if (col < 0 || col >= 4) return -1;
     return col;
 }
@@ -454,7 +546,9 @@ static LRESULT CALLBACK ui_wndproc(HWND hwnd, UINT msg,
         if (sl >= 0) {
             ui->drag_slider = sl;
             SetCapture(hwnd);
-            int val = slider_value_from_x(mx, 280, 180,
+            float S = ui->dpi_scale;
+            int sx = (int)(280 * S), sw = (int)(180 * S);
+            int val = slider_value_from_x(mx, sx, sw,
                         g_slider_params[sl][2], g_slider_params[sl][3]);
             send_param(ui, g_slider_params[sl][1], (int16_t)val);
             InvalidateRect(hwnd, NULL, FALSE);
@@ -485,7 +579,9 @@ static LRESULT CALLBACK ui_wndproc(HWND hwnd, UINT msg,
         if (!ui || ui->drag_slider < 0) break;
         int mx = LOWORD(lp);
         int sl = ui->drag_slider;
-        int val = slider_value_from_x(mx, 280, 180,
+        float S = ui->dpi_scale;
+        int sx = (int)(280 * S), sw = (int)(180 * S);
+        int val = slider_value_from_x(mx, sx, sw,
                     g_slider_params[sl][2], g_slider_params[sl][3]);
         send_param(ui, g_slider_params[sl][1], (int16_t)val);
         InvalidateRect(hwnd, NULL, FALSE);
@@ -527,66 +623,77 @@ void ddpui_register_class(HINSTANCE hInst) {
 
 /* ── Create / Destroy ─────────────────────────────────────────────── */
 
-DDPUI *ddpui_create(HWND parent, CmdQueue *cmdq) {
+DDPUI *ddpui_create(HWND parent) {
     DDPUI *ui = (DDPUI *)calloc(1, sizeof(DDPUI));
     if (!ui) return NULL;
 
-    ui->cmdq = cmdq;
-    ui->width = UI_WIDTH;
-    ui->height = UI_HEIGHT;
+    ui->ctrl_pipe = INVALID_HANDLE_VALUE;
     ui->power = 1;
     ui->profile = DDP_PROFILE_MUSIC;
     ui->ieq_mode = DDP_IEQ_MANUAL;
     ui->drag_slider = -1;
     ui->hover_profile = -1;
 
+    /* DPI scaling */
+    HDC screen = GetDC(NULL);
+    int dpi = GetDeviceCaps(screen, LOGPIXELSX);
+    ReleaseDC(NULL, screen);
+    ui->dpi_scale = (float)dpi / 96.0f;
+    if (ui->dpi_scale < 1.0f) ui->dpi_scale = 1.0f;
+
+    ui->width  = (int)(UI_WIDTH * ui->dpi_scale);
+    ui->height = (int)(UI_HEIGHT * ui->dpi_scale);
+
     /* Load Music profile defaults */
     extern const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT];
     memcpy(ui->params, g_profiles[DDP_PROFILE_MUSIC], sizeof(ui->params));
 
-    /* Fonts */
-    ui->font_title  = CreateFontA(22, 0, 0, 0, FW_BOLD, 0, 0, 0,
+    /* Fonts — scale with DPI */
+    int fs_title  = (int)(22 * ui->dpi_scale);
+    int fs_normal = (int)(15 * ui->dpi_scale);
+    int fs_small  = (int)(12 * ui->dpi_scale);
+    int fs_label  = (int)(13 * ui->dpi_scale);
+
+    ui->font_title  = CreateFontA(fs_title, 0, 0, 0, FW_BOLD, 0, 0, 0,
         DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
-    ui->font_normal = CreateFontA(15, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+    ui->font_normal = CreateFontA(fs_normal, 0, 0, 0, FW_NORMAL, 0, 0, 0,
         DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
-    ui->font_small  = CreateFontA(12, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+    ui->font_small  = CreateFontA(fs_small, 0, 0, 0, FW_NORMAL, 0, 0, 0,
         DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
-    ui->font_label  = CreateFontA(13, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0,
+    ui->font_label  = CreateFontA(fs_label, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0,
         DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
 
-    /* Register window class */
     HINSTANCE hInst = GetModuleHandle(NULL);
     ddpui_register_class(hInst);
 
-    /* Create child window inside host-provided parent */
     ui->hwnd = CreateWindowExA(
         0, UI_CLASS, "DolbyX",
         WS_CHILD | WS_VISIBLE,
-        0, 0, UI_WIDTH, UI_HEIGHT,
+        0, 0, ui->width, ui->height,
         parent, NULL, hInst, NULL
     );
 
     SetWindowLongPtrA(ui->hwnd, GWLP_USERDATA, (LONG_PTR)ui);
 
-    /* Double buffer */
     HDC hdc = GetDC(ui->hwnd);
     ui->memdc = CreateCompatibleDC(hdc);
-    ui->membmp = CreateCompatibleBitmap(hdc, UI_WIDTH, UI_HEIGHT);
+    ui->membmp = CreateCompatibleBitmap(hdc, ui->width, ui->height);
     SelectObject(ui->memdc, ui->membmp);
     ReleaseDC(ui->hwnd, hdc);
 
-    /* Timer for visualizer animation (~30fps) */
     SetTimer(ui->hwnd, 1, 33, NULL);
 
-    /* Initial paint */
-    InvalidateRect(ui->hwnd, NULL, FALSE);
+    /* Connect to control pipe */
+    ctrl_connect(ui);
 
+    InvalidateRect(ui->hwnd, NULL, FALSE);
     return ui;
 }
 
 void ddpui_destroy(DDPUI *ui) {
     if (!ui) return;
     KillTimer(ui->hwnd, 1);
+    ctrl_disconnect(ui);
     DeleteDC(ui->memdc);
     DeleteObject(ui->membmp);
     DeleteObject(ui->font_title);

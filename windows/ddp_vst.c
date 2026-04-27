@@ -64,7 +64,6 @@ typedef struct {
 
     /* Editor */
     DDPUI          *editor;
-    CmdQueue        cmdq;
     ERect           editor_rect;
 } DDPState;
 
@@ -170,30 +169,6 @@ static void disconnect_bridge(DDPState *st) {
     logf_(st, "Disconnected after %d blocks\n", st->block_count);
 }
 
-/* ── Drain command queue (called from audio thread) ───────────────── */
-
-static void drain_commands(DDPState *st) {
-    if (!st->connected) return;
-
-    UICommand cmd;
-    while (cmdq_pop(&st->cmdq, &cmd)) {
-        if (cmd.type == DDP_CMD_SET_PARAM) {
-            uint32_t hdr = DDP_CMD_SET_PARAM;
-            p_write(st->pipe, &hdr, 4);
-            p_write(st->pipe, &cmd.param_idx, 2);
-            p_write(st->pipe, &cmd.value, 2);
-            uint32_t status = 0;
-            p_read(st->pipe, &status, 4);
-        } else if (cmd.type == DDP_CMD_SET_PROFILE) {
-            uint32_t hdr = DDP_CMD_SET_PROFILE;
-            p_write(st->pipe, &hdr, 4);
-            p_write(st->pipe, &cmd.profile_id, 4);
-            uint32_t status = 0;
-            p_read(st->pipe, &status, 4);
-        }
-    }
-}
-
 /* ── processReplacing ────────────────────────────────────────────── */
 
 static void ddp_processReplacing(struct AEffect *effect,
@@ -214,7 +189,6 @@ static void ddp_processReplacing(struct AEffect *effect,
     }
 
     /* Drain pending UI commands before processing audio */
-    drain_commands(st);
 
     int frames = (sampleFrames > MAX_FRAMES) ? MAX_FRAMES : sampleFrames;
     DWORD pcm_bytes = frames * 2 * sizeof(int16_t);
@@ -288,7 +262,6 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         logf_(st, "\n===== DolbyX v2.0 opened =====\n");
         logf_(st, "Host: %s\n", exe);
         st->pcm_buf = (int16_t *)malloc(MAX_FRAMES * 2 * sizeof(int16_t));
-        cmdq_init(&st->cmdq);
         if (connect_bridge(st) != 0)
             logf_(st, "Bridge not running\n");
         return 0;
@@ -317,9 +290,16 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
     case effEditOpen: {
         HWND parent = (HWND)ptr;
         logf_(st, "Editor open (parent=%p)\n", parent);
-        st->editor = ddpui_create(parent, &st->cmdq);
+        st->editor = ddpui_create(parent);
         if (!st->editor)
             logf_(st, "Editor create FAILED\n");
+        else {
+            /* Update editor rect from actual DPI-scaled size */
+            st->editor_rect.left = 0;
+            st->editor_rect.top = 0;
+            st->editor_rect.right = st->editor->width;
+            st->editor_rect.bottom = st->editor->height;
+        }
         return st->editor ? 1 : 0;
     }
 
