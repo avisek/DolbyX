@@ -25,6 +25,7 @@ enum {
     effEditGetRect = 13,
     effEditOpen = 14,
     effEditClose = 15,
+    effEditIdle = 19,
     effGetChunk = 23,
     effSetChunk = 24,
     effProcessEvents = 25,
@@ -62,6 +63,15 @@ enum {
     kPlugCategAnalysis = 3,
     kPlugCategRestoration = 8,
 };
+
+/* ── Editor Rectangle ─────────────────────────────────────────────── */
+
+typedef struct {
+    int16_t top;
+    int16_t left;
+    int16_t bottom;
+    int16_t right;
+} ERect;
 
 /* ── AEffect structure ───────────────────────────────────────────────── */
 

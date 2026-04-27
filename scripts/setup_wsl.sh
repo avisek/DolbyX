@@ -40,7 +40,7 @@ echo ""
 
 echo "[4/4] Building Windows components..."
 cd "$WIN_DIR"
-x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll ddp_vst.c -static \
+x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll ddp_vst.c ddp_ui.c -static -lgdi32 -lmsimg32 \
     && echo "  DolbyDDP.dll OK" || echo "  DolbyDDP.dll FAILED"
 x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c -static -ladvapi32 \
     && echo "  dolbyx-bridge.exe OK" || echo "  dolbyx-bridge.exe FAILED"
