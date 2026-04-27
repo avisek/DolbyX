@@ -1,21 +1,13 @@
 /*
- * ddp_processor.c — Dolby Digital Plus ARM processor
+ * ddp_processor.c — DolbyX ARM processor with live parameter control
  *
- * Loads libdseffect.so via QEMU, processes PCM through the DS1 effect.
- * Supports native 44100Hz and 48000Hz via Ds1ap hot-swap technique.
+ * Loads libdseffect.so via QEMU, processes PCM, handles control commands
+ * for live profile switching and parameter tweaking without audio glitches.
  *
- * Protocol (binary, little-endian over stdin/stdout):
- *   Startup:  processor writes 4-byte magic 0xDD901DAA
- *   Process:  host writes uint32_t frame_count + int16_t pcm[frames*2]
- *             processor writes int16_t pcm[frames*2]
- *   Shutdown: host writes frame_count = 0xFFFFFFFF
+ * Protocol: see ddp_protocol.h
  *
  * Usage:
- *   ddp_processor <libdseffect.so> [sample_rate] [pre_gain_db] [post_gain_db]
- *
- *   sample_rate:  44100 (default) or 48000
- *   pre_gain_db:  attenuation before DDP, e.g. -6.0 (default: -9.0)
- *   post_gain_db: boost after DDP, e.g. 6.0 (default: 9.0)
+ *   ddp_processor <libdseffect.so> [sample_rate] [pre_gain_dB] [post_gain_dB]
  */
 
 #include <stdio.h>
@@ -27,158 +19,287 @@
 #include <unistd.h>
 #include <signal.h>
 #include "audio_effect_defs.h"
+#include "ddp_protocol.h"
 
-/* ── Constants ────────────────────────────────────────────────────── */
+/* ── Internal Constants ───────────────────────────────────────────── */
 
-#define READY_MAGIC       0xDD901DAA
-#define CMD_SHUTDOWN      0xFFFFFFFF
-#define CMD_PING          0xFFFFFFFD
-#define CMD_SET_PROFILE   0xFFFFFFF0
-#define MAX_FRAMES        8192
-#define CHANNELS          2
+#define MAX_FRAMES  8192
+#define CHANNELS    2
 
-/* DS1 parameter commands */
+/* DS1 parameter command IDs (Android API level) */
 #define DS_PARAM_DEFINE_SETTINGS     1
 #define DS_PARAM_SINGLE_DEVICE_VALUE 3
 #define DS_PARAM_DEFINE_PARAMS       5
+#define DS_PARAM_VISUALIZER_ENABLE   7
 
 /* Ds1ap direct API (for 48kHz hot-swap) */
-typedef void* (*Ds1apNew_t)(int endp, int rate, int ch, int mode);
-typedef void* (*Ds1apBufInit_t)(void* ctx, int blocksize, int ch, int bits);
+typedef void *(*Ds1apNew_t)(int, int, int, int);
+typedef void *(*Ds1apBufInit_t)(void *, int, int, int);
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
-static void log_msg(const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
+static void log_msg(const char *fmt, ...) {
+    va_list a;
+    va_start(a, fmt);
+    vfprintf(stderr, fmt, a);
+    va_end(a);
     fflush(stderr);
 }
 
 /* ── I/O ──────────────────────────────────────────────────────────── */
 
-static int read_exact(int fd, void* buf, size_t n) {
+static int read_exact(int fd, void *buf, size_t n) {
     size_t total = 0;
     while (total < n) {
-        ssize_t r = read(fd, (uint8_t*)buf + total, n - total);
+        ssize_t r = read(fd, (uint8_t *)buf + total, n - total);
         if (r <= 0) return -1;
         total += r;
     }
     return 0;
 }
 
-static int write_exact(int fd, const void* buf, size_t n) {
+static int write_exact(int fd, const void *buf, size_t n) {
     size_t total = 0;
     while (total < n) {
-        ssize_t w = write(fd, (const uint8_t*)buf + total, n - total);
+        ssize_t w = write(fd, (const uint8_t *)buf + total, n - total);
         if (w <= 0) return -1;
         total += w;
     }
     return 0;
 }
 
-/* ── DS1 Parameter Protocol ───────────────────────────────────────── */
+/* ── DS1 Low-Level Parameter API ──────────────────────────────────── */
 
-static int ds1_set_param(effect_handle_t handle, int param_id,
-                         const void* value, int value_size) {
-    int total = sizeof(effect_param_t) + sizeof(int32_t) + value_size;
-    uint8_t* buf = calloc(1, total);
+static effect_handle_t g_handle = NULL;
+
+static int ds1_set_raw(int param_cmd, const void *val, int vsize) {
+    int total = sizeof(effect_param_t) + sizeof(int32_t) + vsize;
+    uint8_t *buf = calloc(1, total);
     if (!buf) return -1;
-    effect_param_t* ep = (effect_param_t*)buf;
-    ep->status = 0;
+    effect_param_t *ep = (effect_param_t *)buf;
     ep->psize = sizeof(int32_t);
-    ep->vsize = value_size;
-    memcpy(buf + sizeof(effect_param_t), &param_id, sizeof(int32_t));
-    memcpy(buf + sizeof(effect_param_t) + sizeof(int32_t), value, value_size);
-    uint32_t reply_size = sizeof(int32_t);
+    ep->vsize = vsize;
+    memcpy(buf + sizeof(effect_param_t), &param_cmd, sizeof(int32_t));
+    memcpy(buf + sizeof(effect_param_t) + sizeof(int32_t), val, vsize);
+    uint32_t rs = sizeof(int32_t);
     int32_t reply = -1;
-    (*handle)->command(handle, EFFECT_CMD_SET_PARAM, total, buf, &reply_size, &reply);
+    (*g_handle)->command(g_handle, EFFECT_CMD_SET_PARAM, total, buf, &rs, &reply);
     free(buf);
     return reply;
 }
 
-/* ── Configure headphone mode with Music profile defaults ─────── */
-
-static void setup_default_music_headphone(effect_handle_t handle) {
-    /* Define all controllable parameters */
-    const char names[][5] = {
-        "endp", "vdhe", "dhsb", "dssb", "dssf",
-        "ngon", "dvla", "dvle", "dvme",
-        "ieon", "iea\0",
-        "deon", "dea\0", "ded\0",
-        "plmd", "aoon",
-        "vmb\0", "vmon",
-        "geon", "plb\0"
-    };
-    int nparam = 20;
-
-    /* Step 1: Define param names */
-    uint8_t pbuf[2 + 20*4];
+/*
+ * Set a single parameter value via the DS_PARAM protocol.
+ * param_index: index in the defined parameter list (see DDP_PARAM_* enum)
+ * value: the int16 value to set
+ */
+static int ds1_set_value(int param_index, int16_t value) {
+    uint8_t buf[10];
     int pos = 0;
-    *(int16_t*)(pbuf + pos) = nparam; pos += 2;
-    for (int i = 0; i < nparam; i++) {
-        memcpy(pbuf + pos, names[i], 4); pos += 4;
-    }
-    ds1_set_param(handle, DS_PARAM_DEFINE_PARAMS, pbuf, pos);
+    *(int32_t *)(buf + pos) = 8;              pos += 4; /* device = wired headphone */
+    *(int16_t *)(buf + pos) = param_index;    pos += 2;
+    *(int16_t *)(buf + pos) = 1;              pos += 2; /* length = 1 */
+    *(int16_t *)(buf + pos) = value;          pos += 2;
+    return ds1_set_raw(DS_PARAM_SINGLE_DEVICE_VALUE, buf, pos);
+}
 
-    /* Step 2: Map 1:1 settings */
-    uint8_t sbuf[2 + 20*3];
+/* ── Parameter Registration ───────────────────────────────────────── */
+
+/* These names MUST match the order in ddp_protocol.h DDP_PARAM_* enum */
+static const char g_param_names[][5] = {
+    "endp", "vdhe", "dhsb", "dssb", "dssf",
+    "ngon", "dvla", "dvle", "dvme",
+    "ieon", "iea\0",
+    "deon", "dea\0", "ded\0",
+    "plmd", "aoon",
+    "vmb\0", "vmon",
+    "geon", "plb\0"
+};
+
+static void register_parameters(void) {
+    int np = DDP_PARAM_COUNT;
+
+    /* Step 1: Define parameter names */
+    uint8_t pbuf[2 + DDP_PARAM_COUNT * 4];
+    int pos = 0;
+    *(int16_t *)(pbuf + pos) = np; pos += 2;
+    for (int i = 0; i < np; i++) {
+        memcpy(pbuf + pos, g_param_names[i], 4);
+        pos += 4;
+    }
+    ds1_set_raw(DS_PARAM_DEFINE_PARAMS, pbuf, pos);
+
+    /* Step 2: Map settings 1:1 */
+    uint8_t sbuf[2 + DDP_PARAM_COUNT * 3];
     pos = 0;
-    *(int16_t*)(sbuf + pos) = nparam; pos += 2;
-    for (int i = 0; i < nparam; i++) {
+    *(int16_t *)(sbuf + pos) = np; pos += 2;
+    for (int i = 0; i < np; i++) {
         sbuf[pos++] = i;
-        *(int16_t*)(sbuf + pos) = 0; pos += 2;
+        *(int16_t *)(sbuf + pos) = 0; pos += 2;
     }
-    ds1_set_param(handle, DS_PARAM_DEFINE_SETTINGS, sbuf, pos);
+    ds1_set_raw(DS_PARAM_DEFINE_SETTINGS, sbuf, pos);
+}
 
-    /* Step 3: Music profile defaults from ds1-default.xml — UNMODIFIED */
-    int16_t values[] = {
-        2,     /*  0: endp = HEADPHONES */
-        2,     /*  1: vdhe = AUTO (Dolby Headphone) */
-        48,    /*  2: dhsb = 48 (headphone surround boost) */
-        0,     /*  3: dssb = 0 */
-        200,   /*  4: dssf = 200 */
-        2,     /*  5: ngon = AUTO (Next Gen Surround) */
-        4,     /*  6: dvla = 4 (Volume Leveler amount) */
-        0,     /*  7: dvle = OFF (ds1-default: Music profile has dvle=0) */
-        0,     /*  8: dvme = OFF */
-        0,     /*  9: ieon = OFF (ds1-default: Music profile has ieon=0) */
-        10,    /* 10: iea  = 10 */
-        1,     /* 11: deon = ON (Dialog Enhancer) */
-        2,     /* 12: dea  = 2 */
-        0,     /* 13: ded  = 0 */
-        4,     /* 14: plmd = AUTO */
-        2,     /* 15: aoon = AUTO */
-        144,   /* 16: vmb  = 144 (+7.2dB) — ORIGINAL DEFAULT */
-        0,     /* 17: vmon = OFF */
-        0,     /* 18: geon = OFF */
-        0,     /* 19: plb  = 0 */
-    };
+/* ── Profile Data (from ds1-default.xml) ──────────────────────────── */
 
-    for (int i = 0; i < nparam; i++) {
-        uint8_t vbuf[10];
-        pos = 0;
-        *(int32_t*)(vbuf + pos) = 8;         pos += 4; /* device=wired headphone */
-        *(int16_t*)(vbuf + pos) = i;          pos += 2;
-        *(int16_t*)(vbuf + pos) = 1;          pos += 2;
-        *(int16_t*)(vbuf + pos) = values[i];  pos += 2;
-        ds1_set_param(handle, DS_PARAM_SINGLE_DEVICE_VALUE, vbuf, pos);
+/*
+ * Each profile is an array of DDP_PARAM_COUNT values, ordered to match
+ * the DDP_PARAM_* enum. Values are from ds1-default.xml, with endp
+ * forced to 2 (headphones) for our use case.
+ */
+static const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
+    /* Movie: rich IEQ, dialog=3, high surround boost */
+    [DDP_PROFILE_MOVIE] = {
+        2, 2, 96, 96, 200,     /* endp,vdhe,dhsb,dssb,dssf */
+        2, 7, 0, 0,            /* ngon,dvla,dvle,dvme */
+        0, 10,                  /* ieon,iea */
+        1, 3, 0,                /* deon,dea,ded */
+        4, 2,                   /* plmd,aoon */
+        144, 0,                 /* vmb,vmon */
+        0, 0                    /* geon,plb */
+    },
+    /* Music: rich IEQ, dialog=2, moderate surround */
+    [DDP_PROFILE_MUSIC] = {
+        2, 2, 48, 0, 200,
+        2, 4, 0, 0,
+        0, 10,
+        1, 2, 0,
+        4, 2,
+        144, 0,
+        0, 0
+    },
+    /* Game: open IEQ, leveler ON, vol max ON, virt speaker ON */
+    [DDP_PROFILE_GAME] = {
+        2, 2, 0, 0, 200,
+        2, 0, 1, 0,
+        0, 10,
+        0, 7, 0,
+        4, 2,
+        144, 2,
+        0, 0
+    },
+    /* Voice: rich IEQ, strong dialog (10), no virtualizer */
+    [DDP_PROFILE_VOICE] = {
+        2, 0, 0, 0, 200,
+        2, 0, 0, 0,
+        0, 10,
+        1, 10, 0,
+        4, 2,
+        144, 0,
+        0, 0
+    },
+    /* Custom 1 */
+    [DDP_PROFILE_USER1] = {
+        2, 0, 48, 48, 200,
+        2, 5, 0, 0,
+        0, 10,
+        0, 7, 0,
+        4, 2,
+        144, 2,
+        0, 0
+    },
+    /* Custom 2 */
+    [DDP_PROFILE_USER2] = {
+        2, 0, 48, 48, 200,
+        2, 5, 0, 0,
+        0, 10,
+        0, 7, 0,
+        4, 2,
+        144, 2,
+        0, 0
+    },
+};
+
+/* Current parameter values (mutable — updated by SET_PARAM) */
+static int16_t g_current_params[DDP_PARAM_COUNT];
+static int g_current_profile = DDP_PROFILE_MUSIC;
+
+static void apply_profile(int profile_id) {
+    if (profile_id < 0 || profile_id >= DDP_PROFILE_COUNT) return;
+    g_current_profile = profile_id;
+    memcpy(g_current_params, g_profiles[profile_id], sizeof(g_current_params));
+
+    for (int i = 0; i < DDP_PARAM_COUNT; i++) {
+        ds1_set_value(i, g_current_params[i]);
     }
+    log_msg("[DDP] Applied profile %d\n", profile_id);
+}
+
+/* ── Control Command Handler ──────────────────────────────────────── */
+
+static int handle_command(uint32_t cmd) {
+    if (cmd == DDP_CMD_SHUTDOWN) {
+        return -1; /* signal exit */
+    }
+
+    if (cmd == DDP_CMD_PING) {
+        uint32_t pong = DDP_CMD_PING;
+        write_exact(STDOUT_FILENO, &pong, sizeof(pong));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_SET_PARAM) {
+        uint16_t param_index = 0;
+        int16_t value = 0;
+        if (read_exact(STDIN_FILENO, &param_index, 2) < 0) return -1;
+        if (read_exact(STDIN_FILENO, &value, 2) < 0) return -1;
+
+        uint32_t status = 0;
+        if (param_index < DDP_PARAM_COUNT) {
+            g_current_params[param_index] = value;
+            int r = ds1_set_value(param_index, value);
+            status = (r == 0) ? 0 : 1;
+            log_msg("[DDP] SetParam[%d] = %d (status=%d)\n",
+                    param_index, value, status);
+        } else {
+            status = 2; /* invalid index */
+        }
+        write_exact(STDOUT_FILENO, &status, sizeof(status));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_SET_PROFILE) {
+        uint32_t profile_id = 0;
+        if (read_exact(STDIN_FILENO, &profile_id, sizeof(profile_id)) < 0)
+            return -1;
+
+        uint32_t status = 0;
+        if (profile_id < DDP_PROFILE_COUNT) {
+            apply_profile(profile_id);
+        } else {
+            status = 1;
+        }
+        write_exact(STDOUT_FILENO, &status, sizeof(status));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_GET_VIS) {
+        /* Return current output levels per band.
+         * TODO: extract real visualizer data from the DSP's visq node.
+         * For now, return zeros — the UI will use its own analysis. */
+        int16_t vis_data[20] = {0};
+        write_exact(STDOUT_FILENO, vis_data, sizeof(vis_data));
+        return 0;
+    }
+
+    /* Unknown command — skip */
+    log_msg("[DDP] Unknown command: 0x%08X\n", cmd);
+    return 0;
 }
 
 /* ── Main ─────────────────────────────────────────────────────────── */
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     if (argc < 2) {
-        log_msg("Usage: %s <libdseffect.so> [rate] [pre_gain_dB] [post_gain_dB]\n", argv[0]);
+        log_msg("Usage: %s <libdseffect.so> [rate] [pre_gain_dB] [post_gain_dB]\n",
+                argv[0]);
         return 1;
     }
 
-    const char* lib_path = argv[1];
-    int sample_rate = (argc >= 3) ? atoi(argv[2]) : 48000;
-    float pre_gain_db  = (argc >= 4) ? atof(argv[3]) : -6.0f;
-    float post_gain_db = (argc >= 5) ? atof(argv[4]) : 0.0f;
+    const char *lib_path = argv[1];
+    int sample_rate     = (argc >= 3) ? atoi(argv[2]) : 48000;
+    float pre_gain_db   = (argc >= 4) ? atof(argv[3]) : -6.0f;
+    float post_gain_db  = (argc >= 5) ? atof(argv[4]) : 0.0f;
 
     float pre_gain  = powf(10.0f, pre_gain_db / 20.0f);
     float post_gain = powf(10.0f, post_gain_db / 20.0f);
@@ -190,7 +311,7 @@ int main(int argc, char* argv[]) {
 
     /* ── Load library ──────────────────────────────────────────────── */
 
-    void* lib = dlopen(lib_path, RTLD_NOW);
+    void *lib = dlopen(lib_path, RTLD_NOW);
     if (!lib) { log_msg("[DDP] dlopen: %s\n", dlerror()); return 1; }
 
     EffectQueryNumberEffects_t QueryNumEffects = dlsym(lib, "EffectQueryNumberEffects");
@@ -210,80 +331,75 @@ int main(int argc, char* argv[]) {
     QueryEffect(0, &desc);
     log_msg("[DDP] Effect: '%s'\n", desc.name);
 
-    /* ── Create effect (always starts at 44100Hz internally) ─────── */
+    /* ── Create effect ─────────────────────────────────────────────── */
 
-    effect_handle_t handle = NULL;
-    int32_t ret = Create(&desc.uuid, 0, 0, &handle);
-    if (ret != 0 || !handle) { log_msg("[DDP] Create failed\n"); return 1; }
+    int32_t ret = Create(&desc.uuid, 0, 0, &g_handle);
+    if (ret != 0 || !g_handle) { log_msg("[DDP] Create failed\n"); return 1; }
 
-    uint32_t rs = 4; int32_t r = -1;
-    (*handle)->command(handle, EFFECT_CMD_INIT, 0, NULL, &rs, &r);
+    uint32_t rs = 4;
+    int32_t r = -1;
+    (*g_handle)->command(g_handle, EFFECT_CMD_INIT, 0, NULL, &rs, &r);
 
-    /* ── Hot-swap to 48kHz if requested ────────────────────────────── */
+    /* ── Hot-swap to requested sample rate ──────────────────────────── */
 
-    if (sample_rate == 48000) {
+    if (sample_rate == 48000 || sample_rate == 32000) {
         Ds1apNew_t DsNew = dlsym(lib, "_ZN5Ds1ap3NewEiiii");
         Ds1apBufInit_t DsBufInit = dlsym(lib, "Ds1apBufferInit");
 
         if (DsNew && DsBufInit) {
-            void* new_ds1ap = DsNew(0, 48000, 2, 0);
+            void *new_ds1ap = DsNew(0, sample_rate, 2, 0);
             if (new_ds1ap) {
                 DsBufInit(new_ds1ap, 256, 2, 16);
-                uint32_t* ctx = (uint32_t*)handle;
-                ctx[17] = (uint32_t)(uintptr_t)new_ds1ap; /* Ds1ap ptr */
-                ctx[3]  = 48000;  /* input sample rate */
-                ctx[11] = 48000;  /* output sample rate */
-                log_msg("[DDP] Hot-swapped to native 48kHz\n");
+                uint32_t *ctx = (uint32_t *)g_handle;
+                ctx[17] = (uint32_t)(uintptr_t)new_ds1ap;
+                ctx[3]  = sample_rate;
+                ctx[11] = sample_rate;
+                log_msg("[DDP] Hot-swapped to %dHz\n", sample_rate);
             } else {
-                log_msg("[DDP] WARNING: 48k Ds1ap failed, using 44.1k\n");
+                log_msg("[DDP] Hot-swap failed, using 44100Hz\n");
                 sample_rate = 44100;
             }
         }
     }
 
-    /* ── Configure headphone mode with original Music defaults ───── */
+    /* ── Register parameters and apply default profile ─────────────── */
 
-    setup_default_music_headphone(handle);
+    register_parameters();
+    apply_profile(DDP_PROFILE_MUSIC);
 
     /* ── Enable ────────────────────────────────────────────────────── */
 
     rs = 4; r = -1;
-    (*handle)->command(handle, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
+    (*g_handle)->command(g_handle, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
 
     log_msg("[DDP] Ready (rate=%d, pre=%.1fdB/%.4f, post=%.1fdB/%.4f)\n",
             sample_rate, pre_gain_db, pre_gain, post_gain_db, post_gain);
 
     /* ── Allocate buffers ──────────────────────────────────────────── */
 
-    int16_t* pcm_in  = calloc(MAX_FRAMES * CHANNELS, sizeof(int16_t));
-    int16_t* pcm_out = calloc(MAX_FRAMES * CHANNELS, sizeof(int16_t));
+    int16_t *pcm_in  = calloc(MAX_FRAMES * CHANNELS, sizeof(int16_t));
+    int16_t *pcm_out = calloc(MAX_FRAMES * CHANNELS, sizeof(int16_t));
     if (!pcm_in || !pcm_out) { log_msg("[DDP] alloc failed\n"); return 1; }
 
     /* ── Signal ready ──────────────────────────────────────────────── */
 
-    uint32_t magic = READY_MAGIC;
+    uint32_t magic = DDP_READY_MAGIC;
     if (write_exact(STDOUT_FILENO, &magic, sizeof(magic)) < 0) return 1;
 
-    /* ── Processing loop ───────────────────────────────────────────── */
+    /* ── Main loop ─────────────────────────────────────────────────── */
 
     for (;;) {
         uint32_t frame_count = 0;
-        if (read_exact(STDIN_FILENO, &frame_count, sizeof(frame_count)) < 0) break;
+        if (read_exact(STDIN_FILENO, &frame_count, sizeof(frame_count)) < 0)
+            break;
 
-        if (frame_count == CMD_SHUTDOWN) break;
-        if (frame_count == CMD_PING) {
-            uint32_t pong = CMD_PING;
-            write_exact(STDOUT_FILENO, &pong, sizeof(pong));
+        /* Control commands use high frame_count values */
+        if (frame_count >= 0xFFFFFFF0) {
+            if (handle_command(frame_count) < 0) break;
             continue;
         }
-        if (frame_count == CMD_SET_PROFILE) {
-            uint32_t p = 0;
-            if (read_exact(STDIN_FILENO, &p, sizeof(p)) < 0) break;
-            log_msg("[DDP] Profile → %u\n", p);
-            uint32_t ack = CMD_SET_PROFILE;
-            write_exact(STDOUT_FILENO, &ack, sizeof(ack));
-            continue;
-        }
+
+        /* Validate audio frame count */
         if (frame_count > MAX_FRAMES) {
             log_msg("[DDP] frame_count too large: %u\n", frame_count);
             break;
@@ -292,37 +408,28 @@ int main(int argc, char* argv[]) {
         size_t pcm_bytes = frame_count * CHANNELS * sizeof(int16_t);
         if (read_exact(STDIN_FILENO, pcm_in, pcm_bytes) < 0) break;
 
-        /* ── Pre-gain: attenuate input to give DDP headroom ──────── */
-        /* On Android, audio enters DDP at system volume (~50-70%),
-         * not at 0dBFS. This pre-gain simulates that attenuation,
-         * letting vmb (+7.2dB) and the Peak Limiter work as designed. */
+        /* Pre-gain */
         if (pre_gain != 1.0f) {
             for (uint32_t i = 0; i < frame_count * CHANNELS; i++) {
                 float s = pcm_in[i] * pre_gain;
-                pcm_in[i] = (int16_t)(s > 32767 ? 32767 : (s < -32767 ? -32767 : s));
+                pcm_in[i] = (int16_t)(s > 32767 ? 32767 : s < -32767 ? -32767 : s);
             }
         }
 
-        /* ── Zero output (ACCUMULATE mode fix) ───────────────────── */
+        /* Zero output buffer (ACCUMULATE mode) */
         memset(pcm_out, 0, pcm_bytes);
 
-        /* ── Process ──────────────────────────────────────────────── */
+        /* Process */
         audio_buffer_t in_buf  = { .frameCount = frame_count, .s16 = pcm_in };
         audio_buffer_t out_buf = { .frameCount = frame_count, .s16 = pcm_out };
+        ret = (*g_handle)->process(g_handle, &in_buf, &out_buf);
+        if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
 
-        ret = (*handle)->process(handle, &in_buf, &out_buf);
-        if (ret != 0) {
-            memcpy(pcm_out, pcm_in, pcm_bytes);
-        }
-
-        /* ── Post-gain: restore level after DDP processing ───────── */
+        /* Post-gain */
         if (post_gain != 1.0f) {
             for (uint32_t i = 0; i < frame_count * CHANNELS; i++) {
                 float s = pcm_out[i] * post_gain;
-                /* Soft clip to avoid harsh digital clipping */
-                if (s > 32767) s = 32767;
-                else if (s < -32767) s = -32767;
-                pcm_out[i] = (int16_t)s;
+                pcm_out[i] = (int16_t)(s > 32767 ? 32767 : s < -32767 ? -32767 : s);
             }
         }
 
@@ -330,7 +437,7 @@ int main(int argc, char* argv[]) {
     }
 
     log_msg("[DDP] Cleaning up\n");
-    Release(handle);
+    Release(g_handle);
     dlclose(lib);
     free(pcm_in);
     free(pcm_out);

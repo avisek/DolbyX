@@ -176,24 +176,65 @@ static DWORD WINAPI client_thread(LPVOID param) {
         return 1;
     }
 
-    /* Bridge loop: batch protocol */
+    /* Bridge loop: audio + control commands */
     BYTE *buf = (BYTE *)malloc(MAX_FRAMES * 4);
     int blocks = 0;
 
     for (;;) {
-        DWORD total_frames = 0;
-        if (!read_exact(pipe, &total_frames, 4)) break;
-        if (total_frames == CMD_SHUTDOWN) break;
-        if (total_frames > MAX_FRAMES) break;
+        DWORD frame_count = 0;
+        if (!read_exact(pipe, &frame_count, 4)) break;
+        if (frame_count == CMD_SHUTDOWN) break;
 
-        DWORD total_bytes = total_frames * 4;
+        /* ── Control commands (0xFFFFFFF0+) ──────────────────────── */
+        if (frame_count >= 0xFFFFFFF0) {
+            /* Forward command to processor */
+            if (!write_exact(proc->stdin_wr, &frame_count, 4)) break;
+
+            if (frame_count == 0xFFFFFFF0) {
+                /* CMD_SET_PARAM: read 4 extra bytes (uint16 index + int16 value) */
+                BYTE extra[4];
+                if (!read_exact(pipe, extra, 4)) break;
+                if (!write_exact(proc->stdin_wr, extra, 4)) break;
+                /* Read response: uint32 status */
+                DWORD status = 0;
+                if (!read_exact(proc->stdout_rd, &status, 4)) break;
+                if (!write_exact(pipe, &status, 4)) break;
+            }
+            else if (frame_count == 0xFFFFFFF1) {
+                /* CMD_SET_PROFILE: read 4 extra bytes (uint32 profile_id) */
+                DWORD pid = 0;
+                if (!read_exact(pipe, &pid, 4)) break;
+                if (!write_exact(proc->stdin_wr, &pid, 4)) break;
+                DWORD status = 0;
+                if (!read_exact(proc->stdout_rd, &status, 4)) break;
+                if (!write_exact(pipe, &status, 4)) break;
+            }
+            else if (frame_count == 0xFFFFFFF2) {
+                /* CMD_GET_VIS: no extra input, read 40 bytes (int16[20]) */
+                BYTE vis[40];
+                if (!read_exact(proc->stdout_rd, vis, 40)) break;
+                if (!write_exact(pipe, vis, 40)) break;
+            }
+            else if (frame_count == 0xFFFFFFFD) {
+                /* CMD_PING */
+                DWORD pong = 0;
+                if (!read_exact(proc->stdout_rd, &pong, 4)) break;
+                if (!write_exact(pipe, &pong, 4)) break;
+            }
+            continue;
+        }
+
+        /* ── Audio frame processing ──────────────────────────────── */
+        if (frame_count > MAX_FRAMES) break;
+
+        DWORD total_bytes = frame_count * 4;
         if (!read_exact(pipe, buf, total_bytes)) break;
 
         /* Pipeline: write all chunks to processor */
         DWORD off = 0;
         BOOL ok = TRUE;
-        while (off < total_frames && ok) {
-            DWORD chunk = total_frames - off;
+        while (off < frame_count && ok) {
+            DWORD chunk = frame_count - off;
             if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
             if (!write_exact(proc->stdin_wr, &chunk, 4) ||
                 !write_exact(proc->stdin_wr, buf + off * 4, chunk * 4))
@@ -204,8 +245,8 @@ static DWORD WINAPI client_thread(LPVOID param) {
 
         /* Read all processed chunks */
         off = 0;
-        while (off < total_frames) {
-            DWORD chunk = total_frames - off;
+        while (off < frame_count) {
+            DWORD chunk = frame_count - off;
             if (chunk > CHUNK_SIZE) chunk = CHUNK_SIZE;
             if (!read_exact(proc->stdout_rd, buf + off * 4, chunk * 4)) {
                 log_msg("Session %d: proc read err\n", sid);
@@ -220,7 +261,7 @@ static DWORD WINAPI client_thread(LPVOID param) {
 
         blocks++;
         if (blocks <= 3 || blocks % 5000 == 0)
-            log_msg("Session %d: block %d (%u frames)\n", sid, blocks, total_frames);
+            log_msg("Session %d: block %d (%u frames)\n", sid, blocks, frame_count);
     }
 
     log_msg("Session %d: done (%d blocks)\n", sid, blocks);
