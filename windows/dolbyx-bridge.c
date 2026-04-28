@@ -231,13 +231,15 @@ static DWORD WINAPI audio_client_thread(LPVOID param) {
         if (frame_count == CMD_SHUTDOWN) break;
 
         /* Control commands from audio pipe (forwarded inline) */
-        if (frame_count >= 0xFFFFFFF0) {
+        if (frame_count >= 0xFFFFFFE0) {
             BYTE ctrl_buf[16];
             int extra = 0, reply_len = 4;
 
             if (frame_count == 0xFFFFFFF0) extra = 4;       /* SET_PARAM */
             else if (frame_count == 0xFFFFFFF1) extra = 4;  /* SET_PROFILE */
             else if (frame_count == 0xFFFFFFF2) reply_len = 40; /* GET_VIS */
+            else if (frame_count == 0xFFFFFFEF) extra = 4; /* SET_IEQ_PRESET */
+            else if (frame_count == 0xFFFFFFEE) extra = 4; /* SET_GAIN */
             else if (frame_count == 0xFFFFFFFD) reply_len = 4; /* PING */
 
             if (extra > 0 && !read_exact(pipe, ctrl_buf + 4, extra)) break;
@@ -345,6 +347,16 @@ static DWORD WINAPI ctrl_client_thread(LPVOID param) {
             data_len = 8;
             reply_len = 4;
         } else if (cmd == 0xFFFFFFF2) {
+        } else if (cmd == 0xFFFFFFEF) {
+        } else if (cmd == 0xFFFFFFEE) {
+            /* SET_GAIN: +4 bytes (int16 pre + int16 post) */
+            if (!read_exact(pipe, ctrl_data + 4, 4)) break;
+            data_len = 8;
+            reply_len = 4;
+            /* SET_IEQ_PRESET: +4 bytes (uint32 preset_id) */
+            if (!read_exact(pipe, ctrl_data + 4, 4)) break;
+            data_len = 8;
+            reply_len = 4;
             /* GET_VIS: no extra, 40 byte reply */
             reply_len = 40;
         } else if (cmd == 0xFFFFFFFD) {

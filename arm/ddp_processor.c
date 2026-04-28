@@ -36,6 +36,11 @@
 typedef void *(*Ds1apNew_t)(int, int, int, int);
 typedef void *(*Ds1apBufInit_t)(void *, int, int, int);
 
+/* ── Global gain (updated by CMD_SET_GAIN) ────────────────────────── */
+
+float g_pre_gain  = 0.5012f;  /* -6.0 dB default */
+float g_post_gain = 1.0f;     /*  0.0 dB default */
+
 /* ── Logging ──────────────────────────────────────────────────────── */
 
 static void log_msg(const char *fmt, ...) {
@@ -90,22 +95,37 @@ static int ds1_set_raw(int param_cmd, const void *val, int vsize) {
 
 /*
  * Set a single parameter value via the DS_PARAM protocol.
- * param_index: index in the defined parameter list (see DDP_PARAM_* enum)
- * value: the int16 value to set
  */
 static int ds1_set_value(int param_index, int16_t value) {
     uint8_t buf[10];
     int pos = 0;
-    *(int32_t *)(buf + pos) = 8;              pos += 4; /* device = wired headphone */
+    *(int32_t *)(buf + pos) = 8;              pos += 4;
     *(int16_t *)(buf + pos) = param_index;    pos += 2;
-    *(int16_t *)(buf + pos) = 1;              pos += 2; /* length = 1 */
+    *(int16_t *)(buf + pos) = 1;              pos += 2;
     *(int16_t *)(buf + pos) = value;          pos += 2;
     return ds1_set_raw(DS_PARAM_SINGLE_DEVICE_VALUE, buf, pos);
 }
 
+/*
+ * Set an array parameter (e.g., iebt with 20 bands).
+ */
+static int ds1_set_array(int param_index, const int16_t *values, int count) {
+    int bufsize = 4 + 2 + 2 + count * 2;
+    uint8_t *buf = calloc(1, bufsize);
+    int pos = 0;
+    *(int32_t *)(buf + pos) = 8;              pos += 4;
+    *(int16_t *)(buf + pos) = param_index;    pos += 2;
+    *(int16_t *)(buf + pos) = count;          pos += 2;
+    memcpy(buf + pos, values, count * 2);     pos += count * 2;
+    int r = ds1_set_raw(DS_PARAM_SINGLE_DEVICE_VALUE, buf, pos);
+    free(buf);
+    return r;
+}
+
 /* ── Parameter Registration ───────────────────────────────────────── */
 
-/* These names MUST match the order in ddp_protocol.h DDP_PARAM_* enum */
+/* Parameter names — order MUST match DDP_PARAM_* enum.
+ * iebt (index 20) is the 20-band IEQ target array. */
 static const char g_param_names[][5] = {
     "endp", "vdhe", "dhsb", "dssb", "dssf",
     "ngon", "dvla", "dvle", "dvme",
@@ -113,14 +133,16 @@ static const char g_param_names[][5] = {
     "deon", "dea\0", "ded\0",
     "plmd", "aoon",
     "vmb\0", "vmon",
-    "geon", "plb\0"
+    "geon", "plb\0",
+    "iebt"            /* index 20: IEQ band targets (20 values) */
 };
 
-static void register_parameters(void) {
-    int np = DDP_PARAM_COUNT;
+#define TOTAL_PARAMS  21  /* DDP_PARAM_COUNT(20) + iebt(1) */
 
-    /* Step 1: Define parameter names */
-    uint8_t pbuf[2 + DDP_PARAM_COUNT * 4];
+static void register_parameters(void) {
+    int np = TOTAL_PARAMS;
+
+    uint8_t pbuf[2 + TOTAL_PARAMS * 4];
     int pos = 0;
     *(int16_t *)(pbuf + pos) = np; pos += 2;
     for (int i = 0; i < np; i++) {
@@ -129,8 +151,7 @@ static void register_parameters(void) {
     }
     ds1_set_raw(DS_PARAM_DEFINE_PARAMS, pbuf, pos);
 
-    /* Step 2: Map settings 1:1 */
-    uint8_t sbuf[2 + DDP_PARAM_COUNT * 3];
+    uint8_t sbuf[2 + TOTAL_PARAMS * 3];
     pos = 0;
     *(int16_t *)(sbuf + pos) = np; pos += 2;
     for (int i = 0; i < np; i++) {
@@ -214,6 +235,47 @@ static const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
 static int16_t g_current_params[DDP_PARAM_COUNT];
 static int g_current_profile = DDP_PROFILE_MUSIC;
 
+/* ── IEQ Preset Target Curves (from ds1-default.xml) ─────────────── */
+
+#define IEBT_INDEX  20  /* parameter index for iebt in the defined list */
+
+static const int16_t g_ieq_presets[3][20] = {
+    /* Open: airy, bright, wide */
+    [DDP_IEQ_OPEN] = {
+        117, 133, 188, 176, 141, 149, 175, 185, 185, 200,
+        236, 242, 228, 213, 182, 132, 110, 68, -27, -240
+    },
+    /* Rich: warm, full, lush */
+    [DDP_IEQ_RICH] = {
+        67, 95, 172, 163, 168, 201, 189, 242, 196, 221,
+        192, 186, 168, 139, 102, 57, 35, 9, -55, -235
+    },
+    /* Focused: vocal-forward, narrow */
+    [DDP_IEQ_FOCUSED] = {
+        -419, -112, 75, 116, 113, 160, 165, 80, 61, 79,
+        98, 121, 64, 70, 44, -71, -33, -100, -238, -411
+    },
+};
+
+/* Default IEQ preset per profile (from ds1-default.xml <include preset="...">) */
+static const int g_profile_ieq_preset[DDP_PROFILE_COUNT] = {
+    DDP_IEQ_RICH,     /* Movie */
+    DDP_IEQ_RICH,     /* Music */
+    DDP_IEQ_OPEN,     /* Game */
+    DDP_IEQ_RICH,     /* Voice */
+    DDP_IEQ_RICH,     /* Custom 1 */
+    DDP_IEQ_RICH,     /* Custom 2 */
+};
+
+static int g_current_ieq_preset = -1; /* -1 = manual */
+
+static void apply_ieq_preset(int preset_id) {
+    if (preset_id < 0 || preset_id > 2) return;
+    g_current_ieq_preset = preset_id;
+    ds1_set_array(IEBT_INDEX, g_ieq_presets[preset_id], 20);
+    log_msg("[DDP] Applied IEQ preset %d\n", preset_id);
+}
+
 static void apply_profile(int profile_id) {
     if (profile_id < 0 || profile_id >= DDP_PROFILE_COUNT) return;
     g_current_profile = profile_id;
@@ -222,6 +284,10 @@ static void apply_profile(int profile_id) {
     for (int i = 0; i < DDP_PARAM_COUNT; i++) {
         ds1_set_value(i, g_current_params[i]);
     }
+
+    /* Apply the profile's default IEQ preset target curve */
+    apply_ieq_preset(g_profile_ieq_preset[profile_id]);
+
     log_msg("[DDP] Applied profile %d\n", profile_id);
 }
 
@@ -274,11 +340,40 @@ static int handle_command(uint32_t cmd) {
     }
 
     if (cmd == DDP_CMD_GET_VIS) {
-        /* Return current output levels per band.
-         * TODO: extract real visualizer data from the DSP's visq node.
-         * For now, return zeros — the UI will use its own analysis. */
         int16_t vis_data[20] = {0};
         write_exact(STDOUT_FILENO, vis_data, sizeof(vis_data));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_SET_IEQ_PRESET) {
+        uint32_t preset_id = 0;
+        if (read_exact(STDIN_FILENO, &preset_id, sizeof(preset_id)) < 0)
+            return -1;
+
+        uint32_t status = 0;
+        if (preset_id <= 2) {
+            apply_ieq_preset(preset_id);
+        } else {
+            status = 1;
+        }
+        write_exact(STDOUT_FILENO, &status, sizeof(status));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_SET_GAIN) {
+        int16_t pre_x10 = 0, post_x10 = 0;
+        if (read_exact(STDIN_FILENO, &pre_x10, 2) < 0) return -1;
+        if (read_exact(STDIN_FILENO, &post_x10, 2) < 0) return -1;
+
+        /* Update global gain values (used in main loop) */
+        extern float g_pre_gain, g_post_gain;
+        g_pre_gain  = powf(10.0f, (float)pre_x10 / 200.0f);
+        g_post_gain = powf(10.0f, (float)post_x10 / 200.0f);
+        log_msg("[DDP] Gain: pre=%.1fdB(%.4f) post=%.1fdB(%.4f)\n",
+                pre_x10/10.0f, g_pre_gain, post_x10/10.0f, g_post_gain);
+
+        uint32_t status = 0;
+        write_exact(STDOUT_FILENO, &status, sizeof(status));
         return 0;
     }
 
@@ -301,8 +396,8 @@ int main(int argc, char *argv[]) {
     float pre_gain_db   = (argc >= 4) ? atof(argv[3]) : -6.0f;
     float post_gain_db  = (argc >= 5) ? atof(argv[4]) : 0.0f;
 
-    float pre_gain  = powf(10.0f, pre_gain_db / 20.0f);
-    float post_gain = powf(10.0f, post_gain_db / 20.0f);
+    g_pre_gain  = powf(10.0f, pre_gain_db / 20.0f);
+    g_post_gain = powf(10.0f, post_gain_db / 20.0f);
 
     signal(SIGPIPE, SIG_IGN);
 
@@ -373,7 +468,7 @@ int main(int argc, char *argv[]) {
     (*g_handle)->command(g_handle, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
 
     log_msg("[DDP] Ready (rate=%d, pre=%.1fdB/%.4f, post=%.1fdB/%.4f)\n",
-            sample_rate, pre_gain_db, pre_gain, post_gain_db, post_gain);
+            sample_rate, pre_gain_db, g_pre_gain, post_gain_db, g_post_gain);
 
     /* ── Allocate buffers ──────────────────────────────────────────── */
 
@@ -393,8 +488,8 @@ int main(int argc, char *argv[]) {
         if (read_exact(STDIN_FILENO, &frame_count, sizeof(frame_count)) < 0)
             break;
 
-        /* Control commands use high frame_count values */
-        if (frame_count >= 0xFFFFFFF0) {
+        /* Control commands use high frame_count values (>= 0xFFFFFFE0) */
+        if (frame_count >= 0xFFFFFFE0) {
             if (handle_command(frame_count) < 0) break;
             continue;
         }
@@ -409,9 +504,9 @@ int main(int argc, char *argv[]) {
         if (read_exact(STDIN_FILENO, pcm_in, pcm_bytes) < 0) break;
 
         /* Pre-gain */
-        if (pre_gain != 1.0f) {
+        if (g_pre_gain != 1.0f) {
             for (uint32_t i = 0; i < frame_count * CHANNELS; i++) {
-                float s = pcm_in[i] * pre_gain;
+                float s = pcm_in[i] * g_pre_gain;
                 pcm_in[i] = (int16_t)(s > 32767 ? 32767 : s < -32767 ? -32767 : s);
             }
         }
@@ -426,9 +521,9 @@ int main(int argc, char *argv[]) {
         if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
 
         /* Post-gain */
-        if (post_gain != 1.0f) {
+        if (g_post_gain != 1.0f) {
             for (uint32_t i = 0; i < frame_count * CHANNELS; i++) {
-                float s = pcm_out[i] * post_gain;
+                float s = pcm_out[i] * g_post_gain;
                 pcm_out[i] = (int16_t)(s > 32767 ? 32767 : s < -32767 ? -32767 : s);
             }
         }

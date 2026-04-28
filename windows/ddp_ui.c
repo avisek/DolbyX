@@ -107,6 +107,16 @@ static void send_profile(DDPUI *ui, int pid) {
     DWORD st = 0; cp_read(ui->ctrl_pipe, &st, 4);
 }
 
+static void send_gain(DDPUI *ui) {
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) ctrl_connect(ui);
+    if (ui->ctrl_pipe == INVALID_HANDLE_VALUE) return;
+    DWORD cmd = DDP_CMD_SET_GAIN;
+    cp_write(ui->ctrl_pipe, &cmd, 4);
+    cp_write(ui->ctrl_pipe, &ui->pre_gain_x10, 2);
+    cp_write(ui->ctrl_pipe, &ui->post_gain_x10, 2);
+    DWORD st = 0; cp_read(ui->ctrl_pipe, &st, 4);
+}
+
 /* ── Drawing Helpers ──────────────────────────────────────────────── */
 
 static void fill(HDC dc, int x, int y, int w, int h, COLORREF c) {
@@ -288,22 +298,29 @@ static void paint(DDPUI *ui) {
         text_at(dc, LM, ADV_Y, "Advanced", ui->font_small, COL_TEXT_DIM);
         int y1 = ADV_Y + 22;
 
-        /* Pre-gain: mapped -12..0 → slider 0..12 */
+        /* Pre-gain: -120..0 (in 0.1dB units) → slider 0..120 */
         text_at(dc, LM, y1+6, "Pre-gain", ui->font_small, COL_TEXT_DIM);
-        int pre_val = 12 + 6; /* current: -6 → mapped to 6 out of 12 */
-        draw_slider(dc, LM+100, y1, 180, pre_val, 0, 12);
-        text_at(dc, LM+290, y1+6, "-6 dB", ui->font_small, COL_TEXT_DIM);
+        draw_slider(dc, LM+100, y1, 180,
+                    ui->pre_gain_x10 + 120, 0, 120);
+        char pgbuf[16]; snprintf(pgbuf, sizeof(pgbuf), "%.1f dB",
+                                  ui->pre_gain_x10 / 10.0f);
+        text_at(dc, LM+290, y1+6, pgbuf, ui->font_small, COL_TEXT_DIM);
 
-        /* Post-gain: 0..12 */
+        /* Post-gain: 0..120 (in 0.1dB units) */
         text_at(dc, LM+350, y1+6, "Post-gain", ui->font_small, COL_TEXT_DIM);
-        draw_slider(dc, LM+450, y1, 150, 0, 0, 12);
-        text_at(dc, LM+610, y1+6, "0 dB", ui->font_small, COL_TEXT_DIM);
+        draw_slider(dc, LM+450, y1, 150,
+                    ui->post_gain_x10, 0, 120);
+        char pobuf[16]; snprintf(pobuf, sizeof(pobuf), "%.1f dB",
+                                  ui->post_gain_x10 / 10.0f);
+        text_at(dc, LM+610, y1+6, pobuf, ui->font_small, COL_TEXT_DIM);
 
         int y2 = y1 + ADV_ROW_H + 4;
-        /* Vol Maximizer */
+        /* Vol Maximizer Boost */
         text_at(dc, LM, y2+6, "Vol. Boost", ui->font_small, COL_TEXT_DIM);
-        draw_slider(dc, LM+100, y2, 180, ui->params[DDP_PARAM_VMB], 0, 192);
-        char vmbuf[16]; snprintf(vmbuf, sizeof(vmbuf), "%d", ui->params[DDP_PARAM_VMB]);
+        draw_slider(dc, LM+100, y2, 180,
+                    ui->params[DDP_PARAM_VMB], 0, 192);
+        char vmbuf[16]; snprintf(vmbuf, sizeof(vmbuf), "%d",
+                                  ui->params[DDP_PARAM_VMB]);
         text_at(dc, LM+290, y2+6, vmbuf, ui->font_small, COL_TEXT_DIM);
 
         /* Peak Limiter mode */
@@ -344,6 +361,21 @@ static int hit_tog_slider(int mx, int my) {
         if (mx >= LM+SL_X && mx <= LM+SL_X+SL_W && my >= y+4 && my <= y+4+30)
             return i;
     }
+    return -1;
+}
+
+/* Advanced slider IDs: 10=pre-gain, 11=post-gain, 12=VMB */
+static int hit_adv_slider(int mx, int my) {
+    int y1 = ADV_Y + 22;
+    int y2 = y1 + ADV_ROW_H + 4;
+
+    /* Pre-gain: x=LM+100, w=180 */
+    if (mx >= LM+100 && mx <= LM+280 && my >= y1 && my <= y1+26) return 10;
+    /* Post-gain: x=LM+450, w=150 */
+    if (mx >= LM+450 && mx <= LM+600 && my >= y1 && my <= y1+26) return 11;
+    /* VMB: x=LM+100, w=180 */
+    if (mx >= LM+100 && mx <= LM+280 && my >= y2 && my <= y2+26) return 12;
+
     return -1;
 }
 
@@ -436,18 +468,57 @@ static LRESULT CALLBACK ui_wndproc(HWND hwnd, UINT msg,
             return 0;
         }
 
+        /* Advanced slider drag */
+        int adv = hit_adv_slider(mx, my);
+        if (adv >= 0) {
+            ui->drag_slider = adv;
+            SetCapture(hwnd);
+            if (adv == 10) {
+                /* Pre-gain: x=LM+100, w=180, range -120..0 */
+                ui->drag_x0 = LM+100; ui->drag_w = 180;
+                ui->drag_min = 0; ui->drag_max = 120;
+                int sv = slider_val(mx, LM+100, 180, 0, 120);
+                ui->pre_gain_x10 = (int16_t)(sv - 120);
+                send_gain(ui);
+            } else if (adv == 11) {
+                /* Post-gain: x=LM+450, w=150, range 0..120 */
+                ui->drag_x0 = LM+450; ui->drag_w = 150;
+                ui->drag_min = 0; ui->drag_max = 120;
+                ui->post_gain_x10 = (int16_t)slider_val(mx, LM+450, 150, 0, 120);
+                send_gain(ui);
+            } else if (adv == 12) {
+                /* VMB: x=LM+100, w=180, range 0..192 */
+                ui->drag_x0 = LM+100; ui->drag_w = 180;
+                ui->drag_min = 0; ui->drag_max = 192;
+                ui->drag_param = DDP_PARAM_VMB;
+                int v = slider_val(mx, LM+100, 180, 0, 192);
+                send_param(ui, DDP_PARAM_VMB, (int16_t)v);
+            }
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
         /* IEQ mode */
         int ieq = hit_ieq(mx, my);
         if (ieq >= 0 && ieq != ui->ieq_mode) {
             ui->ieq_mode = ieq;
             if (ieq == DDP_IEQ_MANUAL) {
+                /* Manual: disable IEQ, enable graphic EQ */
                 send_param(ui, DDP_PARAM_IEON, 0);
                 send_param(ui, DDP_PARAM_GEON, 1);
             } else {
+                /* Preset: enable IEQ, disable graphic EQ, send preset curve */
                 send_param(ui, DDP_PARAM_GEON, 0);
                 send_param(ui, DDP_PARAM_IEON, 1);
-                /* Set IEQ amount to max for the preset to take effect */
                 send_param(ui, DDP_PARAM_IEA, 10);
+                /* Send IEQ preset target curve */
+                if (ui->ctrl_pipe != INVALID_HANDLE_VALUE) {
+                    DWORD cmd = DDP_CMD_SET_IEQ_PRESET;
+                    DWORD pid = (DWORD)ieq;
+                    cp_write(ui->ctrl_pipe, &cmd, 4);
+                    cp_write(ui->ctrl_pipe, &pid, 4);
+                    DWORD st = 0; cp_read(ui->ctrl_pipe, &st, 4);
+                }
             }
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
@@ -458,9 +529,28 @@ static LRESULT CALLBACK ui_wndproc(HWND hwnd, UINT msg,
     case WM_MOUSEMOVE: {
         if (!ui || ui->drag_slider < 0) break;
         int mx = LOWORD(lp);
-        int v = slider_val(mx, ui->drag_x0, ui->drag_w,
-                           ui->drag_min, ui->drag_max);
-        send_param(ui, ui->drag_param, (int16_t)v);
+        int ds = ui->drag_slider;
+
+        if (ds <= 2) {
+            /* Toggle slider */
+            int v = slider_val(mx, LM+SL_X, SL_W,
+                               g_tog_min[ds], g_tog_max[ds]);
+            send_param(ui, g_tog_amt[ds], (int16_t)v);
+        } else if (ds == 10) {
+            /* Pre-gain */
+            int sv = slider_val(mx, ui->drag_x0, ui->drag_w, 0, 120);
+            ui->pre_gain_x10 = (int16_t)(sv - 120);
+            send_gain(ui);
+        } else if (ds == 11) {
+            /* Post-gain */
+            ui->post_gain_x10 = (int16_t)slider_val(mx, ui->drag_x0, ui->drag_w, 0, 120);
+            send_gain(ui);
+        } else if (ds == 12) {
+            /* VMB */
+            int v = slider_val(mx, ui->drag_x0, ui->drag_w, 0, 192);
+            send_param(ui, DDP_PARAM_VMB, (int16_t)v);
+        }
+
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     }
@@ -508,6 +598,8 @@ DDPUI *ddpui_create(HWND parent) {
     ui->profile = DDP_PROFILE_MUSIC;
     ui->ieq_mode = DDP_IEQ_MANUAL;
     ui->drag_slider = -1;
+    ui->pre_gain_x10 = -60;   /* -6.0 dB */
+    ui->post_gain_x10 = 0;    /*  0.0 dB */
 
     extern const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT];
     memcpy(ui->params, g_profiles[DDP_PROFILE_MUSIC], sizeof(ui->params));

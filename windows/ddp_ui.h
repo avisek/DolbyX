@@ -52,6 +52,10 @@ typedef struct {
 
     /* Control pipe */
     HANDLE   ctrl_pipe;
+
+    /* Gain (in 0.1dB units: -60 = -6.0dB) */
+    int16_t  pre_gain_x10;   /* -120..0 */
+    int16_t  post_gain_x10;  /* 0..120 */
 } DDPUI;
 
 DDPUI *ddpui_create(HWND parent);
