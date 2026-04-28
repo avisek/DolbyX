@@ -293,13 +293,6 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         st->editor = ddpui_create(parent);
         if (!st->editor)
             logf_(st, "Editor create FAILED\n");
-        else {
-            /* Update editor rect from actual DPI-scaled size */
-            st->editor_rect.left = 0;
-            st->editor_rect.top = 0;
-            st->editor_rect.right = st->editor->width;
-            st->editor_rect.bottom = st->editor->height;
-        }
         return st->editor ? 1 : 0;
     }
 
