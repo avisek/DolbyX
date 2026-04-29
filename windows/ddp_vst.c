@@ -290,7 +290,7 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
     case effEditOpen: {
         HWND parent = (HWND)ptr;
         logf_(st, "Editor open (parent=%p)\n", parent);
-        st->editor = ddpui_create(parent);
+        st->editor = ddpui_create(parent, st->dll_dir);
         if (!st->editor)
             logf_(st, "Editor create FAILED\n");
         return st->editor ? 1 : 0;

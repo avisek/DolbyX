@@ -1,5 +1,5 @@
 /*
- * ddp_ui.h — DolbyX VST Editor UI definitions
+ * ddp_ui.h — DolbyX VST Editor UI
  */
 #ifndef DDP_UI_H
 #define DDP_UI_H
@@ -8,9 +8,6 @@
 #include <stdint.h>
 #include "ddp_protocol.h"
 
-/* Editor base size — rendered at this logical pixel size.
- * No manual DPI scaling; we declare per-monitor DPI awareness
- * and let Windows handle scaling if needed. */
 #define UI_WIDTH    720
 #define UI_HEIGHT   560
 
@@ -26,7 +23,12 @@
 #define COL_TEXT_DIM    RGB(96,  112, 128)
 #define COL_SLIDER_BG   RGB(32,  44,  60)
 
-/* UI state */
+/* Per-profile saved state */
+typedef struct {
+    int16_t  params[DDP_PARAM_COUNT];
+    int      ieq_mode;  /* 0=open, 1=rich, 2=focused, 3=manual */
+} ProfileState;
+
 typedef struct {
     HWND     hwnd;
     HFONT    font_title;
@@ -38,14 +40,12 @@ typedef struct {
     /* DDP state */
     int      power;
     int      profile;
-    int16_t  params[DDP_PARAM_COUNT];
-    int      ieq_mode;
+    ProfileState profiles[DDP_PROFILE_COUNT];  /* persistent per-profile state */
 
     /* Interaction */
-    int      drag_slider;   /* -1=none, 0-4=which slider */
-    int      drag_param;    /* param index of dragged slider */
-    int      drag_x0, drag_w; /* slider geometry during drag */
-    int      drag_min, drag_max;
+    int      drag_slider;   /* -1=none, 0-2=toggle sliders, 12=VMB */
+    int      drag_param;
+    int      drag_x0, drag_w, drag_min, drag_max;
 
     /* Visualizer */
     float    vis_phase;
@@ -53,12 +53,15 @@ typedef struct {
     /* Control pipe */
     HANDLE   ctrl_pipe;
 
-    /* Gain (in 0.1dB units: -60 = -6.0dB) */
-    int16_t  pre_gain_x10;   /* -120..0 */
-    int16_t  post_gain_x10;  /* 0..120 */
+    /* Config file path (next to DLL) */
+    char     config_path[512];
 } DDPUI;
 
-DDPUI *ddpui_create(HWND parent);
+/* Convenience accessors */
+#define CUR_PARAMS(ui)   ((ui)->profiles[(ui)->profile].params)
+#define CUR_IEQ(ui)      ((ui)->profiles[(ui)->profile].ieq_mode)
+
+DDPUI *ddpui_create(HWND parent, const char *dll_dir);
 void   ddpui_destroy(DDPUI *ui);
 void   ddpui_idle(DDPUI *ui);
 void   ddpui_register_class(HINSTANCE hInst);
