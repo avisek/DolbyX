@@ -76,7 +76,7 @@ def process(samples, frames):
     proc = subprocess.run(
         ['qemu-arm-static', '-L', '/usr/arm-linux-gnueabihf',
          'build/ddp_processor', 'build/lib/libdseffect.so',
-         str(RATE), '-6', '0'],
+         str(RATE)],
         input=msg, capture_output=True, timeout=600, env=env
     )
 

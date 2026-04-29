@@ -36,9 +36,9 @@
 typedef void *(*Ds1apNew_t)(int, int, int, int);
 typedef void *(*Ds1apBufInit_t)(void *, int, int, int);
 
-/* ── Global gain (updated by CMD_SET_GAIN) ────────────────────────── */
+/* ── Global gain (set via CLI args for offline processing) ────────── */
 
-float g_pre_gain  = 0.5012f;  /* -6.0 dB default */
+float g_pre_gain  = 1.0f;  /* 0 dB default (no pre-gain) */
 float g_post_gain = 1.0f;     /*  0.0 dB default */
 
 /* ── Logging ──────────────────────────────────────────────────────── */
@@ -360,24 +360,7 @@ static int handle_command(uint32_t cmd) {
         return 0;
     }
 
-    if (cmd == DDP_CMD_SET_GAIN) {
-        int16_t pre_x10 = 0, post_x10 = 0;
-        if (read_exact(STDIN_FILENO, &pre_x10, 2) < 0) return -1;
-        if (read_exact(STDIN_FILENO, &post_x10, 2) < 0) return -1;
-
-        /* Update global gain values (used in main loop) */
-        extern float g_pre_gain, g_post_gain;
-        g_pre_gain  = powf(10.0f, (float)pre_x10 / 200.0f);
-        g_post_gain = powf(10.0f, (float)post_x10 / 200.0f);
-        log_msg("[DDP] Gain: pre=%.1fdB(%.4f) post=%.1fdB(%.4f)\n",
-                pre_x10/10.0f, g_pre_gain, post_x10/10.0f, g_post_gain);
-
-        uint32_t status = 0;
-        write_exact(STDOUT_FILENO, &status, sizeof(status));
-        return 0;
-    }
-
-    /* Unknown command — skip */
+    /* Unknown command */
     log_msg("[DDP] Unknown command: 0x%08X\n", cmd);
     return 0;
 }
@@ -393,7 +376,7 @@ int main(int argc, char *argv[]) {
 
     const char *lib_path = argv[1];
     int sample_rate     = (argc >= 3) ? atoi(argv[2]) : 48000;
-    float pre_gain_db   = (argc >= 4) ? atof(argv[3]) : -6.0f;
+    float pre_gain_db   = (argc >= 4) ? atof(argv[3]) : 0.0f;
     float post_gain_db  = (argc >= 5) ? atof(argv[4]) : 0.0f;
 
     g_pre_gain  = powf(10.0f, pre_gain_db / 20.0f);

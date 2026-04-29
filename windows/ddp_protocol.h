@@ -121,11 +121,4 @@ enum {
 #define DDP_CMD_SET_IEQ_PRESET 0xFFFFFFEF
 
 
-/*
- * CMD_SET_GAIN: Change pre/post gain.
- *   Client → Proc: uint32 0xFFFFFFEE + int16 pre_gain_x10 + int16 post_gain_x10
- *     (gain values in 0.1dB units: -60 = -6.0dB, 30 = +3.0dB)
- *   Proc → Client: uint32 status
- */
-#define DDP_CMD_SET_GAIN 0xFFFFFFEE
 
