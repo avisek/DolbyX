@@ -170,6 +170,7 @@ static int ctrl_extra(DWORD cmd, int *reply_len) {
     case 0xFFFFFFF2: *reply_len = 40; return 0; /* GET_VIS: → int16[20] */
     case 0xFFFFFFFD: return 0;  /* PING: → uint32 */
     case 0xFFFFFFEF: return 4;  /* SET_IEQ_PRESET: +uint32 pid → uint32 */
+    case 0xFFFFFFED: return 4;  /* SET_POWER: +uint32 power → uint32 */
     default: return -1;         /* unknown */
     }
 }

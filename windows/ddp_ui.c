@@ -189,9 +189,9 @@ static void paint(DDPUI *ui) {
         rrect(d,x,PROF_Y,bw,PROF_H,8,a?COL_ACCENT:COL_SURFACE,a?COL_ACCENT:COL_BORDER);
         txtc(d,x,PROF_Y,bw,PROF_H,pn[i],ui->font_normal,a?RGB(0,0,0):COL_TEXT);
     }
-    /* Reset */
-    rrect(d,UI_WIDTH-LM-52,PROF_Y+6,48,PROF_H-12,6,COL_SURFACE,COL_BORDER);
-    txtc(d,UI_WIDTH-LM-52,PROF_Y+6,48,PROF_H-12,"Reset",ui->font_small,COL_TEXT_DIM);
+    /* Reset button — right-aligned below profile row */
+    rrect(d,UI_WIDTH-LM-56,PROF_Y+PROF_H+4,52,20,6,COL_SURFACE,COL_BORDER);
+    txtc(d,UI_WIDTH-LM-56,PROF_Y+PROF_H+4,52,20,"Reset",ui->font_small,COL_TEXT_DIM);
 
     /* Visualizer */
     fill(d,LM,VIS_Y,CW,VIS_H,COL_PANEL);
@@ -235,8 +235,8 @@ static void paint(DDPUI *ui) {
 /* Hit testing */
 static int hp(int mx,int my){if(my<PROF_Y||my>=PROF_Y+PROF_H)return-1;
     int g=6,bw=(CW-5*g)/6,c=(mx-LM)/(bw+g);return(c>=0&&c<6)?c:-1;}
-static int hr(int mx,int my){return mx>=UI_WIDTH-LM-52&&mx<=UI_WIDTH-LM&&
-    my>=PROF_Y+6&&my<=PROF_Y+PROF_H-6;}
+static int hr(int mx,int my){return mx>=UI_WIDTH-LM-56&&mx<=UI_WIDTH-LM&&
+    my>=PROF_Y+PROF_H+4&&my<=PROF_Y+PROF_H+24;}
 static int ht(int mx,int my){for(int i=0;i<3;i++){int y=TOG_Y+i*TOG_ROW;
     if(mx>=LM+TOG_X&&mx<=LM+TOG_X+TOG_W&&my>=y+6&&my<=y+6+TOG_SH)return i;}return-1;}
 static int hs(int mx,int my){for(int i=0;i<3;i++){int y=TOG_Y+i*TOG_ROW;
@@ -261,7 +261,12 @@ static LRESULT CALLBACK wndp(HWND hw,UINT msg,WPARAM wp,LPARAM lp){
     case WM_LBUTTONDOWN:{if(!ui)break;int mx=LOWORD(lp),my=HIWORD(lp);
         /* Power */
         if(mx>=14&&mx<=42&&my>=10&&my<=38){ui->power=!ui->power;save_cfg(ui);
-            /* TODO: send power on/off to processor */
+            /* Send power state to processor via control pipe */
+            if(ui->ctrl_pipe==INVALID_HANDLE_VALUE)cc(ui);
+            if(ui->ctrl_pipe!=INVALID_HANDLE_VALUE){
+                DWORD c=DDP_CMD_SET_POWER,p=(DWORD)ui->power;
+                cpw(ui->ctrl_pipe,&c,4);cpw(ui->ctrl_pipe,&p,4);
+                DWORD s=0;cpr(ui->ctrl_pipe,&s,4);}
             InvalidateRect(hw,NULL,FALSE);return 0;}
         /* Reset */
         if(hr(mx,my)){extern const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT];

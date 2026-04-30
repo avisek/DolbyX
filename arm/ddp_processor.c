@@ -39,7 +39,8 @@ typedef void *(*Ds1apBufInit_t)(void *, int, int, int);
 /* ── Global gain (set via CLI args for offline processing) ────────── */
 
 float g_pre_gain  = 1.0f;  /* 0 dB default (no pre-gain) */
-float g_post_gain = 1.0f;     /*  0.0 dB default */
+float g_post_gain = 1.0f;  /* 0 dB default */
+int   g_power     = 1;     /* 1 = processing, 0 = bypass */
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
@@ -361,6 +362,17 @@ static int handle_command(uint32_t cmd) {
     }
 
     /* Unknown command */
+    if (cmd == DDP_CMD_SET_POWER) {
+        uint32_t power = 0;
+        if (read_exact(STDIN_FILENO, &power, sizeof(power)) < 0) return -1;
+        g_power = (power != 0) ? 1 : 0;
+        log_msg("[DDP] Power: %s\n", g_power ? "ON" : "OFF (bypass)");
+        uint32_t status = 0;
+        write_exact(STDOUT_FILENO, &status, sizeof(status));
+        return 0;
+    }
+
+    /* Unknown command */
     log_msg("[DDP] Unknown command: 0x%08X\n", cmd);
     return 0;
 }
@@ -498,10 +510,15 @@ int main(int argc, char *argv[]) {
         memset(pcm_out, 0, pcm_bytes);
 
         /* Process */
-        audio_buffer_t in_buf  = { .frameCount = frame_count, .s16 = pcm_in };
-        audio_buffer_t out_buf = { .frameCount = frame_count, .s16 = pcm_out };
-        ret = (*g_handle)->process(g_handle, &in_buf, &out_buf);
-        if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
+        if (g_power) {
+            audio_buffer_t in_buf  = { .frameCount = frame_count, .s16 = pcm_in };
+            audio_buffer_t out_buf = { .frameCount = frame_count, .s16 = pcm_out };
+            ret = (*g_handle)->process(g_handle, &in_buf, &out_buf);
+            if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
+        } else {
+            /* Power OFF — bypass (passthrough) */
+            memcpy(pcm_out, pcm_in, pcm_bytes);
+        }
 
         /* Post-gain */
         if (g_post_gain != 1.0f) {

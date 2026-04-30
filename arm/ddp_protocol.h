@@ -122,3 +122,11 @@ enum {
 
 
 
+
+/*
+ * CMD_SET_POWER: Enable/disable DDP processing (bypass).
+ *   Client → Proc: uint32 0xFFFFFFED + uint32 power (0=off, 1=on)
+ *   Proc → Client: uint32 status
+ */
+#define DDP_CMD_SET_POWER  0xFFFFFFED
+
