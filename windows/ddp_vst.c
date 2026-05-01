@@ -47,6 +47,9 @@ const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
     [DDP_PROFILE_USER2] = {
         2, 0, 48, 48, 200, 2, 5, 0, 0, 0, 10, 0, 7, 0, 4, 2, 144, 2, 0, 0
     },
+    [DDP_PROFILE_OFF] = {
+        2, 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0
+    },
 };
 
 /* ── Forward declarations ─────────────────────────────────────────── */
@@ -86,7 +89,7 @@ static void load_saved_state(DDPState *st) {
     st->saved_profile = GetPrivateProfileIntA("DolbyX", "profile",
                                                DDP_PROFILE_MUSIC, ini);
     st->saved_power = GetPrivateProfileIntA("DolbyX", "power", 1, ini);
-    if (st->saved_profile < 0 || st->saved_profile >= DDP_PROFILE_COUNT)
+    if (st->saved_profile < 0 || st->saved_profile >= DDP_PROFILE_USER_COUNT)
         st->saved_profile = DDP_PROFILE_MUSIC;
 }
 
@@ -152,14 +155,14 @@ static void apply_saved_state(DDPState *st) {
         p_read(st->pipe, &status, 4);
     }
 
-    /* If power was off, tell processor to bypass */
+    /* If power was off, switch to OFF profile (graceful fade) */
     if (!st->saved_power) {
-        cmd = DDP_CMD_SET_POWER;
-        DWORD pw = 0;
+        cmd = DDP_CMD_SET_PROFILE;
+        DWORD off_pid = DDP_PROFILE_OFF;
         p_write(st->pipe, &cmd, 4);
-        p_write(st->pipe, &pw, 4);
+        p_write(st->pipe, &off_pid, 4);
         p_read(st->pipe, &status, 4);
-        logf_(st, "Power OFF — processor bypass\n");
+        logf_(st, "Power OFF — applied OFF profile\n");
     }
 }
 

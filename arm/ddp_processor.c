@@ -40,7 +40,6 @@ typedef void *(*Ds1apBufInit_t)(void *, int, int, int);
 
 float g_pre_gain  = 1.0f;  /* 0 dB default (no pre-gain) */
 float g_post_gain = 1.0f;  /* 0 dB default */
-int   g_power     = 1;     /* 1 = processing, 0 = bypass */
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
@@ -230,6 +229,10 @@ static const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
         144, 2,
         0, 0
     },
+    /* OFF: all effects disabled — graceful fade to unity */
+    [DDP_PROFILE_OFF] = {
+        2, 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0
+    },
 };
 
 /* Current parameter values (mutable — updated by SET_PARAM) */
@@ -266,6 +269,7 @@ static const int g_profile_ieq_preset[DDP_PROFILE_COUNT] = {
     DDP_IEQ_RICH,     /* Voice */
     DDP_IEQ_RICH,     /* Custom 1 */
     DDP_IEQ_RICH,     /* Custom 2 */
+    DDP_IEQ_OPEN,     /* Off (doesn't matter, IEQ disabled) */
 };
 
 static int g_current_ieq_preset = -1; /* -1 = manual */
@@ -357,17 +361,6 @@ static int handle_command(uint32_t cmd) {
         } else {
             status = 1;
         }
-        write_exact(STDOUT_FILENO, &status, sizeof(status));
-        return 0;
-    }
-
-    /* Unknown command */
-    if (cmd == DDP_CMD_SET_POWER) {
-        uint32_t power = 0;
-        if (read_exact(STDIN_FILENO, &power, sizeof(power)) < 0) return -1;
-        g_power = (power != 0) ? 1 : 0;
-        log_msg("[DDP] Power: %s\n", g_power ? "ON" : "OFF (bypass)");
-        uint32_t status = 0;
         write_exact(STDOUT_FILENO, &status, sizeof(status));
         return 0;
     }
@@ -510,15 +503,10 @@ int main(int argc, char *argv[]) {
         memset(pcm_out, 0, pcm_bytes);
 
         /* Process */
-        if (g_power) {
-            audio_buffer_t in_buf  = { .frameCount = frame_count, .s16 = pcm_in };
-            audio_buffer_t out_buf = { .frameCount = frame_count, .s16 = pcm_out };
-            ret = (*g_handle)->process(g_handle, &in_buf, &out_buf);
-            if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
-        } else {
-            /* Power OFF — bypass (passthrough) */
-            memcpy(pcm_out, pcm_in, pcm_bytes);
-        }
+        audio_buffer_t in_buf  = { .frameCount = frame_count, .s16 = pcm_in };
+        audio_buffer_t out_buf = { .frameCount = frame_count, .s16 = pcm_out };
+        ret = (*g_handle)->process(g_handle, &in_buf, &out_buf);
+        if (ret != 0) memcpy(pcm_out, pcm_in, pcm_bytes);
 
         /* Post-gain */
         if (g_post_gain != 1.0f) {

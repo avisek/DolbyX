@@ -102,7 +102,9 @@ enum {
 #define DDP_PROFILE_VOICE   3
 #define DDP_PROFILE_USER1   4
 #define DDP_PROFILE_USER2   5
-#define DDP_PROFILE_COUNT   6
+#define DDP_PROFILE_OFF     6   /* All effects disabled — used for power toggle */
+#define DDP_PROFILE_COUNT   7   /* Total including OFF */
+#define DDP_PROFILE_USER_COUNT 6 /* User-selectable profiles (excludes OFF) */
 
 /* ── IEQ Presets ──────────────────────────────────────────────────── */
 
@@ -123,10 +125,4 @@ enum {
 
 
 
-/*
- * CMD_SET_POWER: Enable/disable DDP processing (bypass).
- *   Client → Proc: uint32 0xFFFFFFED + uint32 power (0=off, 1=on)
- *   Proc → Client: uint32 status
- */
-#define DDP_CMD_SET_POWER  0xFFFFFFED
 
