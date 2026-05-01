@@ -1,259 +1,447 @@
-# DolbyX Cross-Platform Implementation — Review & Plan
+# DolbyX Cross-Platform Implementation Plan
 
-## Spec Review
+## Goal
 
-### Section 1: AF_UNIX Sockets — CRITICAL ISSUE
+Expand DolbyX from Windows-only to Windows, Linux, NixOS, and macOS. Unify the
+core daemon, replace the VST UI with a Web UI, and keep platform-specific code
+minimal.
 
-The spec proposes replacing named pipes with AF_UNIX sockets everywhere.
-This has a **showstopper on Windows**: AF_UNIX sockets use the Winsock API
-(`ws2_32.dll`), the same network stack that gives audiodg.exe error 10013
-(WSAEACCES) on TCP connections. We've empirically proven audiodg.exe cannot
-make socket connections of any kind — it's a Windows security boundary on
-the audio service account.
+---
 
-**Correction:** Keep named pipes for the Windows VST ↔ daemon audio path
-(the only path that crosses from audiodg.exe). Use Unix sockets for:
-- Control connections (Web UI WebSocket → daemon)
-- Linux/macOS audio plugin ↔ daemon (no audiodg.exe restriction)
-- Daemon ↔ processor (same process, any IPC works)
+## Architecture Overview
 
-Recommended approach:
 ```
-Windows:
-  audiodg.exe → \\.\pipe\DolbyX (named pipe, works with LOCAL SERVICE)
-  Browser     → localhost:9876   (HTTP/WebSocket, no restrictions)
-
-Linux/macOS:
-  LV2/AU plugin → /tmp/dolbyx.sock (AF_UNIX)
-  Browser       → localhost:9876    (HTTP/WebSocket)
+┌──────────────────────────────────────────────────────────────────┐
+│  Browser (any platform)                                          │
+│  http://localhost:9876                                            │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Web UI — profiles, toggles, EQ, SVG visualizer            │  │
+│  └────────────┬───────────────────────────────────────────────┘  │
+│               │ WebSocket ws://localhost:9876/ws                  │
+└───────────────┼──────────────────────────────────────────────────┘
+                │
+┌───────────────┼──────────────────────────────────────────────────┐
+│  dolbyx daemon                                                    │
+│  ┌────────────┴──────────┐  ┌──────────────────────────────┐    │
+│  │ HTTP + WebSocket      │  │ Audio IPC                     │    │
+│  │ (control, visualizer) │  │ Win: \\.\pipe\DolbyX          │    │
+│  │ localhost:9876        │  │ Unix: /tmp/dolbyx.sock         │    │
+│  └───────────────────────┘  └──────────────┬───────────────┘    │
+│                                             │                    │
+│  ┌──────────────────────────────────────────┴──────────────────┐ │
+│  │ Processor (QEMU / Unicorn)                                  │ │
+│  │ libdseffect.so → 28-node QMF DSP pipeline                  │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-The daemon abstracts this: it accepts audio from whatever platform transport
-is appropriate, and the control path is always HTTP/WebSocket.
+---
 
-### Section 2: dolbyx Daemon — GOOD
+## Key Decisions
 
-Renaming from "bridge" to "dolbyx" makes sense. The daemon's responsibilities
-are well-scoped. One addition: on Linux, the daemon can spawn `qemu-arm-static`
-directly (no WSL needed), which simplifies the startup significantly.
+- The central daemon is renamed from `dolbyx-bridge` to **`dolbyx`**. The
+  "bridge" term was Windows-specific. On all platforms it is simply the main
+  background process.
 
-On macOS with Apple Silicon, QEMU user-mode does NOT work (it translates
-Linux syscalls, not macOS syscalls). macOS support requires either:
-- Unicorn Engine (embedded ARM emulation — no OS dependency)
-- Rosetta 2 won't help (ARM32 → ARM64 is not what Rosetta does)
-- Cross-compiled processor using a compatibility layer
+- **IPC is hybrid, not unified.** AF_UNIX sockets use Winsock on Windows, which
+  audiodg.exe (LOCAL SERVICE) cannot access (error 10013). Named pipes bypass
+  Winsock via the kernel filesystem stack. Therefore:
 
-This is a real blocker for macOS. The Unicorn Engine path (from our earlier
-roadmap) becomes the prerequisite for macOS. Recommend: implement Unicorn
-before macOS, or ship macOS as "Linux VM required" initially.
+  | Path                  | Windows                        | Linux / macOS                  |
+  |-----------------------|--------------------------------|--------------------------------|
+  | Plugin → daemon audio | Named pipe `\\.\pipe\DolbyX`   | AF_UNIX `/tmp/dolbyx.sock`     |
+  | Browser → daemon ctrl | HTTP/WS `localhost:9876`       | HTTP/WS `localhost:9876`       |
 
-### Section 3: Web UI — GOOD
+- The Web UI is served by the daemon over HTTP + WebSocket on `localhost:9876`.
+  The daemon logs a clickable URL on startup; it does not auto-launch the
+  browser.
 
-Spec is solid. Minor improvements:
+- The existing VST GDI editor is removed entirely. The VST opens the Web UI in
+  the system browser via `ShellExecuteW`.
 
-- esbuild is the right choice for bundling. The `xxd -i` approach for
-  embedding is elegant — single binary, no runtime file dependencies.
+- The daemon is a **system-level process** for consistency with EqualizerAPO
+  (system APO), audiodg.exe (LOCAL SERVICE), PipeWire system graph, and macOS
+  AudioServerPlugin (HAL).
 
-- Suggest adding: the Web UI should work in **offline mode** — once loaded,
-  the page should function even if the HTTP server restarts (WebSocket
-  auto-reconnects). This makes the UI resilient to daemon restarts.
+  | Platform | Mechanism                                                |
+  |----------|----------------------------------------------------------|
+  | Windows  | Windows Service (`sc create`, runs as `LOCAL SERVICE`)   |
+  | Linux    | systemd system service (`systemd.services`)              |
+  | macOS    | LaunchDaemon (`/Library/LaunchDaemons/com.dolbyx.plist`) |
 
-- The macOS-specific device selector is well-designed (opt-in, not automatic).
+- Config format is **TOML**, parsed with `tomlc17` (single `.c` + `.h`, C99,
+  maintained successor to `tomlc99`). System-level paths:
 
-### Section 4: VST Editor Replacement — GOOD
+  | Platform | Path                                         |
+  |----------|----------------------------------------------|
+  | Windows  | `C:\ProgramData\DolbyX\config.toml`          |
+  | Linux    | `/var/lib/dolbyx/config.toml`                |
+  | macOS    | `/Library/Application Support/DolbyX/config.toml` |
 
-Returning 0×0 from effEditGetRect and using ShellExecute is correct.
-One nuance: some VST hosts may not call effEditOpen if the rect is 0×0.
-An alternative is to return a small rect (e.g., 200×30) with a single
-"Open DolbyX UI" button that launches the browser.
+  The daemon owns all reads and writes. Plugins never touch the config directly.
 
-### Section 5: Linux/NixOS — GOOD with NOTES
+- The project is distributed as a **Nix flake** exposing `nixosModules.default`
+  and `darwinModules.default`. No standalone package outputs.
 
-**LV2 plugin:** Good choice. The LV2 format is simpler than VST and has
-first-class PipeWire support. The plugin only needs:
-- `lv2:AudioPort` stereo in/out
-- Unix socket connection to daemon
-- Forward audio, receive processed audio
+---
 
-**PipeWire filter-chain:** This is the right integration point. The config
-fragment loads the LV2 as a virtual sink. Users just select it as output.
+## 1. dolbyx Daemon
 
-**NixOS module:** The design is correct. `libdseffect.so` bundled in-repo
-means no manual setup. One note: the flake should expose the daemon as a
-package too (`packages.x86_64-linux.dolbyx`) for non-NixOS Nix users.
+The unified daemon replaces `dolbyx-bridge.exe`. Responsibilities:
 
-**QEMU on Linux:** No WSL needed — `qemu-arm-static` runs natively.
-The daemon just spawns it directly. Much simpler than Windows.
+- Accept audio connections from platform-specific plugins
+- Manage QEMU/Unicorn processor lifecycle
+- Serve Web UI at `GET /`
+- WebSocket endpoint for bidirectional control + visualizer streaming
+- Own config.toml persistence
+- On macOS only: CoreAudio device enumeration endpoints
 
-### Section 6: macOS — AMBITIOUS but CORRECT
+On startup, print: `DolbyX running → http://localhost:9876`
 
-**AudioServerPlugin:** This is the right approach (not AudioUnit, not
-CoreAudio aggregate device — AudioServerPlugin is the proper way to create
-a virtual audio device). The complexity is high but the design is sound.
-
-**libASPL:** Good reference. It provides a C++ wrapper around the HAL plugin
-API that handles most of the boilerplate.
-
-**nix-darwin module:** The `system.activationScripts` approach for the HAL
-driver is the pragmatic solution. The self-cleaning logic (install on
-enable=true, remove on enable=false) is the right pattern.
-
-**Blocker: ARM emulation on macOS.** As noted above, QEMU user-mode is
-Linux-only. The Unicorn Engine integration should be done before macOS.
-
-### Section 7: Project Structure — GOOD
-
-Clean separation. The `daemon/` directory containing the unified daemon
-code is the right abstraction. Suggest adding:
+### Daemon source structure
 
 ```
 daemon/
 ├── main.c           # Entry point, platform detection
 ├── processor.c      # QEMU/Unicorn processor management
-├── http.c           # HTTP server
-├── ws.c             # WebSocket server
-├── ipc_unix.c       # AF_UNIX socket server (Linux/macOS)
+├── http.c           # HTTP server (serve embedded HTML)
+├── ws.c             # WebSocket server (RFC 6455)
 ├── ipc_pipe.c       # Named pipe server (Windows)
-└── platform.h       # Platform-specific #ifdefs
+├── ipc_unix.c       # AF_UNIX socket server (Linux/macOS)
+├── config.c         # TOML config read/write (tomlc17)
+└── platform.h       # Platform #ifdefs
 ```
-
-### Missing from Spec
-
-1. **Unicorn Engine** — needed before macOS (QEMU is Linux-only for
-   user-mode). Should be a dedicated phase.
-
-2. **State persistence** — the current DolbyX.ini approach works. Should
-   the daemon own persistence (shared across platforms) or keep it
-   per-client? Recommend: daemon owns a single `config.json`, Web UI
-   reads/writes it via WebSocket.
-
-3. **Multiple simultaneous outputs** — on Linux, PipeWire can have multiple
-   sinks. Should DolbyX support processing for multiple outputs?
-   Recommend: single processor instance, PipeWire handles routing.
-
-4. **Latency reporting** — LV2 and VST both support reporting processing
-   latency. Should document the expected values.
 
 ---
 
-## Phased Implementation Plan
+## 2. Web UI
+
+### Source structure
+
+Lives in `ui/` as separate HTML, CSS, JS files. Future migration to TypeScript
+and SCSS anticipated; build pipeline designed accordingly.
+
+### Build pipeline
+
+`make ui` runs esbuild to bundle and minify all sources into `ui/dist/bundle.html`.
+`xxd -i` generates `ui/dist/ui_bundle.h`, included by the daemon as `const char[]`.
+The daemon binary is a single self-contained file with no runtime UI dependencies.
+
+### Interface
+
+Single-page layout — profile selector and editor unified on one screen. Dark theme,
+Dolby cyan accent. The UI works in offline mode: once loaded, WebSocket auto-reconnects
+on daemon restart without requiring a page refresh.
+
+**macOS-specific controls** (absent on Windows and Linux):
+- Output device selector (populated from daemon CoreAudio enumeration)
+- Button to set DolbyX as system default output (opt-in, not automatic)
+- Checkbox for automatic output switching on device plug/unplug (off by default)
+
+Device routing on Windows and Linux is handled transparently by EqualizerAPO and
+PipeWire respectively — no device controls needed.
+
+### Visualizer — SVG-Based
+
+The visualizer is a single `<svg>` with layered `<g>` groups:
+
+**`<defs>` block:**
+- `<radialGradient id="bg-gradient">` — dark navy center blooming to near-black
+- `<pattern id="grid">` — repeating horizontal + vertical lines. Bar widths are
+  integer multiples of the grid cell so bars snap naturally
+- `<clipPath id="above-curve">` — EQ curve path extended to top edge, forming a
+  closed region above the curve for highlight clipping
+
+**`<g>` layer stack (bottom to top):**
+1. `background` — gradient rect + grid rect
+2. `spectrum` — dim semi-transparent teal `<rect>` per band, heights updated at
+   ~30fps from WebSocket visualizer data
+3. `spectrum-highlight` — identical rects at full brightness, clipped by
+   `above-curve` so only the portion above the EQ curve is bright
+4. `eq-curve` — single `<path>` drawn as Catmull-Rom spline through control points
+5. `handles` — `<circle>` per EQ band with pointer events for dragging
+
+Bar heights quantized to grid cell height for a discrete "big pixel" appearance.
+Updates are immediate snaps, not smooth interpolation.
+
+---
+
+## 3. VST Plugin (Windows Only)
+
+Remove the GDI editor entirely (`ddp_ui.c`, `ddp_ui.h` deleted).
+
+`effEditOpen` launches the Web UI and dismisses the VST popup:
+
+```c
+case effEditOpen: {
+    ShellExecuteW(NULL, L"open", WEBUI_URL, NULL, NULL, SW_SHOWNORMAL);
+    HWND root = GetAncestor((HWND)ptr, GA_ROOT);
+    char title[256] = {0};
+    GetWindowTextA(root, title, sizeof(title));
+    if (strstr(title, "DolbyX") != NULL)
+        PostMessage(root, WM_CLOSE, 0, 0);
+    return 1;
+}
+```
+
+`effEditGetRect` returns 0×0. `effFlagsHasEditor` kept so EqualizerAPO shows
+"Open Panel". `effEditClose` and `effEditIdle` are no-ops.
+
+Plugin name strings updated to "DolbyX" (dropping "DDP"). Link with `-lshell32`
+instead of `-lmsimg32 -lcomdlg32`.
+
+Audio processing continues over named pipe as before.
+
+---
+
+## 4. Linux / NixOS: LV2 Plugin + PipeWire
+
+`libdolbyx.lv2` — minimal LV2 plugin:
+- `lv2:AudioPort` stereo in/out
+- Connects to daemon via AF_UNIX socket at `/tmp/dolbyx.sock`
+- Forwards audio buffers, returns processed audio
+- `.ttl` manifest describing ports
+
+PipeWire `filter-chain` config fragment loads the LV2 as a virtual sink and
+sets it as system default. PipeWire handles all device switching natively.
+
+On Linux, the daemon spawns `qemu-arm-static` directly (no WSL needed).
+
+### NixOS flake module (`nixosModules.default`)
+
+`libdseffect.so` is bundled in the repository. No manual path configuration.
+
+```nix
+{
+  inputs.dolbyx.url = "github:avisek/DolbyX";
+  imports = [ inputs.dolbyx.nixosModules.default ];
+  services.dolbyx.enable = true;
+}
+```
+
+Declares:
+- PipeWire filter-chain config via `services.pipewire.extraConfig`
+- `dolbyx` as `systemd.services` (system-level) with `Restart = always`
+
+`nixos-rebuild switch` fully configures the system. No manual steps.
+
+---
+
+## 5. Unicorn Engine (macOS Prerequisite)
+
+QEMU user-mode is a Linux syscall translator — it cannot run on macOS. The
+Unicorn Engine uses the same TCG JIT backend as QEMU but provides a bare
+CPU emulator API with no OS dependency.
+
+Implementation:
+- Custom ELF loader (parse libdseffect.so sections, map into Unicorn memory)
+- ARM stub resolver (hook android:: imports to our C++ stubs)
+- EffectCreate / Effect_process invocation via Unicorn API
+- Performance target: >3× realtime for 48kHz stereo
+
+Unicorn also eliminates the QEMU dependency on Windows (optional improvement)
+and enables a future standalone single-DLL VST.
+
+---
+
+## 6. macOS: AudioServerPlugin + nix-darwin
+
+`DolbyX.driver` — macOS AudioServerPlugin virtual audio device, using libASPL
+or BGMDriver as reference:
+- Appears as stereo output in CoreAudio
+- Does NOT set itself as system default automatically (opt-in via Web UI)
+- Captures audio → forwards to daemon via AF_UNIX → returns processed audio
+- Device enumeration exposed to Web UI for output selection
+
+### nix-darwin flake module (`darwinModules.default`)
+
+```nix
+{
+  inputs.dolbyx.url = "github:avisek/DolbyX";
+  imports = [ inputs.dolbyx.darwinModules.default ];
+  services.dolbyx.enable = true;
+}
+```
+
+HAL driver installation uses `system.activationScripts` with self-cleaning logic:
+
+```nix
+system.activationScripts.dolbyx.text = ''
+  DEST="/Library/Audio/Plug-Ins/HAL/DolbyX.driver"
+  ${if cfg.enable then ''
+    if ! diff -rq "${driverPkg}" "$DEST" &>/dev/null 2>&1; then
+      rm -rf "$DEST"
+      cp -r "${driverPkg}" "$DEST"
+      xattr -dr com.apple.quarantine "$DEST"
+      launchctl kickstart -k system/com.apple.audio.coreaudiod || true
+    fi
+  '' else ''
+    if [ -d "$DEST" ]; then
+      rm -rf "$DEST"
+      launchctl kickstart -k system/com.apple.audio.coreaudiod || true
+    fi
+  ''}
+'';
+```
+
+Setting `enable = false` and running `darwin-rebuild switch` cleanly removes the
+driver. LaunchDaemon for the daemon is fully declarative via `launchd.daemons`.
+
+`darwin-rebuild switch` installs the driver, registers the LaunchDaemon, and
+starts the daemon. No code signing required.
+
+Non-Nix manual installation documented in `docs/install-macos.md`.
+
+---
+
+## 7. Project Structure
+
+```
+DolbyX/
+├── arm/                    # ARM processor + stubs (unchanged)
+├── daemon/                 # dolbyx daemon (all platforms)
+│   ├── main.c
+│   ├── processor.c
+│   ├── http.c
+│   ├── ws.c
+│   ├── ipc_pipe.c          # Windows named pipe
+│   ├── ipc_unix.c          # Linux/macOS AF_UNIX
+│   ├── config.c            # TOML persistence
+│   └── platform.h
+├── windows/
+│   └── vst/                # VST2 plugin (audio pipe + browser launch)
+├── linux/
+│   ├── lv2/                # libdolbyx.lv2 + .ttl manifest
+│   └── pipewire/           # filter-chain config fragment
+├── macos/
+│   └── driver/             # DolbyX.driver AudioServerPlugin
+├── ui/
+│   ├── src/                # HTML, CSS, JS (future: TS, SCSS)
+│   ├── dist/               # bundle.html + ui_bundle.h (gitignored)
+│   └── build.js            # esbuild bundler
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── DDP_Reverse_Engineering_Analysis.md
+│   ├── UI_DESIGN.md
+│   ├── UI_ARCHITECTURE.md
+│   ├── CROSS_PLATFORM_PLAN.md
+│   └── install-macos.md
+├── nix/
+│   ├── nixosModules/       # NixOS flake module
+│   └── darwinModules/      # nix-darwin flake module
+├── flake.nix
+└── flake.lock
+```
+
+---
+
+## Out of Scope
+
+- Code signing / notarization
+- Unicorn Engine embedding as standalone VST (no bridge)
+- Per-profile headphone EQ presets
+- Windows ARM support
+- Packaging (`.pkg`, `.deb`, `.rpm`, AUR)
+- TypeScript / SCSS migration (build pipeline anticipates it)
+
+---
+
+## Phased Implementation
 
 ### Phase 0: Repo Restructure
 **Dependencies:** None
 **Effort:** 1 session
 
-- Create new directory layout (`daemon/`, `ui/`, `linux/`, `macos/`, `nix/`)
-- Move existing code:
+- Create directory layout: `daemon/`, `ui/`, `linux/`, `macos/`, `nix/`
+- Move code:
   - `windows/dolbyx-bridge.c` → `daemon/main.c` (refactored)
   - `windows/ddp_vst.c` → `windows/vst/ddp_vst.c`
-  - `windows/ddp_ui.c` + `ddp_ui.h` → removed (replaced by Web UI)
+  - Remove `ddp_ui.c`, `ddp_ui.h` (replaced by Web UI)
 - Update build scripts and README
-- Commit: clean structure, everything still builds and works
+- Everything still builds and works after restructure
 
 ### Phase 1: Daemon HTTP + WebSocket Server
 **Dependencies:** Phase 0
-**Effort:** 1-2 sessions
+**Effort:** 2 sessions
 
-- Add minimal HTTP server to daemon (serve single HTML page)
-- Add WebSocket server (RFC 6455 handshake + framing)
-- Define JSON control protocol:
-  - `set_profile`, `set_param`, `set_ieq`, `power`, `get_state`
-  - Server→client: `state`, `vis`, `ack`
-- Wire WebSocket commands to existing pipe protocol (CMD_SET_PARAM etc.)
-- Add visualizer data pump thread (30fps CMD_GET_VIS → WS broadcast)
-- Test: curl http://localhost:9876 returns HTML
-- Test: wscat connects and can switch profiles
+- Minimal HTTP server in daemon (~100 lines, serve single page)
+- WebSocket server (RFC 6455 handshake + framing, ~200 lines)
+- JSON control protocol:
+  - Client → Server: `set_profile`, `set_param`, `set_ieq`, `power`, `get_state`
+  - Server → Client: `state`, `vis`, `ack`
+- Wire WebSocket commands to existing pipe protocol
+- Visualizer data pump thread (30fps CMD_GET_VIS → WS broadcast)
+- TOML config persistence (tomlc17)
 
 ### Phase 2: Web UI — Core Controls
 **Dependencies:** Phase 1
 **Effort:** 2-3 sessions
 
 - HTML/CSS/JS single page:
-  - Dark theme, Dolby cyan accent
-  - Profile selector (6 buttons)
-  - Power toggle
+  - Profile selector (6 buttons), power toggle
   - Three toggle rows with amount sliders
   - IEQ mode selector (Open/Rich/Focused/Manual)
   - Reset button
-- WebSocket integration (auto-connect, auto-reconnect)
-- State sync (load current state on connect)
-- Responsive layout (works on any screen size)
-- Keyboard accessible (tab navigation, space to toggle)
-- Build pipeline: esbuild bundle → xxd → embedded C header
-- Test: full control of live audio from browser
+- WebSocket auto-connect + auto-reconnect on daemon restart
+- State sync (full state load on connect)
+- Responsive layout, keyboard accessible
+- esbuild → xxd → embedded C header build pipeline
 
 ### Phase 3: Web UI — Visualizer + EQ
 **Dependencies:** Phase 2
 **Effort:** 2-3 sessions
 
-- Canvas-based 20-band frequency visualizer
-  - Smooth bar animation with decay
-  - Gradient fill (dark cyan → bright cyan)
-- EQ curve overlay (Catmull-Rom spline)
-- Draggable n-band EQ knobs (configurable band count)
-  - SVG circle handles with pointer events
-  - Real-time graphic EQ update via WebSocket
+- SVG-based visualizer with layered rendering:
+  - Background gradient + grid pattern
+  - Spectrum bars (quantized to grid, dim + highlight layers)
+  - EQ curve (Catmull-Rom spline `<path>`)
+  - Draggable handles (`<circle>` with pointer events)
+  - `<clipPath>` intersection highlight
+- Configurable n-band EQ (user chooses band count)
 - IEQ target curve display (when in preset mode)
-- CSS transitions for smooth state changes
-- Test: drag EQ knobs → hear frequency change in real-time
+- Real-time graphic EQ updates via WebSocket
 
-### Phase 4: VST Simplification + Daemon Polish
+### Phase 4: VST Simplification
 **Dependencies:** Phase 2
 **Effort:** 1 session
 
-- Remove GDI editor (ddp_ui.c, ddp_ui.h)
-- VST effEditOpen → ShellExecute browser to localhost:9876
-- VST effEditGetRect → small rect with "Open UI" fallback
-- Daemon: config.json persistence (replaces DolbyX.ini)
-- Daemon: graceful shutdown, signal handling
-- Daemon: auto-detect WSL path on Windows
+- Remove GDI editor files
+- VST effEditOpen → ShellExecuteW + smart popup dismissal
+- effEditGetRect → 0×0
+- Update link flags (`-lshell32`, remove `-lmsimg32 -lcomdlg32`)
+- Plugin name → "DolbyX"
 - Update setup scripts and README
 
 ### Phase 5: Linux / NixOS
-**Dependencies:** Phase 1 (daemon with HTTP/WS)
+**Dependencies:** Phase 1
 **Effort:** 2-3 sessions
 
-- Daemon Linux build (no WSL, direct qemu-arm-static spawn)
-- LV2 plugin (`linux/lv2/`):
-  - Stereo in/out AudioPort
-  - Unix socket connection to daemon
-  - Audio buffer forwarding
-  - `.ttl` manifest
+- Daemon Linux build (direct qemu-arm-static, no WSL)
+- LV2 plugin: AF_UNIX socket, stereo AudioPort, `.ttl` manifest
 - PipeWire filter-chain config fragment
-- NixOS flake module:
-  - `services.dolbyx.enable`
-  - systemd user service for daemon
-  - PipeWire config via `services.pipewire.extraConfig`
-  - Package derivation for daemon + LV2 + ARM binaries
-- flake.nix with nixosModules.default + packages
-- Test: `nixos-rebuild switch` → DolbyX active on all audio
+- NixOS flake module: systemd.services, pipewire.extraConfig
+- flake.nix with nixosModules.default
+- Test: `nixos-rebuild switch` → DolbyX active system-wide
 
-### Phase 6: Unicorn Engine (Prerequisite for macOS)
+### Phase 6: Unicorn Engine
 **Dependencies:** Phase 1
 **Effort:** 3-5 sessions
 
 - Custom ELF loader for libdseffect.so
-- ARM stub resolver (android:: symbols → our stubs)
+- ARM stub resolver (android:: symbols)
 - Unicorn ARM emulator integration
 - EffectCreate / Effect_process via Unicorn API
-- Performance validation (must be >3× realtime for 48kHz stereo)
-- Package as library usable by daemon on all platforms
-- This eliminates QEMU dependency for macOS (and optionally Windows)
+- Performance validation (>3× realtime at 48kHz stereo)
+- Packaged as library for daemon on all platforms
 
 ### Phase 7: macOS
-**Dependencies:** Phase 6 (Unicorn) + Phase 1 (daemon)
+**Dependencies:** Phase 6 + Phase 1
 **Effort:** 3-5 sessions
 
-- AudioServerPlugin virtual device (DolbyX.driver):
-  - Stereo output device visible in CoreAudio
-  - Captures audio, forwards to daemon via Unix socket
-  - Plays processed audio to selected real output
-  - Device enumeration endpoint for Web UI
-- Web UI: macOS-specific device selector + controls
-- nix-darwin module:
-  - activationScripts for HAL driver install/remove
-  - launchd.agents for daemon
-- Manual install docs for non-Nix users
+- AudioServerPlugin virtual device (DolbyX.driver)
+- Web UI macOS device selector
+- nix-darwin module: activationScripts + launchd.daemons
+- Manual install docs (docs/install-macos.md)
 - Test: `darwin-rebuild switch` → DolbyX in Sound preferences
 
 ---
@@ -262,34 +450,23 @@ daemon/
 
 ```
 Phase 0 (restructure)
-  ├── Phase 1 (daemon HTTP/WS)
-  │     ├── Phase 2 (Web UI core)
-  │     │     ├── Phase 3 (visualizer + EQ)
-  │     │     └── Phase 4 (VST simplify)
-  │     ├── Phase 5 (Linux/NixOS)
-  │     └── Phase 6 (Unicorn Engine)
-  │           └── Phase 7 (macOS)
-  └── (independent)
+  └── Phase 1 (daemon HTTP/WS)
+        ├── Phase 2 (Web UI core)
+        │     ├── Phase 3 (visualizer + EQ)
+        │     └── Phase 4 (VST simplify)
+        ├── Phase 5 (Linux/NixOS)
+        └── Phase 6 (Unicorn Engine)
+              └── Phase 7 (macOS)
 ```
 
-Phases 2-5 can partially overlap. Phase 6 blocks Phase 7 entirely.
+Phases 2-5 can partially overlap. Phase 6 fully blocks Phase 7.
 
 ---
 
-## Estimated Total
+## Release Plan
 
-| Phase | Sessions | Calendar |
-|-------|----------|----------|
-| 0: Restructure | 1 | Day 1 |
-| 1: Daemon HTTP/WS | 2 | Days 2-3 |
-| 2: Web UI core | 3 | Days 4-6 |
-| 3: Visualizer + EQ | 3 | Days 7-9 |
-| 4: VST simplify | 1 | Day 10 |
-| 5: Linux/NixOS | 3 | Days 11-13 |
-| 6: Unicorn | 5 | Days 14-18 |
-| 7: macOS | 5 | Days 19-23 |
-| **Total** | **~23 sessions** | |
-
-Phases 0-4 (Windows complete + Web UI) can ship as v2.0.
-Phase 5 adds Linux, shipping as v2.1.
-Phases 6-7 add macOS, shipping as v3.0.
+| Version | Milestone | Phases |
+|---------|-----------|--------|
+| v2.0 | Windows + Web UI | 0, 1, 2, 3, 4 |
+| v2.1 | Linux / NixOS | 5 |
+| v3.0 | macOS | 6, 7 |
