@@ -1,12 +1,12 @@
 /*
- * ddp_vst.c — DolbyX VST2 Plugin with Editor UI
+ * ddp_vst.c — DolbyX VST2 Plugin
  *
- * Named pipe audio bridge + GDI editor window for live parameter control.
- * Connects to \\.\pipe\DolbyX served by dolbyx-bridge.exe.
+ * Audio processing via named pipe to the DolbyX daemon.
+ * No built-in editor — Web UI is accessed via browser.
  *
  * Build:
  *   x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll \
- *     ddp_vst.c ddp_ui.c -static -lgdi32 -lmsimg32 -lcomdlg32
+ *     ddp_vst.c -static
  */
 
 #include <windows.h>
@@ -15,7 +15,6 @@
 #include <string.h>
 #include "vst2_abi.h"
 #include "ddp_protocol.h"
-#include "ddp_ui.h"
 
 /* ── Configuration ────────────────────────────────────────────────── */
 
@@ -52,14 +51,12 @@ const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
     },
 };
 
-/* ── Forward declarations ─────────────────────────────────────────── */
+/* ── Plugin State ─────────────────────────────────────────────────── */
 
 typedef struct DDPState DDPState;
 static void logf_(DDPState *st, const char *fmt, ...);
 static BOOL p_read(HANDLE h, void *buf, DWORD n);
 static BOOL p_write(HANDLE h, const void *buf, DWORD n);
-
-/* ── Plugin State ─────────────────────────────────────────────────── */
 
 struct DDPState {
     HANDLE          pipe;
@@ -72,99 +69,11 @@ struct DDPState {
     FILE           *logfp;
     audioMasterCallback master;
 
-    /* Saved state (loaded from config on effOpen, applied on first connect) */
+    /* Saved state (loaded from config, applied on first connect) */
     int             saved_profile;
     int             saved_power;
-    int             state_applied;   /* 0 = not yet sent to processor */
-
-    /* Editor */
-    DDPUI          *editor;
-    ERect           editor_rect;
+    int             state_applied;
 };
-
-/* Read saved profile from DolbyX.ini */
-static void load_saved_state(DDPState *st) {
-    char ini[600];
-    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
-    st->saved_profile = GetPrivateProfileIntA("DolbyX", "profile",
-                                               DDP_PROFILE_MUSIC, ini);
-    st->saved_power = GetPrivateProfileIntA("DolbyX", "power", 1, ini);
-    if (st->saved_profile < 0 || st->saved_profile >= DDP_PROFILE_USER_COUNT)
-        st->saved_profile = DDP_PROFILE_MUSIC;
-}
-
-/* Apply saved profile + overrides via the audio pipe */
-static void apply_saved_state(DDPState *st) {
-    if (st->state_applied || !st->connected) return;
-    st->state_applied = 1;
-
-    logf_(st, "Applying saved profile %d (power=%d)\n",
-          st->saved_profile, st->saved_power);
-
-    /* Send profile switch */
-    DWORD cmd = DDP_CMD_SET_PROFILE;
-    DWORD pid = (DWORD)st->saved_profile;
-    p_write(st->pipe, &cmd, 4);
-    p_write(st->pipe, &pid, 4);
-    DWORD status = 0;
-    p_read(st->pipe, &status, 4);
-
-    /* Apply per-profile overrides from config */
-    char ini[600], sec[32];
-    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
-    static const char *keys[] = {
-        "endp","vdhe","dhsb","dssb","dssf","ngon","dvla",
-        "dvle","dvme","ieon","iea","deon","dea","ded",
-        "plmd","aoon","vmb","vmon","geon","plb"
-    };
-    static const char *secs[] = {"Movie","Music","Game","Voice","Custom1","Custom2"};
-    const char *s = secs[st->saved_profile];
-
-    for (int i = 1; i < DDP_PARAM_COUNT; i++) {
-        int def = g_profiles[st->saved_profile][i];
-        int val = GetPrivateProfileIntA(s, keys[i], def, ini);
-        if (val != def) {
-            cmd = DDP_CMD_SET_PARAM;
-            uint16_t pi = (uint16_t)i;
-            int16_t v = (int16_t)val;
-            p_write(st->pipe, &cmd, 4);
-            p_write(st->pipe, &pi, 2);
-            p_write(st->pipe, &v, 2);
-            p_read(st->pipe, &status, 4);
-        }
-    }
-
-    /* Apply IEQ preset if saved */
-    int ieq = GetPrivateProfileIntA(s, "ieq_mode", DDP_IEQ_MANUAL, ini);
-    if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
-        /* Enable IEQ */
-        cmd = DDP_CMD_SET_PARAM;
-        uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
-        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
-        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
-
-        pi = DDP_PARAM_IEA; v = 10;
-        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
-        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
-
-        /* Set preset */
-        cmd = DDP_CMD_SET_IEQ_PRESET;
-        DWORD preset = (DWORD)ieq;
-        p_write(st->pipe, &cmd, 4);
-        p_write(st->pipe, &preset, 4);
-        p_read(st->pipe, &status, 4);
-    }
-
-    /* If power was off, switch to OFF profile (graceful fade) */
-    if (!st->saved_power) {
-        cmd = DDP_CMD_SET_PROFILE;
-        DWORD off_pid = DDP_PROFILE_OFF;
-        p_write(st->pipe, &cmd, 4);
-        p_write(st->pipe, &off_pid, 4);
-        p_read(st->pipe, &status, 4);
-        logf_(st, "Power OFF — applied OFF profile\n");
-    }
-}
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
@@ -225,6 +134,88 @@ static void get_dll_dir(char *buf, size_t sz) {
     if (p) *p = '\0';
 }
 
+/* ── Saved State ──────────────────────────────────────────────────── */
+
+static void load_saved_state(DDPState *st) {
+    char ini[600];
+    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
+    st->saved_profile = GetPrivateProfileIntA("DolbyX", "profile",
+                                               DDP_PROFILE_MUSIC, ini);
+    st->saved_power = GetPrivateProfileIntA("DolbyX", "power", 1, ini);
+    if (st->saved_profile < 0 || st->saved_profile >= DDP_PROFILE_USER_COUNT)
+        st->saved_profile = DDP_PROFILE_MUSIC;
+}
+
+static void apply_saved_state(DDPState *st) {
+    if (st->state_applied || !st->connected) return;
+    st->state_applied = 1;
+
+    logf_(st, "Restoring profile %d (power=%d)\n",
+          st->saved_profile, st->saved_power);
+
+    DWORD cmd, status = 0;
+
+    /* Set profile */
+    cmd = DDP_CMD_SET_PROFILE;
+    DWORD pid = (DWORD)st->saved_profile;
+    p_write(st->pipe, &cmd, 4);
+    p_write(st->pipe, &pid, 4);
+    p_read(st->pipe, &status, 4);
+
+    /* Apply per-profile overrides from config */
+    char ini[600];
+    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
+    static const char *keys[] = {
+        "endp","vdhe","dhsb","dssb","dssf","ngon","dvla","dvle","dvme",
+        "ieon","iea","deon","dea","ded","plmd","aoon","vmb","vmon","geon","plb"
+    };
+    static const char *secs[] = {"Movie","Music","Game","Voice","Custom1","Custom2"};
+    const char *s = secs[st->saved_profile];
+
+    for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+        int def = g_profiles[st->saved_profile][i];
+        int val = GetPrivateProfileIntA(s, keys[i], def, ini);
+        if (val != def) {
+            cmd = DDP_CMD_SET_PARAM;
+            uint16_t pi = (uint16_t)i;
+            int16_t v = (int16_t)val;
+            p_write(st->pipe, &cmd, 4);
+            p_write(st->pipe, &pi, 2);
+            p_write(st->pipe, &v, 2);
+            p_read(st->pipe, &status, 4);
+        }
+    }
+
+    /* Apply IEQ preset */
+    int ieq = GetPrivateProfileIntA(s, "ieq_mode", DDP_IEQ_MANUAL, ini);
+    if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
+        cmd = DDP_CMD_SET_PARAM;
+        uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
+        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
+        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
+
+        pi = DDP_PARAM_IEA; v = 10;
+        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
+        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
+
+        cmd = DDP_CMD_SET_IEQ_PRESET;
+        DWORD preset = (DWORD)ieq;
+        p_write(st->pipe, &cmd, 4);
+        p_write(st->pipe, &preset, 4);
+        p_read(st->pipe, &status, 4);
+    }
+
+    /* Power off → send OFF profile */
+    if (!st->saved_power) {
+        cmd = DDP_CMD_SET_PROFILE;
+        DWORD off_pid = DDP_PROFILE_OFF;
+        p_write(st->pipe, &cmd, 4);
+        p_write(st->pipe, &off_pid, 4);
+        p_read(st->pipe, &status, 4);
+        logf_(st, "Power OFF — applied OFF profile\n");
+    }
+}
+
 /* ── Bridge Connection ────────────────────────────────────────────── */
 
 static int connect_bridge(DDPState *st) {
@@ -254,13 +245,11 @@ static int connect_bridge(DDPState *st) {
         return -1;
     }
 
-    logf_(st, "Connected to bridge\n");
+    logf_(st, "Connected to daemon\n");
     st->connected = 1; st->bypass = 0; st->block_count = 0;
 
-    /* On first connection, apply saved profile from config */
-    if (!st->state_applied) {
+    if (!st->state_applied)
         apply_saved_state(st);
-    }
 
     return 0;
 }
@@ -292,8 +281,6 @@ static void ddp_processReplacing(struct AEffect *effect,
             memcpy(outputs[1], inputs[1], sampleFrames * sizeof(float));
         return;
     }
-
-    /* Drain pending UI commands before processing audio */
 
     int frames = (sampleFrames > MAX_FRAMES) ? MAX_FRAMES : sampleFrames;
     DWORD pcm_bytes = frames * 2 * sizeof(int16_t);
@@ -368,10 +355,10 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         logf_(st, "Host: %s\n", exe);
         st->pcm_buf = (int16_t *)malloc(MAX_FRAMES * 2 * sizeof(int16_t));
         load_saved_state(st);
-        logf_(st, "Saved state: profile=%d power=%d\n",
+        logf_(st, "Saved: profile=%d power=%d\n",
               st->saved_profile, st->saved_power);
         if (connect_bridge(st) != 0)
-            logf_(st, "Bridge not running\n");
+            logf_(st, "Daemon not running\n");
         return 0;
     }
 
@@ -383,38 +370,6 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         free(st);
         effect->object = NULL;
         return 0;
-
-    /* ── Editor ─────────────────────────────────────────────────── */
-
-    case effEditGetRect: {
-        st->editor_rect.left = 0;
-        st->editor_rect.top = 0;
-        st->editor_rect.right = UI_WIDTH;
-        st->editor_rect.bottom = UI_HEIGHT;
-        *(ERect **)ptr = &st->editor_rect;
-        return 1;
-    }
-
-    case effEditOpen: {
-        HWND parent = (HWND)ptr;
-        logf_(st, "Editor open (parent=%p)\n", parent);
-        st->editor = ddpui_create(parent, st->dll_dir);
-        if (!st->editor)
-            logf_(st, "Editor create FAILED\n");
-        return st->editor ? 1 : 0;
-    }
-
-    case effEditClose:
-        logf_(st, "Editor close\n");
-        ddpui_destroy(st->editor);
-        st->editor = NULL;
-        return 0;
-
-    case effEditIdle:
-        ddpui_idle(st->editor);
-        return 0;
-
-    /* ── Standard ───────────────────────────────────────────────── */
 
     case effSetSampleRate:
         if (st) { st->sample_rate = opt; logf_(st, "Rate: %.0f\n", opt); }
@@ -432,9 +387,9 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         }
         return 0;
 
-    case effGetEffectName:    strcpy((char *)ptr, "DolbyX DDP");          return 1;
-    case effGetVendorString:  strcpy((char *)ptr, "DolbyX");              return 1;
-    case effGetProductString: strcpy((char *)ptr, "Dolby Digital Plus");  return 1;
+    case effGetEffectName:    strcpy((char *)ptr, "DolbyX");     return 1;
+    case effGetVendorString:  strcpy((char *)ptr, "DolbyX");     return 1;
+    case effGetProductString: strcpy((char *)ptr, "DolbyX");     return 1;
     case effGetVendorVersion: return DDP_VERSION;
     case effGetVstVersion:    return kVstVersion;
     case effGetPlugCategory:  return kPlugCategEffect;
@@ -484,7 +439,7 @@ VST_EXPORT struct AEffect *VSTPluginMain(audioMasterCallback audioMaster) {
     e->numParams        = 1;
     e->numInputs        = DDP_NUM_CHANNELS;
     e->numOutputs       = DDP_NUM_CHANNELS;
-    e->flags            = effFlagsCanReplacing | effFlagsHasEditor;
+    e->flags            = effFlagsCanReplacing;
     e->initialDelay     = DDP_LATENCY_SAMPLES;
     e->object           = st;
     e->uniqueID         = DDP_UNIQUE_ID;

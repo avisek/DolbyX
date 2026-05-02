@@ -3,6 +3,9 @@ arm/build/
 *.o
 *.core
 
+# UI build output
+ui/dist/
+
 # Python
 __pycache__/
 *.pyc
@@ -10,12 +13,14 @@ __pycache__/
 # Logs
 *.log
 
-# Editor files
+# Editor / OS
 *.swp
 *~
 .vscode/
 .idea/
-
-# OS files
 .DS_Store
 Thumbs.db
+
+# Nix
+result
+.direnv/

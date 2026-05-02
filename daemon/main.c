@@ -1,14 +1,17 @@
 /*
- * dolbyx-bridge.c — DolbyX Named Pipe Bridge (Multi-client + Control)
+ * daemon/main.c — DolbyX Daemon
  *
- * Two named pipes:
- *   \\.\pipe\DolbyX     — audio (audiodg.exe connects here)
- *   \\.\pipe\DolbyXCtrl — control commands (Editor UI connects here)
+ * Central background process for DolbyX. Manages the DDP ARM processor
+ * and provides two communication channels:
  *
- * Control commands are forwarded to ALL active audio processors.
+ *   \\.\pipe\DolbyX     — audio (VST/LV2 plugins connect here)
+ *   \\.\pipe\DolbyXCtrl — control (Web UI connects here)
  *
- * Build:
- *   x86_64-w64-mingw32-gcc -O2 -o dolbyx-bridge.exe dolbyx-bridge.c \
+ * Future: HTTP + WebSocket server for Web UI (Phase 1).
+ * Future: AF_UNIX sockets for Linux/macOS audio plugins (Phase 5).
+ *
+ * Build (Windows, MinGW):
+ *   x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe daemon/main.c \
  *     -static -ladvapi32
  */
 
@@ -338,9 +341,9 @@ int main(int argc, char *argv[]) {
     InitializeCriticalSection(&g_log_lock);
     InitializeCriticalSection(&g_procs_lock);
 
-    printf("DolbyX Bridge v1.3\n==================\n\n");
+    printf("DolbyX Daemon v2.0\n==================\n\n");
     if (argc < 2) {
-        printf("Usage: dolbyx-bridge.exe <wsl-path-to-DolbyX/arm>\n");
+        printf("Usage: dolbyx <wsl-path-to-DolbyX/arm>\n");
         return 1;
     }
     g_wsl_path = argv[1];

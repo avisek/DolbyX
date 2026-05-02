@@ -80,7 +80,7 @@ def process(samples, frames):
         input=msg, capture_output=True, timeout=600, env=env
     )
 
-    if proc.returncode != 0:
+    if proc.returncode != 0 and len(proc.stdout) < 4:
         print(f"ERROR: exit code {proc.returncode}")
         for line in proc.stderr.decode('utf-8','replace').split('\n')[-5:]:
             if line.strip(): print(f"  {line}")
