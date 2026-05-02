@@ -12,7 +12,7 @@ ARM_DIR="$PROJECT_DIR/arm"
 DAEMON_DIR="$PROJECT_DIR/daemon"
 VST_DIR="$PROJECT_DIR/windows/vst"
 
-echo "[1/4] Installing dependencies..."
+echo "[1/5] Installing dependencies..."
 sudo apt-get update -qq 2>/dev/null
 sudo apt-get install -y -qq gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
     qemu-user-static gcc-mingw-w64-x86-64 make python3 2>/dev/null
@@ -20,18 +20,30 @@ echo ""
 
 if [ ! -f "$ARM_DIR/lib/libdseffect.so" ]; then
     echo "ERROR: libdseffect.so not found in $ARM_DIR/lib/"; exit 1; fi
-echo "[2/4] Found libdseffect.so"
+echo "[2/5] Found libdseffect.so"
 echo ""
 
-echo "[3/4] Building ARM processor..."
+echo "[3/5] Building ARM processor..."
 cd "$ARM_DIR" && make clean && make all
 echo ""
 
-echo "[4/4] Building Windows components..."
+echo "[4/5] Building Web UI..."
+cd "$PROJECT_DIR/ui"
+if [ -f "node_modules/.package-lock.json" ] || npm install --save-dev esbuild 2>/dev/null; then
+    node build.js && echo "  Web UI OK" || echo "  Web UI FAILED"
+else
+    echo "  Skipped (npm not available — using fallback page)"
+fi
+echo ""
+
+echo "[5/5] Building Windows components..."
 
 # Daemon
 cd "$DAEMON_DIR"
-x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe main.c http.c -static -ladvapi32 -lws2_32 \
+BUNDLE_FLAG=""
+if [ -f "../ui/dist/ui_bundle.h" ]; then BUNDLE_FLAG="-DDOLBYX_USE_BUNDLE"; fi
+x86_64-w64-mingw32-gcc -O2 $BUNDLE_FLAG -o dolbyx.exe main.c http.c \
+    -static -ladvapi32 -lws2_32 \
     && echo "  dolbyx.exe OK" || echo "  dolbyx.exe FAILED"
 
 # VST

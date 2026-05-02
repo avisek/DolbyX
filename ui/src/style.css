@@ -1,0 +1,303 @@
+/* DolbyX Web UI — Dark theme, Dolby-inspired */
+
+:root {
+  --bg: #0b1018;
+  --panel: #0e1420;
+  --surface: #151d28;
+  --surface-hover: #1a2535;
+  --border: #1e2d40;
+  --accent: #00b4d8;
+  --accent-bright: #00d4ff;
+  --accent-dim: rgba(0, 180, 216, 0.12);
+  --green: #00c853;
+  --text: #d0d8e4;
+  --text-dim: #5a6a7a;
+  --radius: 10px;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 680px;
+  width: 100%;
+}
+
+/* ── Header ─────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  margin-bottom: 8px;
+}
+
+.power {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+}
+
+.power:hover { background: var(--accent-dim); }
+.power:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+
+.power.off {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.brand-text {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 3px;
+}
+
+.dd-icon { flex-shrink: 0; }
+
+.reset-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.reset-btn:hover { border-color: var(--accent); color: var(--text); }
+.reset-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+
+/* ── Connection ─────────────────────────────────── */
+
+.conn {
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 13px;
+  color: var(--text-dim);
+  border-left: 3px solid var(--border);
+  margin-bottom: 14px;
+  transition: all 0.3s;
+}
+
+.conn.ok { border-left-color: var(--green); }
+.conn.err { border-left-color: #ef4444; }
+
+/* ── Profiles ───────────────────────────────────── */
+
+.profiles {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.prof {
+  padding: 10px 4px;
+  text-align: center;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.prof:hover { border-color: var(--accent); }
+.prof:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+
+.prof.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+  font-weight: 600;
+}
+
+/* ── Visualizer ─────────────────────────────────── */
+
+.visualizer {
+  height: 110px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: 14px;
+  overflow: hidden;
+  position: relative;
+}
+
+.visualizer canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Controls ───────────────────────────────────── */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 14px;
+}
+
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--panel);
+  gap: 14px;
+}
+
+.ctrl-row:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+.ctrl-row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+
+.ctrl-label {
+  flex: 0 0 180px;
+  font-size: 14px;
+}
+
+.ctrl-slider {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.ctrl-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.ctrl-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.ctrl-slider:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+.ctrl-val {
+  width: 32px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.toggle {
+  width: 48px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--border);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle::after {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #9aa;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  transition: left 0.2s, background 0.2s;
+}
+
+.toggle.on { background: var(--green); }
+.toggle.on::after { left: 25px; background: #fff; }
+
+.toggle:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+
+/* ── IEQ Mode ───────────────────────────────────── */
+
+.ieq-section { margin-bottom: 14px; }
+
+.section-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.ieq-modes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.ieq-btn {
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ieq-btn:hover { border-color: var(--accent); }
+.ieq-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+
+.ieq-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent-bright);
+}
+
+/* ── Responsive ─────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .profiles { grid-template-columns: repeat(3, 1fr); }
+  .ctrl-label { flex: 0 0 130px; font-size: 13px; }
+  .brand-text { font-size: 16px; }
+}
+
+@media (max-width: 400px) {
+  .profiles { grid-template-columns: repeat(2, 1fr); }
+  .ctrl-label { flex: 0 0 100px; }
+}

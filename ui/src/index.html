@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DolbyX</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app" role="application" aria-label="DolbyX Audio Controls">
+
+    <!-- Header -->
+    <header class="header">
+      <button class="power" id="pwr" aria-label="Power toggle" tabindex="1">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+             stroke="currentColor" stroke-width="2.5">
+          <path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>
+        </svg>
+      </button>
+      <div class="brand">
+        <svg class="dd-icon" viewBox="0 0 48 28" width="28" height="16">
+          <rect x="0" y="4" width="10" height="20" rx="2" fill="currentColor"/>
+          <rect x="12" y="4" width="10" height="20" rx="2" fill="currentColor"/>
+          <rect x="4" y="8" width="16" height="12" fill="var(--bg)"/>
+        </svg>
+        <span class="brand-text">DOLBY</span>
+      </div>
+      <button class="reset-btn" id="resetBtn" tabindex="2">Reset Profile</button>
+    </header>
+
+    <!-- Connection status -->
+    <div class="conn" id="conn" role="status" aria-live="polite">Connecting…</div>
+
+    <!-- Profile selector -->
+    <nav class="profiles" id="profiles" role="tablist" aria-label="Audio profile">
+    </nav>
+
+    <!-- Visualizer placeholder -->
+    <div class="visualizer" id="visualizer">
+      <canvas id="visCanvas" aria-hidden="true"></canvas>
+    </div>
+
+    <!-- Toggle controls -->
+    <section class="controls" aria-label="Effect controls">
+      <div class="ctrl-row" data-en="7" data-amt="6" data-min="0" data-max="10" data-on="1">
+        <span class="ctrl-label">Volume Leveler</span>
+        <input type="range" class="ctrl-slider" aria-label="Volume Leveler amount"
+               tabindex="0">
+        <span class="ctrl-val"></span>
+        <button class="toggle" aria-label="Volume Leveler toggle" tabindex="0"></button>
+      </div>
+      <div class="ctrl-row" data-en="11" data-amt="12" data-min="0" data-max="16" data-on="1">
+        <span class="ctrl-label">Dialogue Enhancer</span>
+        <input type="range" class="ctrl-slider" aria-label="Dialogue Enhancer amount"
+               tabindex="0">
+        <span class="ctrl-val"></span>
+        <button class="toggle" aria-label="Dialogue Enhancer toggle" tabindex="0"></button>
+      </div>
+      <div class="ctrl-row" data-en="1" data-amt="2" data-min="0" data-max="192" data-on="2">
+        <span class="ctrl-label">Surround Virtualizer</span>
+        <input type="range" class="ctrl-slider" aria-label="Surround Virtualizer amount"
+               tabindex="0">
+        <span class="ctrl-val"></span>
+        <button class="toggle" aria-label="Surround Virtualizer toggle" tabindex="0"></button>
+      </div>
+    </section>
+
+    <!-- IEQ mode -->
+    <div class="ieq-section">
+      <span class="section-label" id="ieqLabel">Graphic EQ: Manual</span>
+      <div class="ieq-modes" id="ieqModes" role="radiogroup" aria-label="Equalizer mode">
+      </div>
+    </div>
+
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>

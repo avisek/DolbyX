@@ -24,3 +24,7 @@ Thumbs.db
 # Nix
 result
 .direnv/
+
+# Node
+node_modules/
+package-lock.json
