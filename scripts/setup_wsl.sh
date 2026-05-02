@@ -31,7 +31,7 @@ echo "[4/4] Building Windows components..."
 
 # Daemon
 cd "$DAEMON_DIR"
-x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe main.c -static -ladvapi32 \
+x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe main.c http.c -static -ladvapi32 -lws2_32 \
     && echo "  dolbyx.exe OK" || echo "  dolbyx.exe FAILED"
 
 # VST

@@ -1,0 +1,710 @@
+/*
+ * daemon/http.c — DolbyX HTTP + WebSocket server
+ *
+ * Minimal embedded HTTP server + RFC 6455 WebSocket.
+ * Serves the Web UI and handles real-time control via JSON.
+ *
+ * JSON protocol:
+ *   Client → Server:
+ *     {"cmd":"get_state"}
+ *     {"cmd":"set_profile","id":1}
+ *     {"cmd":"set_param","index":7,"value":1}
+ *     {"cmd":"set_ieq","preset":1}
+ *     {"cmd":"power","on":true}
+ *
+ *   Server → Client:
+ *     {"type":"state","profile":1,"power":1,"params":[...],"ieq":3}
+ *     {"type":"vis","bands":[...]}
+ *     {"type":"ack","ok":true}
+ */
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "http.h"
+#include "ddp_protocol.h"
+
+/* ── Forward declarations from main.c ─────────────────────────────── */
+
+extern void log_msg(const char *fmt, ...);
+
+typedef struct {
+    HANDLE process, stdin_wr, stdout_rd;
+    CRITICAL_SECTION lock;
+} Proc;
+
+extern Proc *g_procs[];
+extern CRITICAL_SECTION g_procs_lock;
+extern BOOL proc_ctrl(Proc *p, const BYTE *data, int dlen,
+                       BYTE *reply, int rlen);
+
+/* ── SHA-1 (minimal, for WebSocket handshake only) ────────────────── */
+
+static void sha1(const uint8_t *msg, size_t len, uint8_t out[20]) {
+    uint32_t h0=0x67452301, h1=0xEFCDAB89, h2=0x98BADCFE,
+             h3=0x10325476, h4=0xC3D2E1F0;
+
+    /* Pre-processing: pad message */
+    size_t ml = len * 8;
+    size_t padded = ((len + 8) / 64 + 1) * 64;
+    uint8_t *buf = (uint8_t *)calloc(padded, 1);
+    memcpy(buf, msg, len);
+    buf[len] = 0x80;
+    for (int i = 0; i < 8; i++)
+        buf[padded - 1 - i] = (uint8_t)(ml >> (i * 8));
+
+    for (size_t chunk = 0; chunk < padded; chunk += 64) {
+        uint32_t w[80];
+        for (int i = 0; i < 16; i++)
+            w[i] = ((uint32_t)buf[chunk+i*4]<<24) |
+                   ((uint32_t)buf[chunk+i*4+1]<<16) |
+                   ((uint32_t)buf[chunk+i*4+2]<<8) |
+                   buf[chunk+i*4+3];
+        for (int i = 16; i < 80; i++) {
+            uint32_t x = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
+            w[i] = (x << 1) | (x >> 31);
+        }
+
+        uint32_t a=h0, b=h1, c=h2, d=h3, e=h4;
+        for (int i = 0; i < 80; i++) {
+            uint32_t f, k;
+            if (i < 20)      { f = (b&c)|((~b)&d); k = 0x5A827999; }
+            else if (i < 40) { f = b^c^d;           k = 0x6ED9EBA1; }
+            else if (i < 60) { f = (b&c)|(b&d)|(c&d); k = 0x8F1BBCDC; }
+            else              { f = b^c^d;           k = 0xCA62C1D6; }
+            uint32_t tmp = ((a<<5)|(a>>27)) + f + e + k + w[i];
+            e=d; d=c; c=(b<<30)|(b>>2); b=a; a=tmp;
+        }
+        h0+=a; h1+=b; h2+=c; h3+=d; h4+=e;
+    }
+    free(buf);
+
+    for (int i=0;i<4;i++) { out[i]=(h0>>(24-i*8))&0xFF;
+        out[4+i]=(h1>>(24-i*8))&0xFF; out[8+i]=(h2>>(24-i*8))&0xFF;
+        out[12+i]=(h3>>(24-i*8))&0xFF; out[16+i]=(h4>>(24-i*8))&0xFF; }
+}
+
+/* ── Base64 encode ────────────────────────────────────────────────── */
+
+static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static int base64_encode(const uint8_t *in, int len, char *out) {
+    int o = 0;
+    for (int i = 0; i < len; i += 3) {
+        int b = (in[i] << 16) | (i+1<len ? in[i+1]<<8 : 0) | (i+2<len ? in[i+2] : 0);
+        out[o++] = b64[(b>>18)&63];
+        out[o++] = b64[(b>>12)&63];
+        out[o++] = (i+1<len) ? b64[(b>>6)&63] : '=';
+        out[o++] = (i+2<len) ? b64[b&63] : '=';
+    }
+    out[o] = 0;
+    return o;
+}
+
+/* ── WebSocket client tracking ────────────────────────────────────── */
+
+static SOCKET g_ws_clients[MAX_WS_CLIENTS];
+static CRITICAL_SECTION g_ws_lock;
+static int g_ws_count = 0;
+
+static void ws_add(SOCKET s) {
+    EnterCriticalSection(&g_ws_lock);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (g_ws_clients[i] == INVALID_SOCKET) {
+            g_ws_clients[i] = s;
+            g_ws_count++;
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_ws_lock);
+}
+
+static void ws_remove(SOCKET s) {
+    EnterCriticalSection(&g_ws_lock);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (g_ws_clients[i] == s) {
+            g_ws_clients[i] = INVALID_SOCKET;
+            g_ws_count--;
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_ws_lock);
+}
+
+/* ── WebSocket frame I/O ──────────────────────────────────────────── */
+
+static int ws_send_text(SOCKET s, const char *text, int len) {
+    /* Build WebSocket text frame (server→client: no mask) */
+    uint8_t hdr[10];
+    int hlen = 0;
+
+    hdr[0] = 0x81; /* FIN + TEXT opcode */
+    if (len < 126) {
+        hdr[1] = (uint8_t)len;
+        hlen = 2;
+    } else if (len < 65536) {
+        hdr[1] = 126;
+        hdr[2] = (len >> 8) & 0xFF;
+        hdr[3] = len & 0xFF;
+        hlen = 4;
+    } else {
+        return -1; /* messages > 64K not supported */
+    }
+
+    if (send(s, (char *)hdr, hlen, 0) != hlen) return -1;
+    if (send(s, text, len, 0) != len) return -1;
+    return 0;
+}
+
+/* Read one WebSocket frame. Returns payload length, -1 on error/close. */
+static int ws_recv(SOCKET s, char *buf, int bufsize) {
+    uint8_t hdr[2];
+    if (recv(s, (char *)hdr, 2, 0) != 2) return -1;
+
+    int opcode = hdr[0] & 0x0F;
+    int masked = (hdr[1] & 0x80) != 0;
+    int plen = hdr[1] & 0x7F;
+
+    if (opcode == 8) return -1; /* close frame */
+
+    if (plen == 126) {
+        uint8_t ext[2];
+        if (recv(s, (char *)ext, 2, 0) != 2) return -1;
+        plen = (ext[0] << 8) | ext[1];
+    } else if (plen == 127) {
+        return -1; /* 64-bit lengths not supported */
+    }
+
+    if (plen > bufsize - 1) return -1;
+
+    uint8_t mask[4] = {0};
+    if (masked) {
+        if (recv(s, (char *)mask, 4, 0) != 4) return -1;
+    }
+
+    int total = 0;
+    while (total < plen) {
+        int r = recv(s, buf + total, plen - total, 0);
+        if (r <= 0) return -1;
+        total += r;
+    }
+
+    if (masked) {
+        for (int i = 0; i < plen; i++)
+            buf[i] ^= mask[i % 4];
+    }
+
+    buf[plen] = 0;
+    return plen;
+}
+
+/* ── JSON Parsing (minimal, handles our protocol) ─────────────────── */
+
+static int json_int(const char *json, const char *key) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    const char *p = strstr(json, needle);
+    if (!p) return -999;
+    p += strlen(needle);
+    while (*p == ' ') p++;
+    return atoi(p);
+}
+
+static int json_bool(const char *json, const char *key) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    const char *p = strstr(json, needle);
+    if (!p) return -1;
+    p += strlen(needle);
+    while (*p == ' ') p++;
+    if (*p == 't') return 1;
+    if (*p == 'f') return 0;
+    return atoi(p);
+}
+
+static int json_str(const char *json, const char *key, char *out, int outlen) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+    const char *p = strstr(json, needle);
+    if (!p) return -1;
+    p += strlen(needle);
+    int i = 0;
+    while (*p && *p != '"' && i < outlen - 1)
+        out[i++] = *p++;
+    out[i] = 0;
+    return i;
+}
+
+/* ── Build state JSON ─────────────────────────────────────────────── */
+
+/* Global state (updated by command handlers, read by get_state) */
+static int g_current_profile = DDP_PROFILE_MUSIC;
+static int g_current_power = 1;
+static int16_t g_current_params[DDP_PARAM_COUNT] = {0};
+static int g_current_ieq = DDP_IEQ_MANUAL;
+
+static int build_state_json(char *buf, int bufsize) {
+    int n = snprintf(buf, bufsize,
+        "{\"type\":\"state\",\"profile\":%d,\"power\":%d,\"ieq\":%d,\"params\":[",
+        g_current_profile, g_current_power, g_current_ieq);
+    for (int i = 0; i < DDP_PARAM_COUNT; i++) {
+        n += snprintf(buf + n, bufsize - n, "%s%d",
+                      i ? "," : "", g_current_params[i]);
+    }
+    n += snprintf(buf + n, bufsize - n, "]}");
+    return n;
+}
+
+/* ── Forward command to all processors ────────────────────────────── */
+
+static BOOL forward_cmd(const BYTE *pkt, int pkt_len, BYTE *reply, int reply_len) {
+    BOOL any = FALSE;
+    EnterCriticalSection(&g_procs_lock);
+    for (int i = 0; i < 8; i++) {
+        if (!g_procs[i]) continue;
+        if (proc_ctrl(g_procs[i], pkt, pkt_len, reply, reply_len))
+            any = TRUE;
+    }
+    LeaveCriticalSection(&g_procs_lock);
+    return any;
+}
+
+/* ── Handle a WebSocket JSON command ──────────────────────────────── */
+
+static void handle_ws_cmd(SOCKET s, const char *json) {
+    char cmd[32] = {0};
+    json_str(json, "cmd", cmd, sizeof(cmd));
+
+    char resp[1024];
+    int rlen;
+
+    if (strcmp(cmd, "get_state") == 0) {
+        rlen = build_state_json(resp, sizeof(resp));
+        ws_send_text(s, resp, rlen);
+        return;
+    }
+
+    if (strcmp(cmd, "set_profile") == 0) {
+        int id = json_int(json, "id");
+        if (id >= 0 && id < DDP_PROFILE_USER_COUNT) {
+            BYTE pkt[8];
+            DWORD c = DDP_CMD_SET_PROFILE;
+            memcpy(pkt, &c, 4);
+            memcpy(pkt + 4, &id, 4);
+            BYTE reply[4] = {0};
+            forward_cmd(pkt, 8, reply, 4);
+            g_current_profile = id;
+
+            /* Load default params for this profile */
+            extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+            memcpy(g_current_params, g_profiles[id], sizeof(g_current_params));
+        }
+        rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
+        ws_send_text(s, resp, rlen);
+
+        /* Broadcast state to all clients */
+        rlen = build_state_json(resp, sizeof(resp));
+        ws_broadcast(resp, rlen);
+        return;
+    }
+
+    if (strcmp(cmd, "set_param") == 0) {
+        int idx = json_int(json, "index");
+        int val = json_int(json, "value");
+        if (idx >= 0 && idx < DDP_PARAM_COUNT) {
+            BYTE pkt[8];
+            DWORD c = DDP_CMD_SET_PARAM;
+            uint16_t pi = (uint16_t)idx;
+            int16_t v = (int16_t)val;
+            memcpy(pkt, &c, 4);
+            memcpy(pkt + 4, &pi, 2);
+            memcpy(pkt + 6, &v, 2);
+            BYTE reply[4] = {0};
+            forward_cmd(pkt, 8, reply, 4);
+            g_current_params[idx] = (int16_t)val;
+        }
+        rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
+        ws_send_text(s, resp, rlen);
+
+        /* Broadcast updated state */
+        rlen = build_state_json(resp, sizeof(resp));
+        ws_broadcast(resp, rlen);
+        return;
+    }
+
+    if (strcmp(cmd, "set_ieq") == 0) {
+        int preset = json_int(json, "preset");
+        if (preset >= 0 && preset <= 3) {
+            g_current_ieq = preset;
+            if (preset == DDP_IEQ_MANUAL) {
+                /* ieon=0, geon=1 */
+                BYTE pkt[8]; DWORD c; BYTE reply[4];
+                c = DDP_CMD_SET_PARAM;
+                uint16_t pi; int16_t v;
+
+                pi = DDP_PARAM_IEON; v = 0;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                g_current_params[DDP_PARAM_IEON] = 0;
+
+                pi = DDP_PARAM_GEON; v = 1;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                g_current_params[DDP_PARAM_GEON] = 1;
+            } else {
+                /* geon=0, ieon=1, iea=10, set preset */
+                BYTE pkt[8]; DWORD c; BYTE reply[4];
+                c = DDP_CMD_SET_PARAM;
+                uint16_t pi; int16_t v;
+
+                pi = DDP_PARAM_GEON; v = 0;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                g_current_params[DDP_PARAM_GEON] = 0;
+
+                pi = DDP_PARAM_IEON; v = 1;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                g_current_params[DDP_PARAM_IEON] = 1;
+
+                pi = DDP_PARAM_IEA; v = 10;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                g_current_params[DDP_PARAM_IEA] = 10;
+
+                c = DDP_CMD_SET_IEQ_PRESET;
+                DWORD pid = preset;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
+                forward_cmd(pkt, 8, reply, 4);
+            }
+        }
+        rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
+        ws_send_text(s, resp, rlen);
+        rlen = build_state_json(resp, sizeof(resp));
+        ws_broadcast(resp, rlen);
+        return;
+    }
+
+    if (strcmp(cmd, "power") == 0) {
+        int on = json_bool(json, "on");
+        if (on >= 0) {
+            g_current_power = on;
+            if (!on) {
+                /* Switch to OFF profile */
+                BYTE pkt[8]; DWORD c = DDP_CMD_SET_PROFILE;
+                DWORD pid = DDP_PROFILE_OFF;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
+                BYTE reply[4]; forward_cmd(pkt, 8, reply, 4);
+            } else {
+                /* Restore current profile */
+                BYTE pkt[8]; DWORD c = DDP_CMD_SET_PROFILE;
+                DWORD pid = g_current_profile;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
+                BYTE reply[4]; forward_cmd(pkt, 8, reply, 4);
+            }
+        }
+        rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
+        ws_send_text(s, resp, rlen);
+        rlen = build_state_json(resp, sizeof(resp));
+        ws_broadcast(resp, rlen);
+        return;
+    }
+
+    /* Unknown command */
+    rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":false}");
+    ws_send_text(s, resp, rlen);
+}
+
+/* ── WebSocket Handshake ──────────────────────────────────────────── */
+
+static int ws_handshake(SOCKET s, const char *request) {
+    /* Find Sec-WebSocket-Key */
+    const char *key_hdr = strstr(request, "Sec-WebSocket-Key: ");
+    if (!key_hdr) return -1;
+    key_hdr += 19;
+    char key[64] = {0};
+    int ki = 0;
+    while (*key_hdr && *key_hdr != '\r' && ki < 63)
+        key[ki++] = *key_hdr++;
+
+    /* Concatenate with magic GUID */
+    char concat[128];
+    snprintf(concat, sizeof(concat), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key);
+
+    /* SHA-1 hash */
+    uint8_t hash[20];
+    sha1((uint8_t *)concat, strlen(concat), hash);
+
+    /* Base64 encode */
+    char accept_key[64];
+    base64_encode(hash, 20, accept_key);
+
+    /* Send response */
+    char response[512];
+    int rlen = snprintf(response, sizeof(response),
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: %s\r\n"
+        "\r\n", accept_key);
+
+    send(s, response, rlen, 0);
+    return 0;
+}
+
+/* ── WebSocket Client Thread ──────────────────────────────────────── */
+
+static DWORD WINAPI ws_client_thread(LPVOID param) {
+    SOCKET s = (SOCKET)(intptr_t)param;
+    log_msg("WebSocket client connected\n");
+    ws_add(s);
+
+    /* Send initial state */
+    char state[1024];
+    int slen = build_state_json(state, sizeof(state));
+    ws_send_text(s, state, slen);
+
+    /* Message loop */
+    char buf[4096];
+    for (;;) {
+        int len = ws_recv(s, buf, sizeof(buf));
+        if (len <= 0) break;
+        handle_ws_cmd(s, buf);
+    }
+
+    ws_remove(s);
+    closesocket(s);
+    log_msg("WebSocket client disconnected\n");
+    return 0;
+}
+
+/* ── Broadcast to all WebSocket clients ───────────────────────────── */
+
+void ws_broadcast(const char *json, int len) {
+    EnterCriticalSection(&g_ws_lock);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (g_ws_clients[i] != INVALID_SOCKET) {
+            if (ws_send_text(g_ws_clients[i], json, len) != 0) {
+                /* Client disconnected — clean up */
+                closesocket(g_ws_clients[i]);
+                g_ws_clients[i] = INVALID_SOCKET;
+                g_ws_count--;
+            }
+        }
+    }
+    LeaveCriticalSection(&g_ws_lock);
+}
+
+/* ── Placeholder HTML Page ────────────────────────────────────────── */
+
+static const char g_default_html[] =
+    "<!DOCTYPE html><html><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>DolbyX</title>"
+    "<style>"
+    "*{margin:0;padding:0;box-sizing:border-box}"
+    "body{background:#0b1018;color:#d0d8e4;font-family:system-ui,-apple-system,sans-serif;"
+    "display:flex;justify-content:center;padding:20px}"
+    ".app{max-width:720px;width:100%}"
+    "h1{color:#00b4d8;font-size:24px;margin-bottom:16px}"
+    ".status{padding:12px;border-radius:8px;background:#111820;margin-bottom:16px;"
+    "font-size:14px;color:#607080}"
+    ".status.ok{border-left:3px solid #00c853}"
+    ".status.err{border-left:3px solid #ff4444}"
+    "#state{font-family:monospace;font-size:12px;background:#0e1420;"
+    "padding:12px;border-radius:8px;white-space:pre-wrap;margin-top:16px}"
+    ".profiles{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:16px 0}"
+    ".prof{padding:10px;text-align:center;border-radius:8px;background:#161e2a;"
+    "border:1px solid #1a2535;cursor:pointer;font-size:13px;transition:all .15s}"
+    ".prof:hover{border-color:#00b4d8}"
+    ".prof.active{background:#00b4d8;color:#000;border-color:#00b4d8}"
+    ".controls{display:flex;flex-direction:column;gap:8px;margin:16px 0}"
+    ".row{display:flex;align-items:center;padding:10px 12px;background:#111820;"
+    "border-radius:8px;gap:12px}"
+    ".row label{flex:1;font-size:14px}"
+    ".row input[type=range]{flex:2;accent-color:#00b4d8}"
+    ".row .val{width:30px;text-align:right;font-size:12px;color:#607080}"
+    ".toggle{width:48px;height:26px;border-radius:13px;background:#1a2535;"
+    "cursor:pointer;position:relative;transition:background .2s;border:none}"
+    ".toggle.on{background:#00c853}"
+    ".toggle::after{content:'';width:20px;height:20px;border-radius:50%;"
+    "background:#fff;position:absolute;top:3px;left:3px;transition:left .2s}"
+    ".toggle.on::after{left:25px}"
+    ".ieq{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:16px 0}"
+    ".ieq button{padding:10px;border-radius:8px;background:#161e2a;color:#d0d8e4;"
+    "border:1px solid #1a2535;cursor:pointer;font-size:13px;transition:all .15s}"
+    ".ieq button:hover{border-color:#00b4d8}"
+    ".ieq button.active{background:rgba(0,180,216,.1);border-color:#00b4d8;color:#00d4ff}"
+    ".power{width:36px;height:36px;border-radius:50%;border:2px solid #00b4d8;"
+    "background:transparent;cursor:pointer;color:#00b4d8;font-size:18px;"
+    "display:flex;align-items:center;justify-content:center}"
+    ".power.off{border-color:#333;color:#333}"
+    ".header{display:flex;align-items:center;gap:12px;margin-bottom:16px}"
+    ".section-label{font-size:12px;color:#607080;margin:12px 0 6px}"
+    "</style></head><body>"
+    "<div class='app'>"
+    "<div class='header'>"
+    "<button class='power' id='pwr' onclick='togglePower()'>&#9741;</button>"
+    "<h1>DOLBY<span style='font-weight:300;margin-left:12px;font-size:14px;color:#607080'>DolbyX</span></h1>"
+    "</div>"
+    "<div id='conn' class='status'>Connecting...</div>"
+    "<div class='profiles' id='profiles'></div>"
+    "<div class='section-label'>Controls</div>"
+    "<div class='controls' id='controls'></div>"
+    "<div class='section-label' id='ieqLabel'>Graphic EQ: Manual</div>"
+    "<div class='ieq' id='ieq'></div>"
+    "<pre id='state'></pre>"
+    "</div>"
+    "<script>"
+    "let ws,state={profile:1,power:1,params:[],ieq:3};"
+    "const pnames=['Movie','Music','Game','Voice','Custom 1','Custom 2'];"
+    "const toggles=["
+    "{label:'Volume Leveler',en:7,amt:6,min:0,max:10,onVal:1},"
+    "{label:'Dialogue Enhancer',en:11,amt:12,min:0,max:16,onVal:1},"
+    "{label:'Surround Virtualizer',en:1,amt:2,min:0,max:192,onVal:2}"
+    "];"
+    "const ieqModes=['Open','Rich','Focused','Manual'];"
+    "function connect(){"
+    "ws=new WebSocket('ws://'+location.host+'/ws');"
+    "ws.onopen=()=>{document.getElementById('conn').className='status ok';"
+    "document.getElementById('conn').textContent='Connected to DolbyX daemon';"
+    "ws.send(JSON.stringify({cmd:'get_state'}));};"
+    "ws.onclose=()=>{document.getElementById('conn').className='status err';"
+    "document.getElementById('conn').textContent='Disconnected — reconnecting...';"
+    "setTimeout(connect,2000);};"
+    "ws.onmessage=(e)=>{try{let d=JSON.parse(e.data);"
+    "if(d.type==='state'){state=d;render();}}catch(e){}};"
+    "}"
+    "function send(obj){if(ws&&ws.readyState===1)ws.send(JSON.stringify(obj));}"
+    "function togglePower(){send({cmd:'power',on:!state.power});}"
+    "function setProfile(id){send({cmd:'set_profile',id:id});}"
+    "function setParam(idx,val){send({cmd:'set_param',index:idx,value:parseInt(val)});}"
+    "function setIEQ(preset){send({cmd:'set_ieq',preset:preset});}"
+    "function render(){"
+    "let p=document.getElementById('pwr');"
+    "p.className=state.power?'power':'power off';"
+    "let ph='';for(let i=0;i<6;i++)"
+    "ph+='<div class=\"prof'+(i===state.profile?' active':'')+'\" onclick=\"setProfile('+i+')\">'+pnames[i]+'</div>';"
+    "document.getElementById('profiles').innerHTML=ph;"
+    "let ch='';toggles.forEach(t=>{"
+    "let on=state.params[t.en]>0,val=state.params[t.amt];"
+    "ch+='<div class=\"row\"><label>'+t.label+'</label>'+"
+    "'<input type=\"range\" min=\"'+t.min+'\" max=\"'+t.max+'\" value=\"'+val+"
+    "'\" oninput=\"setParam('+t.amt+',this.value)\"><span class=\"val\">'+val+'</span>'+"
+    "'<button class=\"toggle'+(on?' on':'')+'\" onclick=\"setParam('+t.en+','+(on?0:t.onVal)+')\"></button></div>';});"
+    "document.getElementById('controls').innerHTML=ch;"
+    "let ih='';for(let i=0;i<4;i++)"
+    "ih+='<button class=\"'+(i===state.ieq?'active':'')+'\" onclick=\"setIEQ('+i+')\">'+ieqModes[i]+'</button>';"
+    "document.getElementById('ieq').innerHTML=ih;"
+    "let il=state.ieq===3?'Graphic EQ: Manual':'Intelligent EQ: '+ieqModes[state.ieq];"
+    "document.getElementById('ieqLabel').textContent=il;"
+    "document.getElementById('state').textContent=JSON.stringify(state,null,2);"
+    "}"
+    "connect();"
+    "</script></body></html>";
+
+const char *g_html_page = g_default_html;
+int g_html_page_len = 0; /* computed at init */
+
+/* ── HTTP Request Handler ─────────────────────────────────────────── */
+
+static DWORD WINAPI http_client_thread(LPVOID param) {
+    SOCKET s = (SOCKET)(intptr_t)param;
+    char req[4096] = {0};
+
+    /* Read HTTP request */
+    int total = 0;
+    while (total < (int)sizeof(req) - 1) {
+        int r = recv(s, req + total, sizeof(req) - 1 - total, 0);
+        if (r <= 0) { closesocket(s); return 0; }
+        total += r;
+        if (strstr(req, "\r\n\r\n")) break;
+    }
+
+    /* WebSocket upgrade? */
+    if (strstr(req, "Upgrade: websocket") || strstr(req, "upgrade: websocket")) {
+        if (ws_handshake(s, req) == 0) {
+            ws_client_thread((LPVOID)(intptr_t)s);
+        } else {
+            closesocket(s);
+        }
+        return 0;
+    }
+
+    /* Serve HTML page for GET / */
+    if (g_html_page_len == 0)
+        g_html_page_len = (int)strlen(g_html_page);
+
+    char headers[256];
+    int hlen = snprintf(headers, sizeof(headers),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Content-Length: %d\r\n"
+        "Connection: close\r\n"
+        "Cache-Control: no-cache\r\n"
+        "\r\n", g_html_page_len);
+
+    send(s, headers, hlen, 0);
+    send(s, g_html_page, g_html_page_len, 0);
+    closesocket(s);
+    return 0;
+}
+
+/* ── HTTP Server Thread ───────────────────────────────────────────── */
+
+static DWORD WINAPI http_server_thread(LPVOID param) {
+    SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (srv == INVALID_SOCKET) {
+        log_msg("HTTP: socket() failed: %d\n", WSAGetLastError());
+        return 1;
+    }
+
+    int opt = 1;
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(HTTP_PORT);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        log_msg("HTTP: bind() failed: %d\n", WSAGetLastError());
+        closesocket(srv);
+        return 1;
+    }
+
+    listen(srv, 8);
+    log_msg("Web UI → http://localhost:%d\n", HTTP_PORT);
+
+    for (;;) {
+        SOCKET client = accept(srv, NULL, NULL);
+        if (client == INVALID_SOCKET) continue;
+
+        int flag = 1;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(flag));
+
+        HANDLE t = CreateThread(NULL, 0, http_client_thread,
+                                (LPVOID)(intptr_t)client, 0, NULL);
+        if (t) CloseHandle(t);
+        else closesocket(client);
+    }
+
+    closesocket(srv);
+    return 0;
+}
+
+/* ── Start ────────────────────────────────────────────────────────── */
+
+void http_start(void) {
+    InitializeCriticalSection(&g_ws_lock);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++)
+        g_ws_clients[i] = INVALID_SOCKET;
+
+    HANDLE t = CreateThread(NULL, 0, http_server_thread, NULL, 0, NULL);
+    if (t) CloseHandle(t);
+}

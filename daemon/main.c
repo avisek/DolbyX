@@ -2,23 +2,24 @@
  * daemon/main.c — DolbyX Daemon
  *
  * Central background process for DolbyX. Manages the DDP ARM processor
- * and provides two communication channels:
+ * and provides three communication channels:
  *
- *   \\.\pipe\DolbyX     — audio (VST/LV2 plugins connect here)
- *   \\.\pipe\DolbyXCtrl — control (Web UI connects here)
- *
- * Future: HTTP + WebSocket server for Web UI (Phase 1).
- * Future: AF_UNIX sockets for Linux/macOS audio plugins (Phase 5).
+ *   \\.\pipe\DolbyX     — audio (VST plugins connect here)
+ *   \\.\pipe\DolbyXCtrl — control (legacy pipe, kept for compatibility)
+ *   HTTP localhost:9876  — Web UI + WebSocket control
  *
  * Build (Windows, MinGW):
- *   x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe daemon/main.c \
- *     -static -ladvapi32
+ *   x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe main.c http.c \
+ *     -static -ladvapi32 -lws2_32
  */
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "http.h"
 
 #define PIPE_AUDIO      "\\\\.\\pipe\\DolbyX"
 #define PIPE_CTRL       "\\\\.\\pipe\\DolbyXCtrl"
@@ -28,9 +29,23 @@
 #define MAX_FRAMES      131072
 #define MAX_SESSIONS    8
 
-static CRITICAL_SECTION g_log_lock;
+/* ── Profile defaults (for HTTP state tracking) ───────────────────── */
 
-static void log_msg(const char *fmt, ...) {
+#include "ddp_protocol.h"
+
+const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
+    [DDP_PROFILE_MOVIE] = {2,2,96,96,200,2,7,0,0,0,10,1,3,0,4,2,144,0,0,0},
+    [DDP_PROFILE_MUSIC] = {2,2,48,0,200,2,4,0,0,0,10,1,2,0,4,2,144,0,0,0},
+    [DDP_PROFILE_GAME]  = {2,2,0,0,200,2,0,1,0,0,10,0,7,0,4,2,144,2,0,0},
+    [DDP_PROFILE_VOICE] = {2,0,0,0,200,2,0,0,0,0,10,1,10,0,4,2,144,0,0,0},
+    [DDP_PROFILE_USER1] = {2,0,48,48,200,2,5,0,0,0,10,0,7,0,4,2,144,2,0,0},
+    [DDP_PROFILE_USER2] = {2,0,48,48,200,2,5,0,0,0,10,0,7,0,4,2,144,2,0,0},
+    [DDP_PROFILE_OFF]   = {2,0,0,0,200,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
+};
+
+CRITICAL_SECTION g_log_lock;
+
+void log_msg(const char *fmt, ...) {
     EnterCriticalSection(&g_log_lock);
     SYSTEMTIME t; GetLocalTime(&t);
     printf("[%02d:%02d:%02d.%03d] ", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
@@ -121,8 +136,8 @@ static void proc_stop(Proc *p) {
 
 /* ── Global processor registry ────────────────────────────────────── */
 
-static Proc *g_procs[MAX_SESSIONS];
-static CRITICAL_SECTION g_procs_lock;
+Proc *g_procs[MAX_SESSIONS];
+CRITICAL_SECTION g_procs_lock;
 
 static void reg_proc(Proc *p) {
     EnterCriticalSection(&g_procs_lock);
@@ -139,7 +154,7 @@ static void unreg_proc(Proc *p) {
 }
 
 /* Send a control command to one processor (thread-safe) */
-static BOOL proc_ctrl(Proc *p, const BYTE *data, int dlen,
+BOOL proc_ctrl(Proc *p, const BYTE *data, int dlen,
                        BYTE *reply, int rlen) {
     EnterCriticalSection(&p->lock);
     BOOL ok = write_exact(p->stdin_wr, data, dlen);
@@ -338,10 +353,17 @@ static DWORD WINAPI accept_ctrl(LPVOID param) {
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    /* Initialize Winsock for HTTP/WebSocket server */
+    WSADATA wd;
+    WSAStartup(MAKEWORD(2, 2), &wd);
+
     InitializeCriticalSection(&g_log_lock);
     InitializeCriticalSection(&g_procs_lock);
 
-    printf("DolbyX Daemon v2.0\n==================\n\n");
+    printf(
+        "DolbyX Daemon v2.0\n"
+        "==================\n\n"
+    );
     if (argc < 2) {
         printf("Usage: dolbyx <wsl-path-to-DolbyX/arm>\n");
         return 1;
@@ -355,11 +377,16 @@ int main(int argc, char *argv[]) {
     proc_stop(test);
     log_msg("OK\n\n");
 
+    /* Start all server threads */
     HANDLE t1 = CreateThread(NULL, 0, accept_audio, NULL, 0, NULL);
     HANDLE t2 = CreateThread(NULL, 0, accept_ctrl, NULL, 0, NULL);
+    http_start();
+
     log_msg("Listening (Ctrl+C to stop)\n\n");
 
     WaitForSingleObject(t1, INFINITE);
     WaitForSingleObject(t2, INFINITE);
+
+    WSACleanup();
     return 0;
 }
