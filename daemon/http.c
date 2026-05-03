@@ -238,13 +238,70 @@ static int json_str(const char *json, const char *key, char *out, int outlen) {
     return i;
 }
 
-/* ── Build state JSON ─────────────────────────────────────────────── */
+/* ── State (daemon-owned, persisted to config.toml) ───────────────── */
 
-/* Global state (updated by command handlers, read by get_state) */
-static int g_current_profile = DDP_PROFILE_MUSIC;
-static int g_current_power = 1;
-static int16_t g_current_params[DDP_PARAM_COUNT] = {0};
-static int g_current_ieq = DDP_IEQ_MANUAL;
+int g_current_profile = DDP_PROFILE_MUSIC;
+int g_current_power = 1;
+int16_t g_current_params[DDP_PARAM_COUNT] = {0};
+int g_current_ieq = DDP_IEQ_MANUAL;
+
+#define CONFIG_DIR  "C:\\ProgramData\\DolbyX"
+#define CONFIG_PATH CONFIG_DIR "\\config.toml"
+
+void save_config(void) {
+    CreateDirectoryA(CONFIG_DIR, NULL);
+    FILE *f = fopen(CONFIG_PATH, "w");
+    if (!f) return;
+    fprintf(f, "# DolbyX configuration (auto-generated)\n\n");
+    fprintf(f, "profile = %d\n", g_current_profile);
+    fprintf(f, "power = %d\n", g_current_power);
+    fprintf(f, "ieq = %d\n", g_current_ieq);
+    fprintf(f, "params = [");
+    for (int i = 0; i < DDP_PARAM_COUNT; i++)
+        fprintf(f, "%s%d", i ? ", " : "", g_current_params[i]);
+    fprintf(f, "]\n");
+    fclose(f);
+}
+
+void load_config(void) {
+    /* Initialize params from default profile */
+    extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+    memcpy(g_current_params, g_profiles[DDP_PROFILE_MUSIC],
+           sizeof(g_current_params));
+
+    FILE *f = fopen(CONFIG_PATH, "r");
+    if (!f) return;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+
+        int ival;
+        if (sscanf(line, "profile = %d", &ival) == 1) {
+            if (ival >= 0 && ival < DDP_PROFILE_USER_COUNT)
+                g_current_profile = ival;
+        } else if (sscanf(line, "power = %d", &ival) == 1) {
+            g_current_power = ival ? 1 : 0;
+        } else if (sscanf(line, "ieq = %d", &ival) == 1) {
+            if (ival >= 0 && ival <= 3) g_current_ieq = ival;
+        } else if (strncmp(line, "params = [", 10) == 0) {
+            char *p = line + 10;
+            for (int i = 0; i < DDP_PARAM_COUNT && *p; i++) {
+                while (*p == ' ') p++;
+                int v = 0, neg = 0;
+                if (*p == '-') { neg = 1; p++; }
+                while (*p >= '0' && *p <= '9') { v = v*10 + (*p - '0'); p++; }
+                g_current_params[i] = (int16_t)(neg ? -v : v);
+                while (*p == ',' || *p == ' ') p++;
+            }
+        }
+    }
+    fclose(f);
+
+    /* Ensure params match the loaded profile if no overrides were saved */
+    log_msg("Config loaded: profile=%d power=%d ieq=%d\n",
+            g_current_profile, g_current_power, g_current_ieq);
+}
 
 static int build_state_json(char *buf, int bufsize) {
     int n = snprintf(buf, bufsize,
@@ -307,6 +364,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
 
         /* Broadcast state to all clients */
         rlen = build_state_json(resp, sizeof(resp));
+        save_config();
         ws_broadcast(resp, rlen);
         return;
     }
@@ -331,6 +389,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
 
         /* Broadcast updated state */
         rlen = build_state_json(resp, sizeof(resp));
+        save_config();
         ws_broadcast(resp, rlen);
         return;
     }
@@ -384,6 +443,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
         rlen = build_state_json(resp, sizeof(resp));
+        save_config();
         ws_broadcast(resp, rlen);
         return;
     }
@@ -409,6 +469,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
         rlen = build_state_json(resp, sizeof(resp));
+        save_config();
         ws_broadcast(resp, rlen);
         return;
     }
@@ -607,6 +668,8 @@ void http_start(void) {
     InitializeCriticalSection(&g_ws_lock);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         g_ws_clients[i] = INVALID_SOCKET;
+
+    load_config();
 
     HANDLE t = CreateThread(NULL, 0, http_server_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);

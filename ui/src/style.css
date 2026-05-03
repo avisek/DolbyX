@@ -154,7 +154,7 @@ body {
   position: relative;
 }
 
-.visualizer canvas {
+.visualizer svg {
   width: 100%;
   height: 100%;
 }

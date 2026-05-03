@@ -2,11 +2,10 @@
  * daemon/main.c — DolbyX Daemon
  *
  * Central background process for DolbyX. Manages the DDP ARM processor
- * and provides three communication channels:
+ * and provides two communication channels:
  *
- *   \\.\pipe\DolbyX     — audio (VST plugins connect here)
- *   \\.\pipe\DolbyXCtrl — control (legacy pipe, kept for compatibility)
- *   HTTP localhost:9876  — Web UI + WebSocket control
+ *   \\.\pipe\DolbyX      — audio (VST plugin connects here)
+ *   HTTP localhost:9876   — Web UI + WebSocket control
  *
  * Build (Windows, MinGW):
  *   x86_64-w64-mingw32-gcc -O2 -o dolbyx.exe main.c http.c \
@@ -20,18 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "http.h"
+#include "ddp_protocol.h"
 
 #define PIPE_AUDIO      "\\\\.\\pipe\\DolbyX"
-#define PIPE_CTRL       "\\\\.\\pipe\\DolbyXCtrl"
 #define READY_MAGIC     0xDD901DAA
 #define CMD_SHUTDOWN    0xFFFFFFFF
 #define CHUNK_SIZE      256
 #define MAX_FRAMES      131072
 #define MAX_SESSIONS    8
 
-/* ── Profile defaults (for HTTP state tracking) ───────────────────── */
-
-#include "ddp_protocol.h"
+/* ── Profile defaults ─────────────────────────────────────────────── */
 
 const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
     [DDP_PROFILE_MOVIE] = {2,2,96,96,200,2,7,0,0,0,10,1,3,0,4,2,144,0,0,0},
@@ -43,6 +40,8 @@ const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
     [DDP_PROFILE_OFF]   = {2,0,0,0,200,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0},
 };
 
+/* ── Logging ──────────────────────────────────────────────────────── */
+
 CRITICAL_SECTION g_log_lock;
 
 void log_msg(const char *fmt, ...) {
@@ -53,6 +52,8 @@ void log_msg(const char *fmt, ...) {
     fflush(stdout);
     LeaveCriticalSection(&g_log_lock);
 }
+
+/* ── Pipe I/O ─────────────────────────────────────────────────────── */
 
 static BOOL read_exact(HANDLE h, void *buf, DWORD n) {
     DWORD t = 0;
@@ -80,7 +81,7 @@ typedef struct {
 static const char *g_wsl_path = NULL;
 
 static Proc *proc_start(void) {
-    Proc *p = (Proc*)calloc(1, sizeof(Proc));
+    Proc *p = (Proc *)calloc(1, sizeof(Proc));
     InitializeCriticalSection(&p->lock);
     SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
     HANDLE si_r, so_w;
@@ -153,9 +154,8 @@ static void unreg_proc(Proc *p) {
     LeaveCriticalSection(&g_procs_lock);
 }
 
-/* Send a control command to one processor (thread-safe) */
 BOOL proc_ctrl(Proc *p, const BYTE *data, int dlen,
-                       BYTE *reply, int rlen) {
+               BYTE *reply, int rlen) {
     EnterCriticalSection(&p->lock);
     BOOL ok = write_exact(p->stdin_wr, data, dlen);
     if (ok && reply && rlen > 0)
@@ -175,21 +175,73 @@ static SECURITY_ATTRIBUTES *get_sa(void) {
     return &sa;
 }
 
-/* ── Control command: determine payload sizes ─────────────────────── */
-/*
- * Returns extra bytes to read after the 4-byte command header,
- * and sets *reply_len to the expected response size.
- */
+/* ── Control command sizes ────────────────────────────────────────── */
+
 static int ctrl_extra(DWORD cmd, int *reply_len) {
     *reply_len = 4;
     switch (cmd) {
-    case 0xFFFFFFF0: return 4;  /* SET_PARAM: +uint16 idx + int16 val → uint32 */
-    case 0xFFFFFFF1: return 4;  /* SET_PROFILE: +uint32 pid → uint32 */
-    case 0xFFFFFFF2: *reply_len = 40; return 0; /* GET_VIS: → int16[20] */
-    case 0xFFFFFFFD: return 0;  /* PING: → uint32 */
-    case 0xFFFFFFEF: return 4;  /* SET_IEQ_PRESET: +uint32 pid → uint32 */
-    default: return -1;         /* unknown */
+    case 0xFFFFFFF0: return 4;  /* SET_PARAM */
+    case 0xFFFFFFF1: return 4;  /* SET_PROFILE */
+    case 0xFFFFFFF2: *reply_len = 40; return 0; /* GET_VIS */
+    case 0xFFFFFFFD: return 0;  /* PING */
+    case 0xFFFFFFEF: return 4;  /* SET_IEQ_PRESET */
+    default: return -1;
     }
+}
+
+/* ── Apply saved state to a new processor ─────────────────────────── */
+
+static void apply_saved_state(Proc *proc) {
+    extern int g_current_profile;
+    extern int g_current_power;
+    extern int16_t g_current_params[];
+    extern int g_current_ieq;
+
+    /* Set profile */
+    BYTE pkt[8]; BYTE reply[4];
+    DWORD cmd = DDP_CMD_SET_PROFILE;
+    DWORD pid = (DWORD)g_current_profile;
+    memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pid, 4);
+    proc_ctrl(proc, pkt, 8, reply, 4);
+
+    /* Apply param overrides */
+    for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+        if (g_current_params[i] != g_profiles[g_current_profile][i]) {
+            cmd = DDP_CMD_SET_PARAM;
+            uint16_t pi = (uint16_t)i;
+            int16_t v = g_current_params[i];
+            memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+            proc_ctrl(proc, pkt, 8, reply, 4);
+        }
+    }
+
+    /* Apply IEQ preset */
+    if (g_current_ieq != DDP_IEQ_MANUAL && g_current_ieq >= 0 && g_current_ieq <= 2) {
+        cmd = DDP_CMD_SET_PARAM;
+        uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
+        memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+        proc_ctrl(proc, pkt, 8, reply, 4);
+
+        pi = DDP_PARAM_IEA; v = 10;
+        memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+        proc_ctrl(proc, pkt, 8, reply, 4);
+
+        cmd = DDP_CMD_SET_IEQ_PRESET;
+        DWORD preset = (DWORD)g_current_ieq;
+        memcpy(pkt, &cmd, 4); memcpy(pkt+4, &preset, 4);
+        proc_ctrl(proc, pkt, 8, reply, 4);
+    }
+
+    /* Power off → OFF profile */
+    if (!g_current_power) {
+        cmd = DDP_CMD_SET_PROFILE;
+        pid = DDP_PROFILE_OFF;
+        memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pid, 4);
+        proc_ctrl(proc, pkt, 8, reply, 4);
+    }
+
+    log_msg("Applied saved state: profile=%d power=%d ieq=%d\n",
+            g_current_profile, g_current_power, g_current_ieq);
 }
 
 /* ── Audio client thread ──────────────────────────────────────────── */
@@ -197,7 +249,7 @@ static int ctrl_extra(DWORD cmd, int *reply_len) {
 typedef struct { HANDLE pipe; int sid; } ClientArgs;
 
 static DWORD WINAPI audio_thread(LPVOID param) {
-    ClientArgs *a = (ClientArgs*)param;
+    ClientArgs *a = (ClientArgs *)param;
     HANDLE pipe = a->pipe; int sid = a->sid; free(a);
 
     log_msg("Audio %d: starting processor\n", sid);
@@ -209,10 +261,13 @@ static DWORD WINAPI audio_thread(LPVOID param) {
     log_msg("Audio %d: ready\n", sid);
     reg_proc(proc);
 
+    /* Apply daemon's current state to the new processor */
+    apply_saved_state(proc);
+
     DWORD magic = READY_MAGIC;
     write_exact(pipe, &magic, 4);
 
-    BYTE *buf = (BYTE*)malloc(MAX_FRAMES * 4);
+    BYTE *buf = (BYTE *)malloc(MAX_FRAMES * 4);
     int blocks = 0;
 
     for (;;) {
@@ -220,22 +275,20 @@ static DWORD WINAPI audio_thread(LPVOID param) {
         if (!read_exact(pipe, &fc, 4)) break;
         if (fc == CMD_SHUTDOWN) break;
 
-        /* Control commands */
+        /* Control commands from audio pipe (inline forwarding) */
         if (fc >= 0xFFFFFFE0) {
             int rlen = 0;
             int extra = ctrl_extra(fc, &rlen);
             if (extra < 0) continue;
-
             BYTE pkt[16]; memcpy(pkt, &fc, 4);
             if (extra > 0 && !read_exact(pipe, pkt+4, extra)) break;
-
             BYTE reply[40] = {0};
             proc_ctrl(proc, pkt, 4+extra, reply, rlen);
             write_exact(pipe, reply, rlen);
             continue;
         }
 
-        /* Audio */
+        /* Audio processing */
         if (fc > MAX_FRAMES) break;
         DWORD bytes = fc * 4;
         if (!read_exact(pipe, buf, bytes)) break;
@@ -252,7 +305,7 @@ static DWORD WINAPI audio_thread(LPVOID param) {
             off = 0;
             while (off < fc) {
                 DWORD ch = fc - off; if (ch > CHUNK_SIZE) ch = CHUNK_SIZE;
-                if (!read_exact(proc->stdout_rd, buf + off*4, ch*4)) { ok=FALSE; break; }
+                if (!read_exact(proc->stdout_rd, buf + off*4, ch*4)) { ok = FALSE; break; }
                 off += ch;
             }
         }
@@ -272,49 +325,7 @@ static DWORD WINAPI audio_thread(LPVOID param) {
     return 0;
 }
 
-/* ── Control client thread ────────────────────────────────────────── */
-
-static DWORD WINAPI ctrl_thread(LPVOID param) {
-    HANDLE pipe = (HANDLE)param;
-    log_msg("Control connected\n");
-
-    DWORD magic = READY_MAGIC;
-    write_exact(pipe, &magic, 4);
-
-    for (;;) {
-        DWORD cmd = 0;
-        if (!read_exact(pipe, &cmd, 4)) break;
-        if (cmd == CMD_SHUTDOWN) break;
-
-        int rlen = 0;
-        int extra = ctrl_extra(cmd, &rlen);
-        if (extra < 0) continue;
-
-        BYTE pkt[16]; memcpy(pkt, &cmd, 4);
-        if (extra > 0 && !read_exact(pipe, pkt+4, extra)) break;
-
-        /* Forward to ALL active audio processors */
-        BYTE reply[40] = {0};
-        BOOL any = FALSE;
-
-        EnterCriticalSection(&g_procs_lock);
-        for (int i = 0; i < MAX_SESSIONS; i++) {
-            if (!g_procs[i]) continue;
-            if (proc_ctrl(g_procs[i], pkt, 4+extra, reply, rlen))
-                any = TRUE;
-        }
-        LeaveCriticalSection(&g_procs_lock);
-
-        if (!any) memset(reply, 0xFF, rlen);
-        write_exact(pipe, reply, rlen);
-    }
-
-    log_msg("Control disconnected\n");
-    DisconnectNamedPipe(pipe); CloseHandle(pipe);
-    return 0;
-}
-
-/* ── Accept threads ───────────────────────────────────────────────── */
+/* ── Audio pipe accept thread ─────────────────────────────────────── */
 
 static DWORD WINAPI accept_audio(LPVOID param) {
     SECURITY_ATTRIBUTES *sa = get_sa();
@@ -330,22 +341,8 @@ static DWORD WINAPI accept_audio(LPVOID param) {
         ClientArgs *a = malloc(sizeof(ClientArgs));
         a->pipe = p; a->sid = sid;
         HANDLE t = CreateThread(NULL, 0, audio_thread, a, 0, NULL);
-        if (t) CloseHandle(t); else { free(a); DisconnectNamedPipe(p); CloseHandle(p); }
-    }
-    return 0;
-}
-
-static DWORD WINAPI accept_ctrl(LPVOID param) {
-    SECURITY_ATTRIBUTES *sa = get_sa();
-    for (;;) {
-        HANDLE p = CreateNamedPipeA(PIPE_CTRL, PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE|PIPE_READMODE_BYTE|PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES, 64*1024, 64*1024, 0, sa);
-        if (p == INVALID_HANDLE_VALUE) { Sleep(1000); continue; }
-        if (!ConnectNamedPipe(p, NULL) && GetLastError() != ERROR_PIPE_CONNECTED)
-            { CloseHandle(p); continue; }
-        HANDLE t = CreateThread(NULL, 0, ctrl_thread, p, 0, NULL);
-        if (t) CloseHandle(t); else { DisconnectNamedPipe(p); CloseHandle(p); }
+        if (t) CloseHandle(t);
+        else { free(a); DisconnectNamedPipe(p); CloseHandle(p); }
     }
     return 0;
 }
@@ -353,17 +350,12 @@ static DWORD WINAPI accept_ctrl(LPVOID param) {
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
-    /* Initialize Winsock for HTTP/WebSocket server */
     WSADATA wd;
     WSAStartup(MAKEWORD(2, 2), &wd);
-
     InitializeCriticalSection(&g_log_lock);
     InitializeCriticalSection(&g_procs_lock);
 
-    printf(
-        "DolbyX Daemon v2.0\n"
-        "==================\n\n"
-    );
+    printf("DolbyX Daemon v2.0\n==================\n\n");
     if (argc < 2) {
         printf("Usage: dolbyx <wsl-path-to-DolbyX/arm>\n");
         return 1;
@@ -373,20 +365,17 @@ int main(int argc, char *argv[]) {
 
     log_msg("Smoke test...\n");
     Proc *test = proc_start();
-    if (!test) { log_msg("FATAL\n"); return 1; }
+    if (!test) { log_msg("FATAL: cannot start processor\n"); return 1; }
     proc_stop(test);
     log_msg("OK\n\n");
 
-    /* Start all server threads */
+    /* Start servers */
     HANDLE t1 = CreateThread(NULL, 0, accept_audio, NULL, 0, NULL);
-    HANDLE t2 = CreateThread(NULL, 0, accept_ctrl, NULL, 0, NULL);
     http_start();
 
-    log_msg("Listening (Ctrl+C to stop)\n\n");
+    log_msg("DolbyX running -> http://localhost:9876\n\n");
 
     WaitForSingleObject(t1, INFINITE);
-    WaitForSingleObject(t2, INFINITE);
-
     WSACleanup();
     return 0;
 }

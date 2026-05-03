@@ -2,21 +2,21 @@
  * ddp_vst.c — DolbyX VST2 Plugin
  *
  * Audio processing via named pipe to the DolbyX daemon.
- * No built-in editor — Web UI is accessed via browser.
+ * No built-in editor — opens Web UI in system browser.
+ * Daemon owns all state/persistence — VST is stateless.
  *
  * Build:
  *   x86_64-w64-mingw32-gcc -shared -O2 -o DolbyDDP.dll \
- *     ddp_vst.c -static
+ *     ddp_vst.c -static -lshell32
  */
 
 #include <windows.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "vst2_abi.h"
 #include "ddp_protocol.h"
-
-/* ── Configuration ────────────────────────────────────────────────── */
 
 #define DDP_UNIQUE_ID       0x44445031
 #define DDP_VERSION         200
@@ -24,41 +24,11 @@
 #define DDP_LATENCY_SAMPLES 512
 #define MAX_FRAMES          131072
 #define PIPE_NAME           "\\\\.\\pipe\\DolbyX"
-
-/* ── Profile Data (must match ddp_processor.c) ────────────────────── */
-
-const int16_t g_profiles[DDP_PROFILE_COUNT][DDP_PARAM_COUNT] = {
-    [DDP_PROFILE_MOVIE] = {
-        2, 2, 96, 96, 200, 2, 7, 0, 0, 0, 10, 1, 3, 0, 4, 2, 144, 0, 0, 0
-    },
-    [DDP_PROFILE_MUSIC] = {
-        2, 2, 48, 0, 200, 2, 4, 0, 0, 0, 10, 1, 2, 0, 4, 2, 144, 0, 0, 0
-    },
-    [DDP_PROFILE_GAME] = {
-        2, 2, 0, 0, 200, 2, 0, 1, 0, 0, 10, 0, 7, 0, 4, 2, 144, 2, 0, 0
-    },
-    [DDP_PROFILE_VOICE] = {
-        2, 0, 0, 0, 200, 2, 0, 0, 0, 0, 10, 1, 10, 0, 4, 2, 144, 0, 0, 0
-    },
-    [DDP_PROFILE_USER1] = {
-        2, 0, 48, 48, 200, 2, 5, 0, 0, 0, 10, 0, 7, 0, 4, 2, 144, 2, 0, 0
-    },
-    [DDP_PROFILE_USER2] = {
-        2, 0, 48, 48, 200, 2, 5, 0, 0, 0, 10, 0, 7, 0, 4, 2, 144, 2, 0, 0
-    },
-    [DDP_PROFILE_OFF] = {
-        2, 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0
-    },
-};
+#define WEBUI_URL           L"http://localhost:9876"
 
 /* ── Plugin State ─────────────────────────────────────────────────── */
 
-typedef struct DDPState DDPState;
-static void logf_(DDPState *st, const char *fmt, ...);
-static BOOL p_read(HANDLE h, void *buf, DWORD n);
-static BOOL p_write(HANDLE h, const void *buf, DWORD n);
-
-struct DDPState {
+typedef struct {
     HANDLE          pipe;
     int16_t        *pcm_buf;
     int             connected;
@@ -68,12 +38,7 @@ struct DDPState {
     char            dll_dir[512];
     FILE           *logfp;
     audioMasterCallback master;
-
-    /* Saved state (loaded from config, applied on first connect) */
-    int             saved_profile;
-    int             saved_power;
-    int             state_applied;
-};
+} DDPState;
 
 /* ── Logging ──────────────────────────────────────────────────────── */
 
@@ -81,7 +46,6 @@ static void open_log(DDPState *st) {
     char p[600];
     snprintf(p, sizeof(p), "%s\\DolbyDDP.log", st->dll_dir);
     st->logfp = fopen(p, "a");
-    if (!st->logfp) st->logfp = fopen("C:\\Users\\Public\\DolbyDDP.log", "a");
     if (!st->logfp) {
         char t[MAX_PATH]; GetTempPathA(sizeof(t), t);
         snprintf(p, sizeof(p), "%sDolbyDDP.log", t);
@@ -103,23 +67,17 @@ static void logf_(DDPState *st, const char *fmt, ...) {
 
 static BOOL p_read(HANDLE h, void *buf, DWORD n) {
     DWORD t = 0;
-    while (t < n) {
-        DWORD r = 0;
-        if (!ReadFile(h, (BYTE *)buf + t, n - t, &r, NULL) || r == 0)
-            return FALSE;
-        t += r;
-    }
+    while (t < n) { DWORD r = 0;
+        if (!ReadFile(h, (BYTE*)buf+t, n-t, &r, NULL) || !r) return FALSE;
+        t += r; }
     return TRUE;
 }
 
 static BOOL p_write(HANDLE h, const void *buf, DWORD n) {
     DWORD t = 0;
-    while (t < n) {
-        DWORD w = 0;
-        if (!WriteFile(h, (const BYTE *)buf + t, n - t, &w, NULL) || w == 0)
-            return FALSE;
-        t += w;
-    }
+    while (t < n) { DWORD w = 0;
+        if (!WriteFile(h, (const BYTE*)buf+t, n-t, &w, NULL) || !w) return FALSE;
+        t += w; }
     return TRUE;
 }
 
@@ -134,127 +92,31 @@ static void get_dll_dir(char *buf, size_t sz) {
     if (p) *p = '\0';
 }
 
-/* ── Saved State ──────────────────────────────────────────────────── */
+/* ── Connection ───────────────────────────────────────────────────── */
 
-static void load_saved_state(DDPState *st) {
-    char ini[600];
-    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
-    st->saved_profile = GetPrivateProfileIntA("DolbyX", "profile",
-                                               DDP_PROFILE_MUSIC, ini);
-    st->saved_power = GetPrivateProfileIntA("DolbyX", "power", 1, ini);
-    if (st->saved_profile < 0 || st->saved_profile >= DDP_PROFILE_USER_COUNT)
-        st->saved_profile = DDP_PROFILE_MUSIC;
-}
-
-static void apply_saved_state(DDPState *st) {
-    if (st->state_applied || !st->connected) return;
-    st->state_applied = 1;
-
-    logf_(st, "Restoring profile %d (power=%d)\n",
-          st->saved_profile, st->saved_power);
-
-    DWORD cmd, status = 0;
-
-    /* Set profile */
-    cmd = DDP_CMD_SET_PROFILE;
-    DWORD pid = (DWORD)st->saved_profile;
-    p_write(st->pipe, &cmd, 4);
-    p_write(st->pipe, &pid, 4);
-    p_read(st->pipe, &status, 4);
-
-    /* Apply per-profile overrides from config */
-    char ini[600];
-    snprintf(ini, sizeof(ini), "%s\\DolbyX.ini", st->dll_dir);
-    static const char *keys[] = {
-        "endp","vdhe","dhsb","dssb","dssf","ngon","dvla","dvle","dvme",
-        "ieon","iea","deon","dea","ded","plmd","aoon","vmb","vmon","geon","plb"
-    };
-    static const char *secs[] = {"Movie","Music","Game","Voice","Custom1","Custom2"};
-    const char *s = secs[st->saved_profile];
-
-    for (int i = 1; i < DDP_PARAM_COUNT; i++) {
-        int def = g_profiles[st->saved_profile][i];
-        int val = GetPrivateProfileIntA(s, keys[i], def, ini);
-        if (val != def) {
-            cmd = DDP_CMD_SET_PARAM;
-            uint16_t pi = (uint16_t)i;
-            int16_t v = (int16_t)val;
-            p_write(st->pipe, &cmd, 4);
-            p_write(st->pipe, &pi, 2);
-            p_write(st->pipe, &v, 2);
-            p_read(st->pipe, &status, 4);
-        }
-    }
-
-    /* Apply IEQ preset */
-    int ieq = GetPrivateProfileIntA(s, "ieq_mode", DDP_IEQ_MANUAL, ini);
-    if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
-        cmd = DDP_CMD_SET_PARAM;
-        uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
-        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
-        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
-
-        pi = DDP_PARAM_IEA; v = 10;
-        p_write(st->pipe, &cmd, 4); p_write(st->pipe, &pi, 2);
-        p_write(st->pipe, &v, 2); p_read(st->pipe, &status, 4);
-
-        cmd = DDP_CMD_SET_IEQ_PRESET;
-        DWORD preset = (DWORD)ieq;
-        p_write(st->pipe, &cmd, 4);
-        p_write(st->pipe, &preset, 4);
-        p_read(st->pipe, &status, 4);
-    }
-
-    /* Power off → send OFF profile */
-    if (!st->saved_power) {
-        cmd = DDP_CMD_SET_PROFILE;
-        DWORD off_pid = DDP_PROFILE_OFF;
-        p_write(st->pipe, &cmd, 4);
-        p_write(st->pipe, &off_pid, 4);
-        p_read(st->pipe, &status, 4);
-        logf_(st, "Power OFF — applied OFF profile\n");
-    }
-}
-
-/* ── Bridge Connection ────────────────────────────────────────────── */
-
-static int connect_bridge(DDPState *st) {
+static int connect_pipe(DDPState *st) {
     if (st->connected) return 0;
-
     for (int attempt = 0; attempt < 5; attempt++) {
         st->pipe = CreateFileA(PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
                                0, NULL, OPEN_EXISTING, 0, NULL);
         if (st->pipe != INVALID_HANDLE_VALUE) break;
-        DWORD err = GetLastError();
-        if (err == ERROR_PIPE_BUSY) {
-            if (WaitNamedPipeA(PIPE_NAME, 2000)) continue;
-        }
-        logf_(st, "Pipe open failed: err=%lu (attempt %d)\n", err, attempt + 1);
-        return -1;
+        if (GetLastError() == ERROR_PIPE_BUSY)
+            WaitNamedPipeA(PIPE_NAME, 2000);
+        else return -1;
     }
-
     if (st->pipe == INVALID_HANDLE_VALUE) return -1;
-
     DWORD mode = PIPE_READMODE_BYTE;
     SetNamedPipeHandleState(st->pipe, &mode, NULL, NULL);
-
     DWORD magic = 0;
     if (!p_read(st->pipe, &magic, 4) || magic != DDP_READY_MAGIC) {
-        logf_(st, "Bad magic: 0x%08X\n", magic);
-        CloseHandle(st->pipe); st->pipe = INVALID_HANDLE_VALUE;
-        return -1;
+        CloseHandle(st->pipe); st->pipe = INVALID_HANDLE_VALUE; return -1;
     }
-
     logf_(st, "Connected to daemon\n");
     st->connected = 1; st->bypass = 0; st->block_count = 0;
-
-    if (!st->state_applied)
-        apply_saved_state(st);
-
     return 0;
 }
 
-static void disconnect_bridge(DDPState *st) {
+static void disconnect_pipe(DDPState *st) {
     if (!st->connected) return;
     DWORD cmd = DDP_CMD_SHUTDOWN;
     p_write(st->pipe, &cmd, 4);
@@ -265,13 +127,13 @@ static void disconnect_bridge(DDPState *st) {
 
 /* ── processReplacing ────────────────────────────────────────────── */
 
-static void ddp_processReplacing(struct AEffect *effect,
-                                  float **inputs, float **outputs,
-                                  int32_t sampleFrames) {
+static void ddp_process(struct AEffect *effect,
+                        float **inputs, float **outputs,
+                        int32_t sampleFrames) {
     DDPState *st = (DDPState *)effect->object;
 
     if (!st->connected && !st->bypass) {
-        if (connect_bridge(st) != 0) { st->bypass = 1; }
+        if (connect_pipe(st) != 0) st->bypass = 1;
     }
 
     if (!st->connected || st->bypass || sampleFrames <= 0) {
@@ -289,20 +151,13 @@ static void ddp_processReplacing(struct AEffect *effect,
         float l = inputs[0][i], r = inputs[1][i];
         if (l >  1.0f) l =  1.0f; if (l < -1.0f) l = -1.0f;
         if (r >  1.0f) r =  1.0f; if (r < -1.0f) r = -1.0f;
-        st->pcm_buf[i * 2]     = (int16_t)(l * 32767.0f);
-        st->pcm_buf[i * 2 + 1] = (int16_t)(r * 32767.0f);
+        st->pcm_buf[i*2]   = (int16_t)(l * 32767.0f);
+        st->pcm_buf[i*2+1] = (int16_t)(r * 32767.0f);
     }
 
     DWORD fc = (DWORD)frames;
-    if (!p_write(st->pipe, &fc, 4) ||
-        !p_write(st->pipe, st->pcm_buf, pcm_bytes)) {
-        st->connected = 0; st->bypass = 1;
-        memcpy(outputs[0], inputs[0], sampleFrames * sizeof(float));
-        memcpy(outputs[1], inputs[1], sampleFrames * sizeof(float));
-        return;
-    }
-
-    if (!p_read(st->pipe, st->pcm_buf, pcm_bytes)) {
+    if (!p_write(st->pipe, &fc, 4) || !p_write(st->pipe, st->pcm_buf, pcm_bytes) ||
+        !p_read(st->pipe, st->pcm_buf, pcm_bytes)) {
         st->connected = 0; st->bypass = 1;
         memcpy(outputs[0], inputs[0], sampleFrames * sizeof(float));
         memcpy(outputs[1], inputs[1], sampleFrames * sizeof(float));
@@ -311,8 +166,8 @@ static void ddp_processReplacing(struct AEffect *effect,
 
     const float scale = 1.0f / 32767.0f;
     for (int i = 0; i < frames; i++) {
-        outputs[0][i] = (float)st->pcm_buf[i * 2]     * scale;
-        outputs[1][i] = (float)st->pcm_buf[i * 2 + 1] * scale;
+        outputs[0][i] = st->pcm_buf[i*2]   * scale;
+        outputs[1][i] = st->pcm_buf[i*2+1] * scale;
     }
     for (int i = frames; i < sampleFrames; i++) {
         outputs[0][i] = 0.0f; outputs[1][i] = 0.0f;
@@ -323,22 +178,10 @@ static void ddp_processReplacing(struct AEffect *effect,
         logf_(st, "Block %d: %d frames\n", st->block_count, frames);
 }
 
-/* ── Parameters ───────────────────────────────────────────────────── */
-
-static float ddp_getParam(struct AEffect *e, int32_t i) {
-    DDPState *st = (DDPState *)e->object;
-    return (i == 0 && st) ? (st->bypass ? 1.0f : 0.0f) : 0.0f;
-}
-
-static void ddp_setParam(struct AEffect *e, int32_t i, float v) {
-    DDPState *st = (DDPState *)e->object;
-    if (i == 0 && st) {
-        if (v > 0.5f && !st->bypass) disconnect_bridge(st);
-        st->bypass = (v > 0.5f) ? 1 : 0;
-    }
-}
-
 /* ── Dispatcher ───────────────────────────────────────────────────── */
+
+static float ddp_getParam(struct AEffect *e, int32_t i) { (void)e;(void)i; return 0; }
+static void ddp_setParam(struct AEffect *e, int32_t i, float v) { (void)e;(void)i;(void)v; }
 
 static intptr_t ddp_dispatch(struct AEffect *effect,
     int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
@@ -351,25 +194,42 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
         open_log(st);
         char exe[MAX_PATH] = {0};
         GetModuleFileNameA(NULL, exe, sizeof(exe));
-        logf_(st, "\n===== DolbyX v2.0 opened =====\n");
+        logf_(st, "\n===== DolbyX v2.0 =====\n");
         logf_(st, "Host: %s\n", exe);
         st->pcm_buf = (int16_t *)malloc(MAX_FRAMES * 2 * sizeof(int16_t));
-        load_saved_state(st);
-        logf_(st, "Saved: profile=%d power=%d\n",
-              st->saved_profile, st->saved_power);
-        if (connect_bridge(st) != 0)
+        /* State is managed by daemon — VST just connects and processes audio */
+        if (connect_pipe(st) != 0)
             logf_(st, "Daemon not running\n");
         return 0;
     }
 
     case effClose:
         logf_(st, "effClose: %d blocks\n", st->block_count);
-        disconnect_bridge(st);
+        disconnect_pipe(st);
         if (st->logfp) fclose(st->logfp);
         free(st->pcm_buf);
         free(st);
         effect->object = NULL;
         return 0;
+
+    /* Editor — open Web UI in browser */
+    case effEditGetRect: {
+        static ERect r = {0, 0, 0, 0};
+        *(ERect **)ptr = &r;
+        return 1;
+    }
+    case effEditOpen: {
+        ShellExecuteW(NULL, L"open", WEBUI_URL, NULL, NULL, SW_SHOWNORMAL);
+        /* Dismiss the VST popup window (but not the main APO editor) */
+        HWND root = GetAncestor((HWND)ptr, GA_ROOT);
+        char title[256] = {0};
+        GetWindowTextA(root, title, sizeof(title));
+        if (strstr(title, "DolbyX") != NULL)
+            PostMessage(root, WM_CLOSE, 0, 0);
+        return 1;
+    }
+    case effEditClose: return 0;
+    case effEditIdle:  return 0;
 
     case effSetSampleRate:
         if (st) { st->sample_rate = opt; logf_(st, "Rate: %.0f\n", opt); }
@@ -382,33 +242,24 @@ static intptr_t ddp_dispatch(struct AEffect *effect,
             logf_(st, "MainsChanged: %d\n", (int)value);
             if (value == 1 && !st->connected && !st->bypass) {
                 st->bypass = 0;
-                connect_bridge(st);
+                connect_pipe(st);
             }
         }
         return 0;
 
-    case effGetEffectName:    strcpy((char *)ptr, "DolbyX");     return 1;
-    case effGetVendorString:  strcpy((char *)ptr, "DolbyX");     return 1;
-    case effGetProductString: strcpy((char *)ptr, "DolbyX");     return 1;
+    case effGetEffectName:    strcpy((char *)ptr, "DolbyX");  return 1;
+    case effGetVendorString:  strcpy((char *)ptr, "DolbyX");  return 1;
+    case effGetProductString: strcpy((char *)ptr, "DolbyX");  return 1;
     case effGetVendorVersion: return DDP_VERSION;
     case effGetVstVersion:    return kVstVersion;
     case effGetPlugCategory:  return kPlugCategEffect;
 
     case effCanDo:
-        if (ptr && !strcmp((char *)ptr, "receiveVstEvents"))     return -1;
-        if (ptr && !strcmp((char *)ptr, "receiveVstMidiEvent"))  return -1;
+        if (ptr && !strcmp((char *)ptr, "receiveVstEvents"))    return -1;
+        if (ptr && !strcmp((char *)ptr, "receiveVstMidiEvent")) return -1;
         return 0;
 
-    case effGetParamName: case effGetParamLabel: case effGetParamDisplay:
-        if (index == 0 && ptr) {
-            strcpy((char *)ptr, opcode == effGetParamDisplay
-                ? (st->bypass ? "ON" : "OFF") : "Bypass");
-            return 1;
-        }
-        return 0;
-
-    default:
-        return 0;
+    default: return 0;
     }
 }
 
@@ -436,15 +287,15 @@ VST_EXPORT struct AEffect *VSTPluginMain(audioMasterCallback audioMaster) {
     e->setParameter     = ddp_setParam;
     e->getParameter     = ddp_getParam;
     e->numPrograms      = 1;
-    e->numParams        = 1;
+    e->numParams        = 0;
     e->numInputs        = DDP_NUM_CHANNELS;
     e->numOutputs       = DDP_NUM_CHANNELS;
-    e->flags            = effFlagsCanReplacing;
+    e->flags            = effFlagsCanReplacing | effFlagsHasEditor;
     e->initialDelay     = DDP_LATENCY_SAMPLES;
     e->object           = st;
     e->uniqueID         = DDP_UNIQUE_ID;
     e->version          = DDP_VERSION;
-    e->processReplacing = ddp_processReplacing;
+    e->processReplacing = ddp_process;
 
     return e;
 }
@@ -458,6 +309,5 @@ VST_EXPORT struct AEffect *main_entry(audioMasterCallback m) {
 #endif
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD r, LPVOID p) {
-    (void)h; (void)r; (void)p;
-    return TRUE;
+    (void)h; (void)r; (void)p; return TRUE;
 }
