@@ -146,15 +146,16 @@ body {
 /* ── Visualizer ─────────────────────────────────── */
 
 .visualizer {
-  height: 110px;
+  height: 200px;
   border-radius: var(--radius);
-  background: var(--panel);
+  background: #050a10;
   margin-bottom: 14px;
   overflow: hidden;
   position: relative;
 }
 
 .visualizer svg {
+  display: block;
   width: 100%;
   height: 100%;
 }

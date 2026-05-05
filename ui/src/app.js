@@ -1,22 +1,35 @@
 /**
  * DolbyX Web UI — Application logic
  *
- * All user interactions use event delegation (no inline onclick handlers).
- * WebSocket auto-connect/reconnect. Keyboard accessible.
+ * WebSocket auto-connect/reconnect, state sync, SVG visualizer.
+ * All interactions via event delegation. Keyboard accessible.
  */
+
+import { initVisualizer, updateVisBars, setEqLevels, setKnobCallback } from './visualizer.js';
 
 const PROFILES = ['Movie', 'Music', 'Game', 'Voice', 'Custom 1', 'Custom 2'];
 const IEQ_MODES = ['Open', 'Rich', 'Focused', 'Manual'];
 
-const TOGGLES = [
-  { label: 'Volume Leveler',       en: 7,  amt: 6,  min: 0, max: 10,  onVal: 1 },
-  { label: 'Dialogue Enhancer',    en: 11, amt: 12, min: 0, max: 16,  onVal: 1 },
-  { label: 'Surround Virtualizer', en: 1,  amt: 2,  min: 0, max: 192, onVal: 2 },
-];
+/* IEQ preset target curves (from ds1-default.xml) */
+const IEQ_PRESETS = {
+  0: [117,133,188,176,141,149,175,185,185,200,236,242,228,213,182,132,110,68,-27,-240],  // Open
+  1: [67,95,172,163,168,201,189,242,196,221,192,186,168,139,102,57,35,9,-55,-235],        // Rich
+  2: [-419,-112,75,116,113,160,165,80,61,79,98,121,64,70,44,-71,-33,-100,-238,-411],       // Focused
+};
 
 let ws = null;
 let state = { profile: 1, power: 1, params: [], ieq: 3 };
 let reconnectTimer = null;
+
+/* Map IEQ values (-500..+500) to grid rows (0..48, center=24) */
+function ieqToGrid(values) {
+  return values.map(v => Math.round(24 + (v / 500) * 24));
+}
+
+/* Map grid row (0..48) to IEQ value (-500..+500) */
+function gridToIeq(row) {
+  return Math.round((row - 24) / 24 * 500);
+}
 
 /* ── WebSocket ────────────────────────────────────── */
 
@@ -42,7 +55,8 @@ function connect() {
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'state') { state = msg; render(); }
+      if (msg.type === 'state') { state = msg; render(); renderEq(); }
+      if (msg.type === 'vis') { updateVisBars(msg.bands); }
     } catch (_) {}
   };
 }
@@ -57,7 +71,7 @@ function setConn(cls, text) {
   el.textContent = text;
 }
 
-/* ── Render ───────────────────────────────────────── */
+/* ── Render Controls ──────────────────────────────── */
 
 function render() {
   const pwr = document.getElementById('pwr');
@@ -100,25 +114,51 @@ function render() {
     : `Intelligent EQ: ${IEQ_MODES[state.ieq]}`;
 }
 
+/* ── Render EQ levels in visualizer ───────────────── */
+
+function renderEq() {
+  if (state.ieq >= 0 && state.ieq <= 2 && IEQ_PRESETS[state.ieq]) {
+    setEqLevels(ieqToGrid(IEQ_PRESETS[state.ieq]));
+  } else {
+    // Manual mode: flat at center
+    setEqLevels(new Array(20).fill(24));
+  }
+}
+
 /* ── Event Delegation ─────────────────────────────── */
 
 function init() {
+  /* Initialize SVG visualizer */
+  const visContainer = document.getElementById('visualizer');
+  initVisualizer(visContainer);
+
+  /* EQ knob drag callback */
+  setKnobCallback((knobIndex, gridRow) => {
+    // TODO: send graphic EQ band update to daemon
+    // For now, this updates the SVG visually only
+  });
+
+  /* Power */
   document.getElementById('pwr').addEventListener('click', () =>
     send({ cmd: 'power', on: !state.power }));
 
+  /* Reset */
   document.getElementById('resetBtn').addEventListener('click', () =>
     send({ cmd: 'reset_profile' }));
 
+  /* Profiles */
   document.getElementById('profiles').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-profile]');
     if (btn) send({ cmd: 'set_profile', id: parseInt(btn.dataset.profile) });
   });
 
+  /* IEQ modes */
   document.getElementById('ieqModes').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-ieq]');
     if (btn) send({ cmd: 'set_ieq', preset: parseInt(btn.dataset.ieq) });
   });
 
+  /* Toggle sliders */
   document.querySelectorAll('.ctrl-row').forEach(row => {
     const amt = parseInt(row.dataset.amt);
     const en = parseInt(row.dataset.en);
@@ -138,6 +178,7 @@ function init() {
 
   connect();
   render();
+  renderEq();
 }
 
 document.addEventListener('DOMContentLoaded', init);
