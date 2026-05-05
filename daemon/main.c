@@ -185,6 +185,7 @@ static int ctrl_extra(DWORD cmd, int *reply_len) {
     case 0xFFFFFFF2: *reply_len = 40; return 0; /* GET_VIS */
     case 0xFFFFFFFD: return 0;  /* PING */
     case 0xFFFFFFEF: return 4;  /* SET_IEQ_PRESET */
+    case 0xFFFFFFEE: *reply_len = 40; return 40; /* SET_GEQ: 20×int16 → 20×int16 */
     default: return -1;
     }
 }
@@ -193,7 +194,7 @@ static int ctrl_extra(DWORD cmd, int *reply_len) {
 
 static void apply_saved_state(Proc *proc) {
     /* Set profile */
-    BYTE pkt[8]; BYTE reply[4];
+    BYTE pkt[48]; BYTE reply[40];
     DWORD cmd = DDP_CMD_SET_PROFILE;
     DWORD pid = (DWORD)g_current_profile;
     memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pid, 4);
@@ -227,6 +228,17 @@ static void apply_saved_state(Proc *proc) {
         DWORD preset = (DWORD)ieq;
         memcpy(pkt, &cmd, 4); memcpy(pkt+4, &preset, 4);
         proc_ctrl(proc, pkt, 8, reply, 4);
+    }
+
+    /* Apply graphic EQ bands */
+    int16_t *geq = g_profile_states[g_current_profile].geq;
+    int has_geq = 0;
+    for (int i = 0; i < 20; i++) if (geq[i] != 0) { has_geq = 1; break; }
+    if (has_geq) {
+        cmd = DDP_CMD_SET_GEQ;
+        memcpy(pkt, &cmd, 4);
+        memcpy(pkt + 4, geq, 40);
+        proc_ctrl(proc, pkt, 44, reply, 40);
     }
 
     /* Power off → OFF profile */
@@ -277,7 +289,7 @@ static DWORD WINAPI audio_thread(LPVOID param) {
             int rlen = 0;
             int extra = ctrl_extra(fc, &rlen);
             if (extra < 0) continue;
-            BYTE pkt[16]; memcpy(pkt, &fc, 4);
+            BYTE pkt[48]; memcpy(pkt, &fc, 4);
             if (extra > 0 && !read_exact(pipe, pkt+4, extra)) break;
             BYTE reply[40] = {0};
             proc_ctrl(proc, pkt, 4+extra, reply, rlen);

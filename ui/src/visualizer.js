@@ -1,56 +1,27 @@
 /**
  * DolbyX SVG Visualizer + Equalizer
  *
- * 7-layer SVG matching the DDP Android app:
- *   1. Background gradient
- *   2. Grid pattern (20 cols × 48 rows)
- *   3. Frequency amplitude bars (quantized to grid)
- *   4. EQ knob lines (5 glowing verticals)
- *   5. Applied EQ band levels (20 bright column lines)
- *   6. EQ knob handles (5 circles)
- *   7. EQ curve (Catmull-Rom spline)
+ * Data flow (round-trip through processor):
+ *   1. Pointer drag → 5-band knob values
+ *   2. Interpolate 5 → 20 band gains
+ *   3. Send 20-band gains to daemon via WebSocket
+ *   4. Daemon sends to processor (libdseffect.so)
+ *   5. Processor returns applied 20-band gains
+ *   6. Daemon broadcasts to UI
+ *   7. UI renders from received data (not from pointer values)
  *
- * Pointer events on SVG container — X selects band, Y sets amplitude.
+ * Grid quantization: ONLY on frequency amplitude bars.
+ * EQ elements (levels, curve, handles) move smoothly.
  */
 
 const NS = 'http://www.w3.org/2000/svg';
 
-const COLS = 20;       // frequency bands
-const ROWS = 48;       // vertical quantization steps
-const KNOBS = 5;       // EQ control points
-const KNOB_BANDS = [0, 5, 10, 15, 19]; // which bands have knobs
+const COLS = 20;
+const ROWS = 48;
+const KNOBS = 5;
+const KNOB_BANDS = [0, 5, 10, 15, 19];
 
-/* Colors */
-const COL_BAR_DIM   = 'rgba(0, 160, 200, 0.25)';
-const COL_BAR_BRIGHT = 'rgba(0, 210, 255, 0.7)';
-const COL_EQ_LINE   = 'rgba(0, 210, 255, 0.35)';
-const COL_EQ_CURVE  = '#00d4ff';
-const COL_EQ_GLOW   = 'rgba(0, 210, 255, 0.4)';
-const COL_HANDLE    = '#00d4ff';
-const COL_HANDLE_RING = 'rgba(0, 210, 255, 0.3)';
-const COL_GRID_LINE = 'rgba(60, 90, 120, 0.15)';
-const COL_GRID_LINE_H = 'rgba(60, 90, 120, 0.08)';
-
-/* State */
-let svgEl = null;
-let cellW = 0, cellH = 0;
-let svgW = 0, svgH = 0;
-
-/* Data (updated from WebSocket) */
-let visBands = new Array(COLS).fill(0);     // 0..ROWS amplitude per band
-let eqLevels = new Array(COLS).fill(24);    // 0..ROWS EQ level per band (center=24)
-let knobValues = new Array(KNOBS).fill(24); // knob positions in grid rows
-
-/* DOM references for fast updates */
-let barEls = [];          // dim bars
-let eqLevelEls = [];      // bright level lines
-let knobLineEls = [];     // vertical knob lines
-let knobCircleEls = [];   // knob handle circles
-let knobGlowEls = [];     // knob outer glow circles
-let eqCurveEl = null;     // curve path
-let dragging = -1;        // which knob (-1 = none)
-
-/* ── SVG element helpers ──────────────────────────── */
+/* ── SVG element helper ───────────────────────────── */
 
 function el(tag, attrs) {
   const e = document.createElementNS(NS, tag);
@@ -58,213 +29,58 @@ function el(tag, attrs) {
   return e;
 }
 
-function g(id) {
-  return el('g', { id });
-}
-
-/* ── Catmull-Rom spline through points ────────────── */
+/* ── Catmull-Rom spline ───────────────────────────── */
 
 function catmullRom(points) {
   if (points.length < 2) return '';
   const pts = [points[0], ...points, points[points.length - 1]];
-  let d = `M${points[0][0]},${points[0][1]}`;
+  let d = `M${pts[1][0].toFixed(1)},${pts[1][1].toFixed(1)}`;
   for (let i = 1; i < pts.length - 2; i++) {
-    const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2];
+    const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2];
     const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
     const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
     const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
     const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+    d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
   }
   return d;
 }
 
-/* ── Build the SVG ────────────────────────────────── */
+/* ── State ────────────────────────────────────────── */
 
-export function initVisualizer(container) {
-  const rect = container.getBoundingClientRect();
-  svgW = rect.width;
-  svgH = rect.height;
-  cellW = svgW / COLS;
-  cellH = svgH / ROWS;
+let svgEl = null;
+let cellW = 0, cellH = 0, svgW = 0, svgH = 0;
 
-  const svg = el('svg', {
-    width: '100%', height: '100%',
-    viewBox: `0 0 ${svgW} ${svgH}`,
-    preserveAspectRatio: 'none',
-  });
-  svgEl = svg;
+/* DOM references */
+let barEls = [];
+let eqLevelEls = [];
+let knobLineEls = [];
+let knobCircleEls = [];
+let knobGlowEls = [];
+let eqCurveEl = null;
 
-  /* ── Defs ─────────────────────────────────────── */
-  const defs = el('defs', {});
+/* Current displayed EQ levels (from processor, 20 bands, smooth Y coords) */
+let displayedEqY = new Array(COLS).fill(0);
 
-  // Background gradient: dark navy bottom-center → black top edges
-  const bgGrad = el('radialGradient', {
-    id: 'bg-grad', cx: '50%', cy: '100%', r: '80%',
-    fx: '50%', fy: '100%',
-  });
-  bgGrad.appendChild(el('stop', { offset: '0%', 'stop-color': '#0a1628' }));
-  bgGrad.appendChild(el('stop', { offset: '100%', 'stop-color': '#050a10' }));
-  defs.appendChild(bgGrad);
+/* Drag state */
+let dragging = -1;
+let onGEQChange = null;
 
-  // Vertical line gradient (fades at top and bottom)
-  const lineGrad = el('linearGradient', {
-    id: 'line-fade', x1: '0', y1: '0', x2: '0', y2: '1',
-  });
-  lineGrad.appendChild(el('stop', { offset: '0%', 'stop-color': COL_EQ_LINE, 'stop-opacity': '0' }));
-  lineGrad.appendChild(el('stop', { offset: '20%', 'stop-color': COL_EQ_LINE, 'stop-opacity': '1' }));
-  lineGrad.appendChild(el('stop', { offset: '80%', 'stop-color': COL_EQ_LINE, 'stop-opacity': '1' }));
-  lineGrad.appendChild(el('stop', { offset: '100%', 'stop-color': COL_EQ_LINE, 'stop-opacity': '0' }));
-  defs.appendChild(lineGrad);
+/* ── Coordinate conversion ────────────────────────── */
 
-  // Glow filter for curve and handles
-  const glow = el('filter', { id: 'glow', x: '-50%', y: '-50%', width: '200%', height: '200%' });
-  const blur = el('feGaussianBlur', { stdDeviation: '3', result: 'blur' });
-  const merge = el('feMerge', {});
-  merge.appendChild(el('feMergeNode', { in: 'blur' }));
-  merge.appendChild(el('feMergeNode', { in: 'SourceGraphic' }));
-  glow.appendChild(blur);
-  glow.appendChild(merge);
-  defs.appendChild(glow);
-
-  svg.appendChild(defs);
-
-  /* ── Layer 1: Background ──────────────────────── */
-  const bgGroup = g('layer-bg');
-  bgGroup.appendChild(el('rect', {
-    x: 0, y: 0, width: svgW, height: svgH, fill: 'url(#bg-grad)',
-  }));
-
-  // Grid lines
-  for (let c = 0; c <= COLS; c++) {
-    bgGroup.appendChild(el('line', {
-      x1: c * cellW, y1: 0, x2: c * cellW, y2: svgH,
-      stroke: COL_GRID_LINE, 'stroke-width': 0.5,
-    }));
-  }
-  for (let r = 0; r <= ROWS; r++) {
-    bgGroup.appendChild(el('line', {
-      x1: 0, y1: r * cellH, x2: svgW, y2: r * cellH,
-      stroke: COL_GRID_LINE_H, 'stroke-width': 0.5,
-    }));
-  }
-  svg.appendChild(bgGroup);
-
-  /* ── Layer 3: Frequency bars (dim) ────────────── */
-  const barsGroup = g('layer-bars');
-  barEls = [];
-  for (let i = 0; i < COLS; i++) {
-    const bar = el('rect', {
-      x: i * cellW + 1, y: svgH, width: cellW - 2, height: 0,
-      fill: COL_BAR_DIM, rx: 0,
-    });
-    barEls.push(bar);
-    barsGroup.appendChild(bar);
-  }
-  svg.appendChild(barsGroup);
-
-  /* ── Layer 4: EQ knob lines (5 glowing verticals) */
-  const linesGroup = g('layer-knob-lines');
-  knobLineEls = [];
-  for (let k = 0; k < KNOBS; k++) {
-    const band = KNOB_BANDS[k];
-    const cx = (band + 0.5) * cellW;
-    const line = el('line', {
-      x1: cx, y1: 0, x2: cx, y2: svgH,
-      stroke: 'url(#line-fade)', 'stroke-width': 1.5,
-    });
-    knobLineEls.push(line);
-    linesGroup.appendChild(line);
-  }
-  svg.appendChild(linesGroup);
-
-  /* ── Layer 5: Applied EQ band levels (20 bright lines) */
-  const eqGroup = g('layer-eq-levels');
-  eqLevelEls = [];
-  for (let i = 0; i < COLS; i++) {
-    const cx = (i + 0.5) * cellW;
-    const levelLine = el('line', {
-      x1: cx - cellW * 0.35, y1: svgH / 2,
-      x2: cx + cellW * 0.35, y2: svgH / 2,
-      stroke: COL_BAR_BRIGHT, 'stroke-width': 2, 'stroke-linecap': 'round',
-    });
-    eqLevelEls.push(levelLine);
-    eqGroup.appendChild(levelLine);
-  }
-  svg.appendChild(eqGroup);
-
-  /* ── Layer 7: EQ curve ────────────────────────── */
-  const curveGroup = g('layer-eq-curve');
-  eqCurveEl = el('path', {
-    d: '', fill: 'none', stroke: COL_EQ_CURVE,
-    'stroke-width': 2, 'stroke-linecap': 'round',
-    filter: 'url(#glow)', opacity: '0.9',
-  });
-  curveGroup.appendChild(eqCurveEl);
-  svg.appendChild(curveGroup);
-
-  /* ── Layer 6: EQ knob handles (5 circles) ─────── */
-  const handlesGroup = g('layer-handles');
-  knobCircleEls = [];
-  knobGlowEls = [];
-  for (let k = 0; k < KNOBS; k++) {
-    const band = KNOB_BANDS[k];
-    const cx = (band + 0.5) * cellW;
-    const cy = svgH / 2;
-
-    // Outer glow ring
-    const glowCircle = el('circle', {
-      cx, cy, r: 12, fill: 'none',
-      stroke: COL_HANDLE_RING, 'stroke-width': 6,
-    });
-    knobGlowEls.push(glowCircle);
-    handlesGroup.appendChild(glowCircle);
-
-    // Inner circle
-    const circle = el('circle', {
-      cx, cy, r: 7, fill: '#0a1628',
-      stroke: COL_HANDLE, 'stroke-width': 2.5,
-    });
-    knobCircleEls.push(circle);
-    handlesGroup.appendChild(circle);
-  }
-  svg.appendChild(handlesGroup);
-
-  /* ── Pointer events on SVG container ──────────── */
-  svg.addEventListener('pointerdown', onPointerDown);
-  svg.addEventListener('pointermove', onPointerMove);
-  svg.addEventListener('pointerup', onPointerUp);
-  svg.addEventListener('pointerleave', onPointerUp);
-  svg.style.touchAction = 'none';
-  svg.style.cursor = 'crosshair';
-
-  container.innerHTML = '';
-  container.appendChild(svg);
-
-  // Initial draw
-  updateEqDisplay();
+/* EQ gain value (-500..+500) → Y pixel (smooth, not quantized) */
+function gainToY(gain) {
+  /* Map -500 → bottom, +500 → top */
+  return svgH * (1 - (gain + 500) / 1000);
 }
 
-/* ── Coordinate helpers ───────────────────────────── */
-
-function svgPoint(e) {
-  const rect = svgEl.getBoundingClientRect();
-  return {
-    x: (e.clientX - rect.left) / rect.width * svgW,
-    y: (e.clientY - rect.top) / rect.height * svgH,
-  };
+/* Y pixel → EQ gain value */
+function yToGain(y) {
+  return Math.round((1 - y / svgH) * 1000 - 500);
 }
 
-function yToRow(y) {
-  return Math.round(Math.max(0, Math.min(ROWS, (svgH - y) / cellH)));
-}
-
-function rowToY(row) {
-  return svgH - row * cellH;
-}
-
+/* Find nearest knob to X position */
 function xToKnob(x) {
-  // Find nearest knob band
   let best = 0, bestDist = Infinity;
   for (let k = 0; k < KNOBS; k++) {
     const cx = (KNOB_BANDS[k] + 0.5) * cellW;
@@ -274,124 +90,275 @@ function xToKnob(x) {
   return best;
 }
 
-/* ── Pointer event handlers ───────────────────────── */
+function svgPoint(e) {
+  const rect = svgEl.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) / rect.width * svgW,
+    y: (e.clientY - rect.top) / rect.height * svgH,
+  };
+}
 
-let onKnobChange = null; // callback: (knobIndex, gridRow) => void
+/* ── Build SVG ────────────────────────────────────── */
 
-function onPointerDown(e) {
+export function initVisualizer(container) {
+  const rect = container.getBoundingClientRect();
+  svgW = rect.width;
+  svgH = rect.height;
+  if (svgW < 10) svgW = 680;
+  if (svgH < 10) svgH = 200;
+  cellW = svgW / COLS;
+  cellH = svgH / ROWS;
+
+  const svg = el('svg', {
+    width: '100%', height: '100%',
+    viewBox: `0 0 ${svgW} ${svgH}`,
+  });
+  svgEl = svg;
+
+  /* Defs */
+  const defs = el('defs', {});
+
+  const bgGrad = el('radialGradient', {
+    id: 'bg-grad', cx: '50%', cy: '100%', r: '80%', fx: '50%', fy: '100%',
+  });
+  bgGrad.appendChild(el('stop', { offset: '0%', 'stop-color': '#0a1628' }));
+  bgGrad.appendChild(el('stop', { offset: '100%', 'stop-color': '#050a10' }));
+  defs.appendChild(bgGrad);
+
+  const lineGrad = el('linearGradient', {
+    id: 'line-fade', x1: '0', y1: '0', x2: '0', y2: '1',
+  });
+  lineGrad.appendChild(el('stop', { offset: '0%', 'stop-color': 'rgba(0,210,255,0.35)', 'stop-opacity': '0' }));
+  lineGrad.appendChild(el('stop', { offset: '15%', 'stop-color': 'rgba(0,210,255,0.35)', 'stop-opacity': '1' }));
+  lineGrad.appendChild(el('stop', { offset: '85%', 'stop-color': 'rgba(0,210,255,0.35)', 'stop-opacity': '1' }));
+  lineGrad.appendChild(el('stop', { offset: '100%', 'stop-color': 'rgba(0,210,255,0.35)', 'stop-opacity': '0' }));
+  defs.appendChild(lineGrad);
+
+  const glow = el('filter', { id: 'glow', x: '-50%', y: '-50%', width: '200%', height: '200%' });
+  glow.appendChild(el('feGaussianBlur', { stdDeviation: '3', result: 'blur' }));
+  const merge = el('feMerge', {});
+  merge.appendChild(el('feMergeNode', { in: 'blur' }));
+  merge.appendChild(el('feMergeNode', { in: 'SourceGraphic' }));
+  glow.appendChild(merge);
+  defs.appendChild(glow);
+
+  svg.appendChild(defs);
+
+  /* Layer 1: Background + grid */
+  const bg = el('g', { id: 'layer-bg' });
+  bg.appendChild(el('rect', { x:0, y:0, width:svgW, height:svgH, fill:'url(#bg-grad)' }));
+  for (let c = 0; c <= COLS; c++)
+    bg.appendChild(el('line', { x1:c*cellW, y1:0, x2:c*cellW, y2:svgH,
+      stroke:'rgba(60,90,120,0.15)', 'stroke-width':0.5 }));
+  for (let r = 0; r <= ROWS; r++)
+    bg.appendChild(el('line', { x1:0, y1:r*cellH, x2:svgW, y2:r*cellH,
+      stroke:'rgba(60,90,120,0.08)', 'stroke-width':0.5 }));
+  svg.appendChild(bg);
+
+  /* Layer 3: Frequency bars (quantized to grid) */
+  const bars = el('g', { id: 'layer-bars' });
+  barEls = [];
+  for (let i = 0; i < COLS; i++) {
+    const bar = el('rect', {
+      x: i*cellW+1, y: svgH, width: cellW-2, height: 0,
+      fill: 'rgba(0,160,200,0.25)',
+    });
+    barEls.push(bar);
+    bars.appendChild(bar);
+  }
+  svg.appendChild(bars);
+
+  /* Layer 4: EQ knob lines (5 glowing verticals) */
+  const lines = el('g', { id: 'layer-knob-lines' });
+  knobLineEls = [];
+  for (let k = 0; k < KNOBS; k++) {
+    const cx = (KNOB_BANDS[k] + 0.5) * cellW;
+    const line = el('line', {
+      x1:cx, y1:0, x2:cx, y2:svgH,
+      stroke:'url(#line-fade)', 'stroke-width':1.5,
+    });
+    knobLineEls.push(line);
+    lines.appendChild(line);
+  }
+  svg.appendChild(lines);
+
+  /* Layer 5: Applied EQ band levels (20 bright lines) */
+  const eqg = el('g', { id: 'layer-eq-levels' });
+  eqLevelEls = [];
+  for (let i = 0; i < COLS; i++) {
+    const cx = (i + 0.5) * cellW;
+    const line = el('line', {
+      x1: cx - cellW*0.35, y1: svgH/2,
+      x2: cx + cellW*0.35, y2: svgH/2,
+      stroke: 'rgba(0,210,255,0.7)', 'stroke-width': 2, 'stroke-linecap': 'round',
+    });
+    eqLevelEls.push(line);
+    eqg.appendChild(line);
+  }
+  svg.appendChild(eqg);
+
+  /* Layer 7: EQ curve */
+  const curve = el('g', { id: 'layer-eq-curve' });
+  eqCurveEl = el('path', {
+    d: '', fill:'none', stroke:'#00d4ff',
+    'stroke-width':2, 'stroke-linecap':'round',
+    filter:'url(#glow)', opacity:'0.9',
+  });
+  curve.appendChild(eqCurveEl);
+  svg.appendChild(curve);
+
+  /* Layer 6: EQ knob handles (5 circles) */
+  const handles = el('g', { id: 'layer-handles' });
+  knobCircleEls = []; knobGlowEls = [];
+  for (let k = 0; k < KNOBS; k++) {
+    const cx = (KNOB_BANDS[k] + 0.5) * cellW;
+    const glowC = el('circle', {
+      cx, cy: svgH/2, r:12, fill:'none',
+      stroke:'rgba(0,210,255,0.3)', 'stroke-width':6,
+    });
+    knobGlowEls.push(glowC);
+    handles.appendChild(glowC);
+
+    const circle = el('circle', {
+      cx, cy: svgH/2, r:7, fill:'#0a1628',
+      stroke:'#00d4ff', 'stroke-width':2.5,
+    });
+    knobCircleEls.push(circle);
+    handles.appendChild(circle);
+  }
+  svg.appendChild(handles);
+
+  /* Pointer events on SVG container */
+  svg.addEventListener('pointerdown', onDown);
+  svg.addEventListener('pointermove', onMove);
+  svg.addEventListener('pointerup', onUp);
+  svg.addEventListener('pointerleave', onUp);
+  svg.style.touchAction = 'none';
+  svg.style.cursor = 'crosshair';
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+
+  /* Initialize display at center */
+  for (let i = 0; i < COLS; i++) displayedEqY[i] = svgH / 2;
+  renderEqFromY();
+}
+
+/* ── Pointer handlers (produce 5-band → 20-band → send to daemon) ── */
+
+function onDown(e) {
   e.preventDefault();
   const pt = svgPoint(e);
   dragging = xToKnob(pt.x);
   svgEl.setPointerCapture(e.pointerId);
-  handleDrag(pt);
+  sendDrag(pt);
 }
 
-function onPointerMove(e) {
+function onMove(e) {
   if (dragging < 0) return;
   e.preventDefault();
   const pt = svgPoint(e);
-  // Allow swipe to different knob
   dragging = xToKnob(pt.x);
-  handleDrag(pt);
+  sendDrag(pt);
 }
 
-function onPointerUp(e) {
+function onUp(e) {
   if (dragging >= 0) {
     svgEl.releasePointerCapture(e.pointerId);
     dragging = -1;
   }
 }
 
-function handleDrag(pt) {
-  const row = yToRow(pt.y);
-  knobValues[dragging] = row;
-  updateEqDisplay();
-  if (onKnobChange) onKnobChange(dragging, row);
+function sendDrag(pt) {
+  /* Clamp Y to SVG bounds */
+  const y = Math.max(0, Math.min(svgH, pt.y));
+  const gain = yToGain(y);
+
+  /* Get current 5 knob gain values, update dragged one */
+  const knobGains = KNOB_BANDS.map(b => yToGain(displayedEqY[b]));
+  knobGains[dragging] = gain;
+
+  /* Interpolate 5 → 20 */
+  const bands20 = interpolate5to20(knobGains);
+
+  /* Send to daemon (round-trip: daemon → processor → daemon → UI) */
+  if (onGEQChange) onGEQChange(bands20);
 }
 
-/* ── Update visual display ────────────────────────── */
-
-function updateEqDisplay() {
-  // Interpolate 5 knob values → 20 band EQ levels
-  interpolateKnobs();
-
-  // Update each band's EQ level line position
+function interpolate5to20(knobGains) {
+  const result = new Array(COLS);
   for (let i = 0; i < COLS; i++) {
-    const y = rowToY(eqLevels[i]);
+    let lo = 0, hi = KNOBS - 1;
+    for (let k = 0; k < KNOBS - 1; k++) {
+      if (i >= KNOB_BANDS[k] && i <= KNOB_BANDS[k+1]) { lo = k; hi = k+1; break; }
+    }
+    const range = KNOB_BANDS[hi] - KNOB_BANDS[lo];
+    const t = range > 0 ? (i - KNOB_BANDS[lo]) / range : 0;
+    result[i] = Math.round(knobGains[lo] + t * (knobGains[hi] - knobGains[lo]));
+  }
+  return result;
+}
+
+/* ── Render from data (called when state arrives from daemon) ─────── */
+
+/*
+ * Update EQ display from 20-band gain values returned by the processor.
+ * This is the ONLY place that sets EQ visual positions.
+ * Gains are in ds1 format: -500..+500 (approx).
+ */
+export function setEqFromGains(gains20) {
+  for (let i = 0; i < COLS && i < gains20.length; i++) {
+    displayedEqY[i] = gainToY(gains20[i]);
+  }
+  renderEqFromY();
+}
+
+function renderEqFromY() {
+  /* EQ level lines (smooth Y, no quantization) */
+  for (let i = 0; i < COLS; i++) {
+    const y = displayedEqY[i];
     const cx = (i + 0.5) * cellW;
     eqLevelEls[i].setAttribute('y1', y);
     eqLevelEls[i].setAttribute('y2', y);
-    eqLevelEls[i].setAttribute('x1', cx - cellW * 0.35);
-    eqLevelEls[i].setAttribute('x2', cx + cellW * 0.35);
+    eqLevelEls[i].setAttribute('x1', cx - cellW*0.35);
+    eqLevelEls[i].setAttribute('x2', cx + cellW*0.35);
   }
 
-  // Update knob handle positions
+  /* Knob handles: snap to their band's Y position (smooth) */
   for (let k = 0; k < KNOBS; k++) {
     const band = KNOB_BANDS[k];
-    const y = rowToY(eqLevels[band]);
+    const y = displayedEqY[band];
     const cx = (band + 0.5) * cellW;
     knobCircleEls[k].setAttribute('cy', y);
     knobGlowEls[k].setAttribute('cy', y);
     knobCircleEls[k].setAttribute('cx', cx);
     knobGlowEls[k].setAttribute('cx', cx);
-
-    // Update knob vertical line
     knobLineEls[k].setAttribute('x1', cx);
     knobLineEls[k].setAttribute('x2', cx);
   }
 
-  // Update EQ curve (Catmull-Rom through all 20 band levels)
+  /* EQ curve: Catmull-Rom through all 20 points (smooth) */
   const points = [];
   for (let i = 0; i < COLS; i++) {
-    points.push([(i + 0.5) * cellW, rowToY(eqLevels[i])]);
+    points.push([(i + 0.5) * cellW, displayedEqY[i]]);
   }
   eqCurveEl.setAttribute('d', catmullRom(points));
 }
 
-function interpolateKnobs() {
-  // Linear interpolation between 5 knob positions → 20 band levels
-  for (let i = 0; i < COLS; i++) {
-    // Find surrounding knobs
-    let lo = 0, hi = KNOBS - 1;
-    for (let k = 0; k < KNOBS - 1; k++) {
-      if (i >= KNOB_BANDS[k] && i <= KNOB_BANDS[k + 1]) {
-        lo = k; hi = k + 1; break;
-      }
-    }
-    const t = KNOB_BANDS[hi] === KNOB_BANDS[lo] ? 0 :
-      (i - KNOB_BANDS[lo]) / (KNOB_BANDS[hi] - KNOB_BANDS[lo]);
-    eqLevels[i] = Math.round(knobValues[lo] + t * (knobValues[hi] - knobValues[lo]));
-  }
-}
-
-/* ── Update frequency bars from processor data ────── */
+/* ── Update frequency bars (quantized to grid) ────── */
 
 export function updateVisBars(bands) {
   for (let i = 0; i < COLS && i < bands.length; i++) {
-    // Quantize to grid
-    const rows = Math.round(Math.max(0, Math.min(ROWS, bands[i])));
-    visBands[i] = rows;
+    /* Quantize to integer number of grid cells */
+    const rows = Math.max(0, Math.min(ROWS, Math.round(bands[i])));
     const h = rows * cellH;
     barEls[i].setAttribute('y', svgH - h);
     barEls[i].setAttribute('height', h);
   }
 }
 
-/* ── Set EQ levels from external data (IEQ presets) ── */
+/* ── Callback registration ────────────────────────── */
 
-export function setEqLevels(levels) {
-  for (let i = 0; i < COLS && i < levels.length; i++) {
-    eqLevels[i] = Math.round(Math.max(0, Math.min(ROWS, levels[i])));
-  }
-  // Snap knobs to their band levels
-  for (let k = 0; k < KNOBS; k++) {
-    knobValues[k] = eqLevels[KNOB_BANDS[k]];
-  }
-  updateEqDisplay();
-}
-
-/* ── Set callback for knob changes ────────────────── */
-
-export function setKnobCallback(cb) {
-  onKnobChange = cb;
+export function setGEQCallback(cb) {
+  onGEQChange = cb;
 }

@@ -26,6 +26,7 @@ void load_config(void);
 typedef struct {
     int16_t params[DDP_PARAM_COUNT];
     int     ieq_mode;
+    int16_t geq[20];  /* 20-band graphic EQ gains */
 } ProfileState;
 
 extern ProfileState g_profile_states[];

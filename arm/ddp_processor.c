@@ -125,7 +125,8 @@ static int ds1_set_array(int param_index, const int16_t *values, int count) {
 /* ── Parameter Registration ───────────────────────────────────────── */
 
 /* Parameter names — order MUST match DDP_PARAM_* enum.
- * iebt (index 20) is the 20-band IEQ target array. */
+ * iebt (index 20) is the 20-band IEQ target array.
+ * gebg (index 21) is the 20-band graphic EQ gains. */
 static const char g_param_names[][5] = {
     "endp", "vdhe", "dhsb", "dssb", "dssf",
     "ngon", "dvla", "dvle", "dvme",
@@ -134,10 +135,13 @@ static const char g_param_names[][5] = {
     "plmd", "aoon",
     "vmb\0", "vmon",
     "geon", "plb\0",
-    "iebt"            /* index 20: IEQ band targets (20 values) */
+    "iebt",           /* index 20: IEQ band targets (20 values) */
+    "gebg"            /* index 21: Graphic EQ band gains (20 values) */
 };
 
-#define TOTAL_PARAMS  21  /* DDP_PARAM_COUNT(20) + iebt(1) */
+#define IEBT_INDEX  20
+#define GEBG_INDEX  21
+#define TOTAL_PARAMS  22  /* DDP_PARAM_COUNT(20) + iebt(1) + gebg(1) */
 
 static void register_parameters(void) {
     int np = TOTAL_PARAMS;
@@ -362,6 +366,19 @@ static int handle_command(uint32_t cmd) {
             status = 1;
         }
         write_exact(STDOUT_FILENO, &status, sizeof(status));
+        return 0;
+    }
+
+    if (cmd == DDP_CMD_SET_GEQ) {
+        int16_t gains[20];
+        if (read_exact(STDIN_FILENO, gains, sizeof(gains)) < 0) return -1;
+
+        ds1_set_array(GEBG_INDEX, gains, 20);
+        log_msg("[DDP] SetGEQ: [%d,%d,%d,...,%d]\n",
+                gains[0], gains[1], gains[2], gains[19]);
+
+        /* Echo back the applied gains */
+        write_exact(STDOUT_FILENO, gains, sizeof(gains));
         return 0;
     }
 

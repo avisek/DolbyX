@@ -126,3 +126,13 @@ enum {
 
 
 
+
+/*
+ * CMD_SET_GEQ: Set 20-band graphic EQ gains.
+ *   Client → Proc: uint32 0xFFFFFFEE + int16[20] band_gains
+ *   Proc → Client: int16[20] applied_gains (echoed back after applying)
+ *
+ * Gains are in the ds1-default.xml gebg format (typically -2048..+2048).
+ */
+#define DDP_CMD_SET_GEQ    0xFFFFFFEE
+

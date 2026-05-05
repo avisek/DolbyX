@@ -289,6 +289,10 @@ void save_config(void) {
             fprintf(f, "%s = %d\n", g_param_names[i], g_profile_states[p].params[i]);
         }
         fprintf(f, "ieq_mode = \"%s\"\n", g_ieq_names[g_profile_states[p].ieq_mode]);
+        fprintf(f, "geq = [");
+        for (int i = 0; i < 20; i++)
+            fprintf(f, "%s%d", i ? ", " : "", g_profile_states[p].geq[i]);
+        fprintf(f, "]\n");
     }
 
     fclose(f);
@@ -359,6 +363,16 @@ void load_config(void) {
                 }
             }
         }
+
+        toml_datum_t geq = toml_get(sec, "geq");
+        if (geq.type == TOML_ARRAY) {
+            int count = geq.u.arr.size;
+            if (count > 20) count = 20;
+            for (int i = 0; i < count; i++) {
+                if (geq.u.arr.elem[i].type == TOML_INT64)
+                    g_profile_states[p].geq[i] = (int16_t)geq.u.arr.elem[i].u.int64;
+            }
+        }
     }
 
     toml_free(r);
@@ -427,12 +441,15 @@ static DWORD WINAPI config_watcher_thread(LPVOID param) {
 static int build_state_json(char *buf, int bufsize) {
     int16_t *P = CUR_PARAMS;
     int ieq = CUR_IEQ;
+    int16_t *geq = g_profile_states[g_current_profile].geq;
     int n = snprintf(buf, bufsize,
         "{\"type\":\"state\",\"profile\":%d,\"power\":%d,\"ieq\":%d,\"params\":[",
         g_current_profile, g_current_power, ieq);
-    for (int i = 0; i < DDP_PARAM_COUNT; i++) {
+    for (int i = 0; i < DDP_PARAM_COUNT; i++)
         n += snprintf(buf + n, bufsize - n, "%s%d", i ? "," : "", P[i]);
-    }
+    n += snprintf(buf + n, bufsize - n, "],\"geq\":[");
+    for (int i = 0; i < 20; i++)
+        n += snprintf(buf + n, bufsize - n, "%s%d", i ? "," : "", geq[i]);
     n += snprintf(buf + n, bufsize - n, "]}");
     return n;
 }
@@ -500,6 +517,18 @@ static void apply_profile_to_processors(void) {
         DWORD preset = (DWORD)ieq;
         memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
         forward_cmd(pkt, 8, reply, 4);
+    }
+
+    /* Apply graphic EQ bands (if geon is enabled or any non-zero) */
+    int16_t *geq = g_profile_states[g_current_profile].geq;
+    int has_geq = 0;
+    for (int i = 0; i < 20; i++) if (geq[i] != 0) { has_geq = 1; break; }
+    if (has_geq) {
+        BYTE geq_pkt[44]; int16_t geq_reply[20];
+        c = DDP_CMD_SET_GEQ;
+        memcpy(geq_pkt, &c, 4);
+        memcpy(geq_pkt + 4, geq, 40);
+        forward_cmd(geq_pkt, 44, (BYTE *)geq_reply, 40);
     }
 }
 
@@ -636,6 +665,46 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         ws_send_text(s, resp, rlen);
         rlen = build_state_json(resp, sizeof(resp));
         save_config();
+        ws_broadcast(resp, rlen);
+        return;
+    }
+
+    if (strcmp(cmd, "set_geq") == 0) {
+        /* Parse 20 band values from "bands":[...] */
+        const char *arr = strstr(json, "\"bands\":[");
+        int16_t gains[20] = {0};
+        if (arr) {
+            arr += 9; /* skip "bands":[ */
+            for (int i = 0; i < 20 && *arr; i++) {
+                while (*arr == ' ') arr++;
+                int neg = 0, v = 0;
+                if (*arr == '-') { neg = 1; arr++; }
+                while (*arr >= '0' && *arr <= '9') { v = v*10+(*arr-'0'); arr++; }
+                gains[i] = (int16_t)(neg ? -v : v);
+                while (*arr == ',' || *arr == ' ') arr++;
+            }
+        }
+
+        /* Send to processor, get applied values back */
+        BYTE pkt[4 + 40];
+        DWORD c = DDP_CMD_SET_GEQ;
+        memcpy(pkt, &c, 4);
+        memcpy(pkt + 4, gains, 40);
+        int16_t applied[20] = {0};
+        forward_cmd(pkt, 44, (BYTE *)applied, 40);
+
+        /* Store applied values */
+        memcpy(g_profile_states[g_current_profile].geq, applied, 40);
+
+        /* Respond with the applied EQ levels */
+        int n = snprintf(resp, sizeof(resp), "{\"type\":\"geq\",\"bands\":[");
+        for (int i = 0; i < 20; i++)
+            n += snprintf(resp+n, sizeof(resp)-n, "%s%d", i?",":"", applied[i]);
+        n += snprintf(resp+n, sizeof(resp)-n, "]}");
+        ws_send_text(s, resp, n);
+
+        save_config();
+        rlen = build_state_json(resp, sizeof(resp));
         ws_broadcast(resp, rlen);
         return;
     }
@@ -828,6 +897,40 @@ static DWORD WINAPI http_server_thread(LPVOID param) {
     return 0;
 }
 
+/* ── Visualizer Data Pump (~30fps) ─────────────────────────────────── */
+
+static DWORD WINAPI vis_pump_thread(LPVOID param) {
+    (void)param;
+    BYTE cmd_pkt[4];
+    DWORD vis_cmd = DDP_CMD_GET_VIS;
+    memcpy(cmd_pkt, &vis_cmd, 4);
+
+    for (;;) {
+        Sleep(33); /* ~30fps */
+
+        if (g_ws_count <= 0) continue; /* no clients, skip */
+
+        /* Poll first active processor */
+        int16_t bands[20] = {0};
+        EnterCriticalSection(&g_procs_lock);
+        for (int i = 0; i < 8; i++) {
+            if (!g_procs[i]) continue;
+            proc_ctrl(g_procs[i], cmd_pkt, 4, (BYTE *)bands, 40);
+            break; /* only poll first active processor */
+        }
+        LeaveCriticalSection(&g_procs_lock);
+
+        /* Broadcast to all WS clients */
+        char json[512];
+        int n = snprintf(json, sizeof(json), "{\"type\":\"vis\",\"bands\":[");
+        for (int i = 0; i < 20; i++)
+            n += snprintf(json+n, sizeof(json)-n, "%s%d", i?",":"", bands[i]);
+        n += snprintf(json+n, sizeof(json)-n, "]}");
+        ws_broadcast(json, n);
+    }
+    return 0;
+}
+
 /* ── Start ────────────────────────────────────────────────────────── */
 
 void http_start(void) {
@@ -841,7 +944,11 @@ void http_start(void) {
     HANDLE t = CreateThread(NULL, 0, http_server_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 
-    /* Start config file watcher */
+    /* Config file watcher */
     HANDLE tw = CreateThread(NULL, 0, config_watcher_thread, NULL, 0, NULL);
     if (tw) CloseHandle(tw);
+
+    /* Visualizer data pump (~30fps) */
+    HANDLE tv = CreateThread(NULL, 0, vis_pump_thread, NULL, 0, NULL);
+    if (tv) CloseHandle(tv);
 }
