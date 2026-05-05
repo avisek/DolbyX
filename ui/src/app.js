@@ -107,7 +107,7 @@ function init() {
     send({ cmd: 'power', on: !state.power }));
 
   document.getElementById('resetBtn').addEventListener('click', () =>
-    send({ cmd: 'set_profile', id: state.profile }));
+    send({ cmd: 'reset_profile' }));
 
   document.getElementById('profiles').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-profile]');

@@ -377,29 +377,50 @@ void load_config(void) {
     LeaveCriticalSection(&g_config_lock);
 }
 
-/* ── Config file watcher (polls mtime every 1s) ──────────────────── */
+/* ── Config file watcher (Windows filesystem events) ──────────────── */
 
 static int build_state_json(char *buf, int bufsize); /* forward decl */
+static void apply_profile_to_processors(void);       /* forward decl */
 
 static DWORD WINAPI config_watcher_thread(LPVOID param) {
     (void)param;
+
+    /* Watch the config directory for changes */
+    HANDLE hNotify = FindFirstChangeNotificationA(
+        CONFIG_DIR, FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+    if (hNotify == INVALID_HANDLE_VALUE) {
+        log_msg("Config watcher: FindFirstChangeNotification failed\n");
+        return 1;
+    }
+
     for (;;) {
-        Sleep(1000);
+        DWORD wait = WaitForSingleObject(hNotify, INFINITE);
+        if (wait != WAIT_OBJECT_0) break;
+
+        /* Small delay to let the editor finish writing */
+        Sleep(100);
+
+        /* Check if mtime actually changed (filter spurious events) */
         HANDLE hf = CreateFileA(CONFIG_PATH, GENERIC_READ, FILE_SHARE_READ,
                                 NULL, OPEN_EXISTING, 0, NULL);
-        if (hf == INVALID_HANDLE_VALUE) continue;
-        FILETIME ft;
-        GetFileTime(hf, NULL, NULL, &ft);
-        CloseHandle(hf);
-        if (CompareFileTime(&ft, &g_config_mtime) != 0) {
-            log_msg("Config file changed — reloading\n");
-            load_config();
-            /* Broadcast updated state to all WS clients */
-            char resp[1024];
-            int rlen = build_state_json(resp, sizeof(resp));
-            ws_broadcast(resp, rlen);
+        if (hf != INVALID_HANDLE_VALUE) {
+            FILETIME ft;
+            GetFileTime(hf, NULL, NULL, &ft);
+            CloseHandle(hf);
+            if (CompareFileTime(&ft, &g_config_mtime) != 0) {
+                log_msg("Config file changed -- reloading\n");
+                load_config();
+                apply_profile_to_processors();
+                char resp[1024];
+                int rlen = build_state_json(resp, sizeof(resp));
+                ws_broadcast(resp, rlen);
+            }
         }
+
+        FindNextChangeNotification(hNotify);
     }
+
+    FindCloseChangeNotification(hNotify);
     return 0;
 }
 
@@ -430,6 +451,58 @@ static BOOL forward_cmd(const BYTE *pkt, int pkt_len, BYTE *reply, int reply_len
     return any;
 }
 
+/*
+ * Apply the current profile state to all active audio processors.
+ * Sends base profile, then per-profile overrides, IEQ preset, and
+ * power state. Used by: set_profile, power, reset_profile, config reload.
+ */
+static void apply_profile_to_processors(void) {
+    extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+    BYTE pkt[8]; BYTE reply[4]; DWORD c;
+
+    /* If power is off, just send OFF profile */
+    if (!g_current_power) {
+        c = DDP_CMD_SET_PROFILE;
+        DWORD pid = DDP_PROFILE_OFF;
+        memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
+        forward_cmd(pkt, 8, reply, 4);
+        return;
+    }
+
+    /* Send base profile */
+    c = DDP_CMD_SET_PROFILE;
+    DWORD pid = (DWORD)g_current_profile;
+    memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
+    forward_cmd(pkt, 8, reply, 4);
+
+    /* Apply per-profile param overrides */
+    int16_t *P = CUR_PARAMS;
+    for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+        if (P[i] != g_profiles[g_current_profile][i]) {
+            c = DDP_CMD_SET_PARAM;
+            uint16_t pi = (uint16_t)i; int16_t v = P[i];
+            memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+            forward_cmd(pkt, 8, reply, 4);
+        }
+    }
+
+    /* Apply IEQ preset */
+    int ieq = CUR_IEQ;
+    if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
+        c = DDP_CMD_SET_PARAM;
+        uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
+        memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+        forward_cmd(pkt, 8, reply, 4);
+        pi = DDP_PARAM_IEA; v = 10;
+        memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+        forward_cmd(pkt, 8, reply, 4);
+        c = DDP_CMD_SET_IEQ_PRESET;
+        DWORD preset = (DWORD)ieq;
+        memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
+        forward_cmd(pkt, 8, reply, 4);
+    }
+}
+
 /* ── Handle a WebSocket JSON command ──────────────────────────────── */
 
 static void handle_ws_cmd(SOCKET s, const char *json) {
@@ -449,44 +522,25 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         int id = json_int(json, "id");
         if (id >= 0 && id < DDP_PROFILE_USER_COUNT) {
             g_current_profile = id;
-
-            /* Send base profile to processor */
-            BYTE pkt[8]; BYTE reply[4];
-            DWORD c = DDP_CMD_SET_PROFILE;
-            memcpy(pkt, &c, 4); memcpy(pkt + 4, &id, 4);
-            forward_cmd(pkt, 8, reply, 4);
-
-            /* Apply saved per-profile overrides */
-            extern const int16_t g_profiles[][DDP_PARAM_COUNT];
-            int16_t *P = CUR_PARAMS;
-            for (int i = 1; i < DDP_PARAM_COUNT; i++) {
-                if (P[i] != g_profiles[id][i]) {
-                    c = DDP_CMD_SET_PARAM;
-                    uint16_t pi = (uint16_t)i; int16_t v = P[i];
-                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
-                    forward_cmd(pkt, 8, reply, 4);
-                }
-            }
-
-            /* Apply saved IEQ preset */
-            int ieq = CUR_IEQ;
-            if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
-                c = DDP_CMD_SET_PARAM;
-                uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
-                forward_cmd(pkt, 8, reply, 4);
-                pi = DDP_PARAM_IEA; v = 10;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
-                forward_cmd(pkt, 8, reply, 4);
-                c = DDP_CMD_SET_IEQ_PRESET;
-                DWORD preset = (DWORD)ieq;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
-                forward_cmd(pkt, 8, reply, 4);
-            }
+            apply_profile_to_processors();
         }
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
+        rlen = build_state_json(resp, sizeof(resp));
+        save_config();
+        ws_broadcast(resp, rlen);
+        return;
+    }
 
+    if (strcmp(cmd, "reset_profile") == 0) {
+        /* Reset current profile to factory defaults */
+        extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+        memcpy(CUR_PARAMS, g_profiles[g_current_profile],
+               sizeof(int16_t) * DDP_PARAM_COUNT);
+        CUR_IEQ = DDP_IEQ_MANUAL;
+        apply_profile_to_processors();
+        rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
+        ws_send_text(s, resp, rlen);
         rlen = build_state_json(resp, sizeof(resp));
         save_config();
         ws_broadcast(resp, rlen);
@@ -576,48 +630,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         int on = json_bool(json, "on");
         if (on >= 0) {
             g_current_power = on;
-            BYTE pkt[8]; BYTE reply[4]; DWORD c;
-            if (!on) {
-                /* OFF: send OFF profile (graceful fade via DS1 smoothing) */
-                c = DDP_CMD_SET_PROFILE;
-                DWORD pid = DDP_PROFILE_OFF;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
-                forward_cmd(pkt, 8, reply, 4);
-            } else {
-                /* ON: restore current profile + all saved overrides */
-                c = DDP_CMD_SET_PROFILE;
-                DWORD pid = g_current_profile;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
-                forward_cmd(pkt, 8, reply, 4);
-
-                extern const int16_t g_profiles[][DDP_PARAM_COUNT];
-                int16_t *P = CUR_PARAMS;
-                for (int i = 1; i < DDP_PARAM_COUNT; i++) {
-                    if (P[i] != g_profiles[g_current_profile][i]) {
-                        c = DDP_CMD_SET_PARAM;
-                        uint16_t pi = (uint16_t)i; int16_t v = P[i];
-                        memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
-                        memcpy(pkt+6, &v, 2);
-                        forward_cmd(pkt, 8, reply, 4);
-                    }
-                }
-                int ieq = CUR_IEQ;
-                if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
-                    c = DDP_CMD_SET_PARAM;
-                    uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
-                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
-                    memcpy(pkt+6, &v, 2);
-                    forward_cmd(pkt, 8, reply, 4);
-                    pi = DDP_PARAM_IEA; v = 10;
-                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
-                    memcpy(pkt+6, &v, 2);
-                    forward_cmd(pkt, 8, reply, 4);
-                    c = DDP_CMD_SET_IEQ_PRESET;
-                    DWORD preset = (DWORD)ieq;
-                    memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
-                    forward_cmd(pkt, 8, reply, 4);
-                }
-            }
+            apply_profile_to_processors();
         }
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
