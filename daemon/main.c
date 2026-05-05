@@ -192,11 +192,6 @@ static int ctrl_extra(DWORD cmd, int *reply_len) {
 /* ── Apply saved state to a new processor ─────────────────────────── */
 
 static void apply_saved_state(Proc *proc) {
-    extern int g_current_profile;
-    extern int g_current_power;
-    extern int16_t g_current_params[];
-    extern int g_current_ieq;
-
     /* Set profile */
     BYTE pkt[8]; BYTE reply[4];
     DWORD cmd = DDP_CMD_SET_PROFILE;
@@ -204,19 +199,21 @@ static void apply_saved_state(Proc *proc) {
     memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pid, 4);
     proc_ctrl(proc, pkt, 8, reply, 4);
 
-    /* Apply param overrides */
+    /* Apply per-profile param overrides */
+    int16_t *P = g_profile_states[g_current_profile].params;
     for (int i = 1; i < DDP_PARAM_COUNT; i++) {
-        if (g_current_params[i] != g_profiles[g_current_profile][i]) {
+        if (P[i] != g_profiles[g_current_profile][i]) {
             cmd = DDP_CMD_SET_PARAM;
             uint16_t pi = (uint16_t)i;
-            int16_t v = g_current_params[i];
+            int16_t v = P[i];
             memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
             proc_ctrl(proc, pkt, 8, reply, 4);
         }
     }
 
     /* Apply IEQ preset */
-    if (g_current_ieq != DDP_IEQ_MANUAL && g_current_ieq >= 0 && g_current_ieq <= 2) {
+    int ieq = g_profile_states[g_current_profile].ieq_mode;
+    if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
         cmd = DDP_CMD_SET_PARAM;
         uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
         memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
@@ -227,7 +224,7 @@ static void apply_saved_state(Proc *proc) {
         proc_ctrl(proc, pkt, 8, reply, 4);
 
         cmd = DDP_CMD_SET_IEQ_PRESET;
-        DWORD preset = (DWORD)g_current_ieq;
+        DWORD preset = (DWORD)ieq;
         memcpy(pkt, &cmd, 4); memcpy(pkt+4, &preset, 4);
         proc_ctrl(proc, pkt, 8, reply, 4);
     }
@@ -241,7 +238,7 @@ static void apply_saved_state(Proc *proc) {
     }
 
     log_msg("Applied saved state: profile=%d power=%d ieq=%d\n",
-            g_current_profile, g_current_power, g_current_ieq);
+            g_current_profile, g_current_power, ieq);
 }
 
 /* ── Audio client thread ──────────────────────────────────────────── */
@@ -373,7 +370,7 @@ int main(int argc, char *argv[]) {
     HANDLE t1 = CreateThread(NULL, 0, accept_audio, NULL, 0, NULL);
     http_start();
 
-    log_msg("DolbyX running -> http://localhost:9876\n\n");
+    log_msg("Listening (Ctrl+C to stop)\n\n");
 
     WaitForSingleObject(t1, INFINITE);
     WSACleanup();

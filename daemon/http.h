@@ -12,7 +12,7 @@
 #define HTTP_PORT 9876
 #define MAX_WS_CLIENTS 8
 
-/* Start the HTTP/WS server (loads config, starts listener thread) */
+/* Start the HTTP/WS server (loads config, starts listener + file watcher) */
 void http_start(void);
 
 /* Broadcast JSON text to all connected WebSocket clients */
@@ -22,10 +22,14 @@ void ws_broadcast(const char *json, int len);
 void save_config(void);
 void load_config(void);
 
-/* Daemon-owned state (persisted to config.toml) */
+/* Per-profile state */
+typedef struct {
+    int16_t params[DDP_PARAM_COUNT];
+    int     ieq_mode;
+} ProfileState;
+
+extern ProfileState g_profile_states[];
 extern int g_current_profile;
 extern int g_current_power;
-extern int16_t g_current_params[];
-extern int g_current_ieq;
 
 #endif

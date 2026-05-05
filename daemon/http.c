@@ -238,78 +238,179 @@ static int json_str(const char *json, const char *key, char *out, int outlen) {
     return i;
 }
 
-/* ── State (daemon-owned, persisted to config.toml) ───────────────── */
+/* ── Per-Profile State (daemon-owned) ─────────────────────────────── */
+
+#include "vendor/tomlc17.h"
+
+/* All 6 user profiles, each with independent saved params */
+ProfileState g_profile_states[DDP_PROFILE_USER_COUNT];
 
 int g_current_profile = DDP_PROFILE_MUSIC;
 int g_current_power = 1;
-int16_t g_current_params[DDP_PARAM_COUNT] = {0};
-int g_current_ieq = DDP_IEQ_MANUAL;
+
+/* Convenience: current profile's params/ieq */
+#define CUR_PARAMS  (g_profile_states[g_current_profile].params)
+#define CUR_IEQ     (g_profile_states[g_current_profile].ieq_mode)
 
 #define CONFIG_DIR  "C:\\ProgramData\\DolbyX"
 #define CONFIG_PATH CONFIG_DIR "\\config.toml"
 
+static const char *g_profile_names[] = {
+    "Movie", "Music", "Game", "Voice", "Custom1", "Custom2"
+};
+
+static const char *g_param_names[] = {
+    "endp", "vdhe", "dhsb", "dssb", "dssf", "ngon", "dvla",
+    "dvle", "dvme", "ieon", "iea",  "deon", "dea",  "ded",
+    "plmd", "aoon", "vmb",  "vmon", "geon", "plb"
+};
+
+static const char *g_ieq_names[] = { "open", "rich", "focused", "manual" };
+
+/* File watcher state */
+static FILETIME g_config_mtime = {0};
+static CRITICAL_SECTION g_config_lock;
+
 void save_config(void) {
+    EnterCriticalSection(&g_config_lock);
     CreateDirectoryA(CONFIG_DIR, NULL);
     FILE *f = fopen(CONFIG_PATH, "w");
-    if (!f) return;
-    fprintf(f, "# DolbyX configuration (auto-generated)\n\n");
-    fprintf(f, "profile = %d\n", g_current_profile);
-    fprintf(f, "power = %d\n", g_current_power);
-    fprintf(f, "ieq = %d\n", g_current_ieq);
-    fprintf(f, "params = [");
-    for (int i = 0; i < DDP_PARAM_COUNT; i++)
-        fprintf(f, "%s%d", i ? ", " : "", g_current_params[i]);
-    fprintf(f, "]\n");
+    if (!f) { LeaveCriticalSection(&g_config_lock); return; }
+
+    fprintf(f, "# DolbyX Configuration\n");
+    fprintf(f, "# Changes to this file are loaded instantly.\n\n");
+    fprintf(f, "active_profile = \"%s\"\n", g_profile_names[g_current_profile]);
+    fprintf(f, "power = %s\n", g_current_power ? "true" : "false");
+
+    extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+    for (int p = 0; p < DDP_PROFILE_USER_COUNT; p++) {
+        fprintf(f, "\n[%s]\n", g_profile_names[p]);
+        for (int i = 1; i < DDP_PARAM_COUNT; i++) { /* skip endp (index 0) */
+            fprintf(f, "%s = %d\n", g_param_names[i], g_profile_states[p].params[i]);
+        }
+        fprintf(f, "ieq_mode = \"%s\"\n", g_ieq_names[g_profile_states[p].ieq_mode]);
+    }
+
     fclose(f);
+
+    /* Update mtime so the watcher doesn't re-trigger */
+    HANDLE hf = CreateFileA(CONFIG_PATH, GENERIC_READ, FILE_SHARE_READ,
+                            NULL, OPEN_EXISTING, 0, NULL);
+    if (hf != INVALID_HANDLE_VALUE) {
+        GetFileTime(hf, NULL, NULL, &g_config_mtime);
+        CloseHandle(hf);
+    }
+
+    LeaveCriticalSection(&g_config_lock);
 }
 
 void load_config(void) {
-    /* Initialize params from default profile */
+    EnterCriticalSection(&g_config_lock);
+
+    /* Initialize all profiles from factory defaults */
     extern const int16_t g_profiles[][DDP_PARAM_COUNT];
-    memcpy(g_current_params, g_profiles[DDP_PROFILE_MUSIC],
-           sizeof(g_current_params));
+    for (int p = 0; p < DDP_PROFILE_USER_COUNT; p++) {
+        memcpy(g_profile_states[p].params, g_profiles[p],
+               sizeof(int16_t) * DDP_PARAM_COUNT);
+        g_profile_states[p].ieq_mode = DDP_IEQ_MANUAL;
+    }
 
-    FILE *f = fopen(CONFIG_PATH, "r");
-    if (!f) return;
+    toml_result_t r = toml_parse_file_ex(CONFIG_PATH);
+    if (!r.ok) {
+        log_msg("Config: %s (using defaults)\n",
+                r.errmsg[0] ? r.errmsg : "file not found");
+        LeaveCriticalSection(&g_config_lock);
+        return;
+    }
 
-    char line[1024];
-    while (fgets(line, sizeof(line), f)) {
-        if (line[0] == '#' || line[0] == '\n') continue;
-
-        int ival;
-        if (sscanf(line, "profile = %d", &ival) == 1) {
-            if (ival >= 0 && ival < DDP_PROFILE_USER_COUNT)
-                g_current_profile = ival;
-        } else if (sscanf(line, "power = %d", &ival) == 1) {
-            g_current_power = ival ? 1 : 0;
-        } else if (sscanf(line, "ieq = %d", &ival) == 1) {
-            if (ival >= 0 && ival <= 3) g_current_ieq = ival;
-        } else if (strncmp(line, "params = [", 10) == 0) {
-            char *p = line + 10;
-            for (int i = 0; i < DDP_PARAM_COUNT && *p; i++) {
-                while (*p == ' ') p++;
-                int v = 0, neg = 0;
-                if (*p == '-') { neg = 1; p++; }
-                while (*p >= '0' && *p <= '9') { v = v*10 + (*p - '0'); p++; }
-                g_current_params[i] = (int16_t)(neg ? -v : v);
-                while (*p == ',' || *p == ' ') p++;
+    /* active_profile */
+    toml_datum_t d = toml_seek(r.toptab, "active_profile");
+    if (d.type == TOML_STRING) {
+        for (int i = 0; i < DDP_PROFILE_USER_COUNT; i++) {
+            if (strcmp(d.u.s, g_profile_names[i]) == 0) {
+                g_current_profile = i;
+                break;
             }
         }
     }
-    fclose(f);
 
-    /* Ensure params match the loaded profile if no overrides were saved */
-    log_msg("Config loaded: profile=%d power=%d ieq=%d\n",
-            g_current_profile, g_current_power, g_current_ieq);
+    /* power */
+    d = toml_seek(r.toptab, "power");
+    if (d.type == TOML_BOOLEAN) g_current_power = d.u.boolean ? 1 : 0;
+
+    /* Per-profile sections */
+    for (int p = 0; p < DDP_PROFILE_USER_COUNT; p++) {
+        toml_datum_t sec = toml_get(r.toptab, g_profile_names[p]);
+        if (sec.type != TOML_TABLE) continue;
+
+        for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+            toml_datum_t v = toml_get(sec, g_param_names[i]);
+            if (v.type == TOML_INT64) {
+                g_profile_states[p].params[i] = (int16_t)v.u.int64;
+            }
+        }
+
+        toml_datum_t ieq = toml_get(sec, "ieq_mode");
+        if (ieq.type == TOML_STRING) {
+            for (int i = 0; i < 4; i++) {
+                if (strcmp(ieq.u.s, g_ieq_names[i]) == 0) {
+                    g_profile_states[p].ieq_mode = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    toml_free(r);
+
+    /* Record mtime */
+    HANDLE hf = CreateFileA(CONFIG_PATH, GENERIC_READ, FILE_SHARE_READ,
+                            NULL, OPEN_EXISTING, 0, NULL);
+    if (hf != INVALID_HANDLE_VALUE) {
+        GetFileTime(hf, NULL, NULL, &g_config_mtime);
+        CloseHandle(hf);
+    }
+
+    log_msg("Config loaded: profile=%s power=%s\n",
+            g_profile_names[g_current_profile],
+            g_current_power ? "on" : "off");
+    LeaveCriticalSection(&g_config_lock);
+}
+
+/* ── Config file watcher (polls mtime every 1s) ──────────────────── */
+
+static int build_state_json(char *buf, int bufsize); /* forward decl */
+
+static DWORD WINAPI config_watcher_thread(LPVOID param) {
+    (void)param;
+    for (;;) {
+        Sleep(1000);
+        HANDLE hf = CreateFileA(CONFIG_PATH, GENERIC_READ, FILE_SHARE_READ,
+                                NULL, OPEN_EXISTING, 0, NULL);
+        if (hf == INVALID_HANDLE_VALUE) continue;
+        FILETIME ft;
+        GetFileTime(hf, NULL, NULL, &ft);
+        CloseHandle(hf);
+        if (CompareFileTime(&ft, &g_config_mtime) != 0) {
+            log_msg("Config file changed — reloading\n");
+            load_config();
+            /* Broadcast updated state to all WS clients */
+            char resp[1024];
+            int rlen = build_state_json(resp, sizeof(resp));
+            ws_broadcast(resp, rlen);
+        }
+    }
+    return 0;
 }
 
 static int build_state_json(char *buf, int bufsize) {
+    int16_t *P = CUR_PARAMS;
+    int ieq = CUR_IEQ;
     int n = snprintf(buf, bufsize,
         "{\"type\":\"state\",\"profile\":%d,\"power\":%d,\"ieq\":%d,\"params\":[",
-        g_current_profile, g_current_power, g_current_ieq);
+        g_current_profile, g_current_power, ieq);
     for (int i = 0; i < DDP_PARAM_COUNT; i++) {
-        n += snprintf(buf + n, bufsize - n, "%s%d",
-                      i ? "," : "", g_current_params[i]);
+        n += snprintf(buf + n, bufsize - n, "%s%d", i ? "," : "", P[i]);
     }
     n += snprintf(buf + n, bufsize - n, "]}");
     return n;
@@ -347,22 +448,45 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
     if (strcmp(cmd, "set_profile") == 0) {
         int id = json_int(json, "id");
         if (id >= 0 && id < DDP_PROFILE_USER_COUNT) {
-            BYTE pkt[8];
-            DWORD c = DDP_CMD_SET_PROFILE;
-            memcpy(pkt, &c, 4);
-            memcpy(pkt + 4, &id, 4);
-            BYTE reply[4] = {0};
-            forward_cmd(pkt, 8, reply, 4);
             g_current_profile = id;
 
-            /* Load default params for this profile */
+            /* Send base profile to processor */
+            BYTE pkt[8]; BYTE reply[4];
+            DWORD c = DDP_CMD_SET_PROFILE;
+            memcpy(pkt, &c, 4); memcpy(pkt + 4, &id, 4);
+            forward_cmd(pkt, 8, reply, 4);
+
+            /* Apply saved per-profile overrides */
             extern const int16_t g_profiles[][DDP_PARAM_COUNT];
-            memcpy(g_current_params, g_profiles[id], sizeof(g_current_params));
+            int16_t *P = CUR_PARAMS;
+            for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+                if (P[i] != g_profiles[id][i]) {
+                    c = DDP_CMD_SET_PARAM;
+                    uint16_t pi = (uint16_t)i; int16_t v = P[i];
+                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                    forward_cmd(pkt, 8, reply, 4);
+                }
+            }
+
+            /* Apply saved IEQ preset */
+            int ieq = CUR_IEQ;
+            if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
+                c = DDP_CMD_SET_PARAM;
+                uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                pi = DDP_PARAM_IEA; v = 10;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+                forward_cmd(pkt, 8, reply, 4);
+                c = DDP_CMD_SET_IEQ_PRESET;
+                DWORD preset = (DWORD)ieq;
+                memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
+                forward_cmd(pkt, 8, reply, 4);
+            }
         }
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
 
-        /* Broadcast state to all clients */
         rlen = build_state_json(resp, sizeof(resp));
         save_config();
         ws_broadcast(resp, rlen);
@@ -382,7 +506,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
             memcpy(pkt + 6, &v, 2);
             BYTE reply[4] = {0};
             forward_cmd(pkt, 8, reply, 4);
-            g_current_params[idx] = (int16_t)val;
+            CUR_PARAMS[idx] = (int16_t)val;
         }
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
@@ -397,7 +521,7 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
     if (strcmp(cmd, "set_ieq") == 0) {
         int preset = json_int(json, "preset");
         if (preset >= 0 && preset <= 3) {
-            g_current_ieq = preset;
+            CUR_IEQ = preset;
             if (preset == DDP_IEQ_MANUAL) {
                 /* ieon=0, geon=1 */
                 BYTE pkt[8]; DWORD c; BYTE reply[4];
@@ -407,12 +531,12 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
                 pi = DDP_PARAM_IEON; v = 0;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
-                g_current_params[DDP_PARAM_IEON] = 0;
+                CUR_PARAMS[DDP_PARAM_IEON] = 0;
 
                 pi = DDP_PARAM_GEON; v = 1;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
-                g_current_params[DDP_PARAM_GEON] = 1;
+                CUR_PARAMS[DDP_PARAM_GEON] = 1;
             } else {
                 /* geon=0, ieon=1, iea=10, set preset */
                 BYTE pkt[8]; DWORD c; BYTE reply[4];
@@ -422,17 +546,17 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
                 pi = DDP_PARAM_GEON; v = 0;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
-                g_current_params[DDP_PARAM_GEON] = 0;
+                CUR_PARAMS[DDP_PARAM_GEON] = 0;
 
                 pi = DDP_PARAM_IEON; v = 1;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
-                g_current_params[DDP_PARAM_IEON] = 1;
+                CUR_PARAMS[DDP_PARAM_IEON] = 1;
 
                 pi = DDP_PARAM_IEA; v = 10;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
-                g_current_params[DDP_PARAM_IEA] = 10;
+                CUR_PARAMS[DDP_PARAM_IEA] = 10;
 
                 c = DDP_CMD_SET_IEQ_PRESET;
                 DWORD pid = preset;
@@ -452,18 +576,47 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         int on = json_bool(json, "on");
         if (on >= 0) {
             g_current_power = on;
+            BYTE pkt[8]; BYTE reply[4]; DWORD c;
             if (!on) {
-                /* Switch to OFF profile */
-                BYTE pkt[8]; DWORD c = DDP_CMD_SET_PROFILE;
+                /* OFF: send OFF profile (graceful fade via DS1 smoothing) */
+                c = DDP_CMD_SET_PROFILE;
                 DWORD pid = DDP_PROFILE_OFF;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
-                BYTE reply[4]; forward_cmd(pkt, 8, reply, 4);
+                forward_cmd(pkt, 8, reply, 4);
             } else {
-                /* Restore current profile */
-                BYTE pkt[8]; DWORD c = DDP_CMD_SET_PROFILE;
+                /* ON: restore current profile + all saved overrides */
+                c = DDP_CMD_SET_PROFILE;
                 DWORD pid = g_current_profile;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pid, 4);
-                BYTE reply[4]; forward_cmd(pkt, 8, reply, 4);
+                forward_cmd(pkt, 8, reply, 4);
+
+                extern const int16_t g_profiles[][DDP_PARAM_COUNT];
+                int16_t *P = CUR_PARAMS;
+                for (int i = 1; i < DDP_PARAM_COUNT; i++) {
+                    if (P[i] != g_profiles[g_current_profile][i]) {
+                        c = DDP_CMD_SET_PARAM;
+                        uint16_t pi = (uint16_t)i; int16_t v = P[i];
+                        memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
+                        memcpy(pkt+6, &v, 2);
+                        forward_cmd(pkt, 8, reply, 4);
+                    }
+                }
+                int ieq = CUR_IEQ;
+                if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
+                    c = DDP_CMD_SET_PARAM;
+                    uint16_t pi = DDP_PARAM_IEON; int16_t v = 1;
+                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
+                    memcpy(pkt+6, &v, 2);
+                    forward_cmd(pkt, 8, reply, 4);
+                    pi = DDP_PARAM_IEA; v = 10;
+                    memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2);
+                    memcpy(pkt+6, &v, 2);
+                    forward_cmd(pkt, 8, reply, 4);
+                    c = DDP_CMD_SET_IEQ_PRESET;
+                    DWORD preset = (DWORD)ieq;
+                    memcpy(pkt, &c, 4); memcpy(pkt+4, &preset, 4);
+                    forward_cmd(pkt, 8, reply, 4);
+                }
             }
         }
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
@@ -643,7 +796,7 @@ static DWORD WINAPI http_server_thread(LPVOID param) {
     }
 
     listen(srv, 8);
-    log_msg("Web UI → http://localhost:%d\n", HTTP_PORT);
+    log_msg("Web UI -> http://localhost:%d\n", HTTP_PORT);
 
     for (;;) {
         SOCKET client = accept(srv, NULL, NULL);
@@ -666,6 +819,7 @@ static DWORD WINAPI http_server_thread(LPVOID param) {
 
 void http_start(void) {
     InitializeCriticalSection(&g_ws_lock);
+    InitializeCriticalSection(&g_config_lock);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         g_ws_clients[i] = INVALID_SOCKET;
 
@@ -673,4 +827,8 @@ void http_start(void) {
 
     HANDLE t = CreateThread(NULL, 0, http_server_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
+
+    /* Start config file watcher */
+    HANDLE tw = CreateThread(NULL, 0, config_watcher_thread, NULL, 0, NULL);
+    if (tw) CloseHandle(tw);
 }

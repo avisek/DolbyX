@@ -38,7 +38,7 @@ echo "[5/5] Building Windows components..."
 
 # Daemon (with embedded Web UI)
 cd "$DAEMON_DIR"
-x86_64-w64-mingw32-gcc -O2 -DDOLBYX_USE_BUNDLE -o dolbyx.exe main.c http.c \
+x86_64-w64-mingw32-gcc -O2 -DDOLBYX_USE_BUNDLE -o dolbyx.exe main.c http.c vendor/tomlc17.c \
     -static -ladvapi32 -lws2_32 \
     && echo "  dolbyx.exe OK" || { echo "  dolbyx.exe FAILED"; exit 1; }
 
