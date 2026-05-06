@@ -503,6 +503,12 @@ static void apply_profile_to_processors(void) {
         }
     }
 
+    /* Always ensure graphic EQ is enabled (profiles default geon=0) */
+    c = DDP_CMD_SET_PARAM;
+    { uint16_t pi = DDP_PARAM_GEON; int16_t v = 1;
+      memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+      forward_cmd(pkt, 8, reply, 4); }
+
     /* Apply IEQ preset */
     int ieq = CUR_IEQ;
     if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {
@@ -567,7 +573,16 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         memcpy(CUR_PARAMS, g_profiles[g_current_profile],
                sizeof(int16_t) * DDP_PARAM_COUNT);
         CUR_IEQ = DDP_IEQ_MANUAL;
+        memset(g_profile_states[g_current_profile].geq, 0, sizeof(int16_t) * 20);
         apply_profile_to_processors();
+
+        /* Also send zero GEQ to processor */
+        BYTE geq_pkt[44]; int16_t geq_reply[20];
+        DWORD gc = DDP_CMD_SET_GEQ;
+        memcpy(geq_pkt, &gc, 4);
+        memset(geq_pkt + 4, 0, 40);
+        forward_cmd(geq_pkt, 44, (BYTE *)geq_reply, 40);
+
         rlen = snprintf(resp, sizeof(resp), "{\"type\":\"ack\",\"ok\":true}");
         ws_send_text(s, resp, rlen);
         rlen = build_state_json(resp, sizeof(resp));
@@ -605,32 +620,18 @@ static void handle_ws_cmd(SOCKET s, const char *json) {
         int preset = json_int(json, "preset");
         if (preset >= 0 && preset <= 3) {
             CUR_IEQ = preset;
-            if (preset == DDP_IEQ_MANUAL) {
-                /* ieon=0, geon=1 */
-                BYTE pkt[8]; DWORD c; BYTE reply[4];
-                c = DDP_CMD_SET_PARAM;
-                uint16_t pi; int16_t v;
+            BYTE pkt[8]; DWORD c; BYTE reply[4];
+            c = DDP_CMD_SET_PARAM;
+            uint16_t pi; int16_t v;
 
+            if (preset == DDP_IEQ_MANUAL) {
+                /* Manual: disable intelligent EQ (graphic EQ stays on) */
                 pi = DDP_PARAM_IEON; v = 0;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);
                 CUR_PARAMS[DDP_PARAM_IEON] = 0;
-
-                pi = DDP_PARAM_GEON; v = 1;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
-                forward_cmd(pkt, 8, reply, 4);
-                CUR_PARAMS[DDP_PARAM_GEON] = 1;
             } else {
-                /* geon=0, ieon=1, iea=10, set preset */
-                BYTE pkt[8]; DWORD c; BYTE reply[4];
-                c = DDP_CMD_SET_PARAM;
-                uint16_t pi; int16_t v;
-
-                pi = DDP_PARAM_GEON; v = 0;
-                memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
-                forward_cmd(pkt, 8, reply, 4);
-                CUR_PARAMS[DDP_PARAM_GEON] = 0;
-
+                /* IEQ preset: enable intelligent EQ alongside graphic EQ */
                 pi = DDP_PARAM_IEON; v = 1;
                 memcpy(pkt, &c, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
                 forward_cmd(pkt, 8, reply, 4);

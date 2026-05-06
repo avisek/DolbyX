@@ -212,6 +212,12 @@ static void apply_saved_state(Proc *proc) {
         }
     }
 
+    /* Always ensure graphic EQ is enabled (profiles default geon=0) */
+    cmd = DDP_CMD_SET_PARAM;
+    { uint16_t pi = DDP_PARAM_GEON; int16_t v = 1;
+      memcpy(pkt, &cmd, 4); memcpy(pkt+4, &pi, 2); memcpy(pkt+6, &v, 2);
+      proc_ctrl(proc, pkt, 8, reply, 4); }
+
     /* Apply IEQ preset */
     int ieq = g_profile_states[g_current_profile].ieq_mode;
     if (ieq != DDP_IEQ_MANUAL && ieq >= 0 && ieq <= 2) {

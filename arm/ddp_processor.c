@@ -122,11 +122,45 @@ static int ds1_set_array(int param_index, const int16_t *values, int count) {
     return r;
 }
 
+/*
+ * Read an array parameter value from the DSP via GET_PARAM.
+ * Returns 0 on success, non-zero on failure.
+ */
+static int ds1_get_array(int param_index, int16_t *values, int count) {
+    int vsize = 4 + 2 + 2 + count * 2; /* device + pi + cnt + values */
+    int total = sizeof(effect_param_t) + sizeof(int32_t) + vsize;
+    uint8_t *buf = calloc(1, total);
+    effect_param_t *ep = (effect_param_t *)buf;
+    ep->status = 0;
+    ep->psize = sizeof(int32_t);
+    ep->vsize = vsize;
+
+    *(int32_t *)(buf + sizeof(effect_param_t)) = DS_PARAM_SINGLE_DEVICE_VALUE;
+
+    uint8_t *vdata = buf + sizeof(effect_param_t) + sizeof(int32_t);
+    *(int32_t *)(vdata + 0) = 8;                /* device = headphone */
+    *(int16_t *)(vdata + 4) = param_index;
+    *(int16_t *)(vdata + 6) = count;
+    /* leave values area zeroed — DSP fills it in */
+
+    uint32_t rs = total;
+    int32_t r = (*g_handle)->command(g_handle, EFFECT_CMD_GET_PARAM,
+                                     total, buf, &rs, buf);
+
+    if (r == 0 && ep->status == 0) {
+        memcpy(values, vdata + 8, count * 2);
+    }
+    free(buf);
+    return (r == 0 && ep->status == 0) ? 0 : -1;
+}
+
 /* ── Parameter Registration ───────────────────────────────────────── */
 
 /* Parameter names — order MUST match DDP_PARAM_* enum.
  * iebt (index 20) is the 20-band IEQ target array.
- * gebg (index 21) is the 20-band graphic EQ gains. */
+ * gebg (index 21) is the 20-band graphic EQ gains.
+ * vcnb (index 22) is the visualizer number of bands.
+ * vcbg (index 23) is the 20-band visualizer band gains. */
 static const char g_param_names[][5] = {
     "endp", "vdhe", "dhsb", "dssb", "dssf",
     "ngon", "dvla", "dvle", "dvme",
@@ -136,12 +170,16 @@ static const char g_param_names[][5] = {
     "vmb\0", "vmon",
     "geon", "plb\0",
     "iebt",           /* index 20: IEQ band targets (20 values) */
-    "gebg"            /* index 21: Graphic EQ band gains (20 values) */
+    "gebg",           /* index 21: Graphic EQ band gains (20 values) */
+    "vcnb",           /* index 22: Visualizer band count */
+    "vcbg"            /* index 23: Visualizer band gains (20 values) */
 };
 
 #define IEBT_INDEX  20
 #define GEBG_INDEX  21
-#define TOTAL_PARAMS  22  /* DDP_PARAM_COUNT(20) + iebt(1) + gebg(1) */
+#define VCNB_INDEX  22
+#define VCBG_INDEX  23
+#define TOTAL_PARAMS  24
 
 static void register_parameters(void) {
     int np = TOTAL_PARAMS;
@@ -349,7 +387,9 @@ static int handle_command(uint32_t cmd) {
     }
 
     if (cmd == DDP_CMD_GET_VIS) {
+        /* Read visualization band gains from DSP's visq node */
         int16_t vis_data[20] = {0};
+        ds1_get_array(VCBG_INDEX, vis_data, 20);
         write_exact(STDOUT_FILENO, vis_data, sizeof(vis_data));
         return 0;
     }
@@ -373,12 +413,20 @@ static int handle_command(uint32_t cmd) {
         int16_t gains[20];
         if (read_exact(STDIN_FILENO, gains, sizeof(gains)) < 0) return -1;
 
-        ds1_set_array(GEBG_INDEX, gains, 20);
-        log_msg("[DDP] SetGEQ: [%d,%d,%d,...,%d]\n",
-                gains[0], gains[1], gains[2], gains[19]);
+        /* Ensure graphic EQ is enabled */
+        ds1_set_value(DDP_PARAM_GEON, 1);
 
-        /* Echo back the applied gains */
-        write_exact(STDOUT_FILENO, gains, sizeof(gains));
+        /* Set the 20-band gains */
+        ds1_set_array(GEBG_INDEX, gains, 20);
+
+        /* Read back the actual applied values from the DSP */
+        int16_t applied[20];
+        if (ds1_get_array(GEBG_INDEX, applied, 20) != 0) {
+            /* Fallback: echo sent values if read-back fails */
+            memcpy(applied, gains, sizeof(gains));
+        }
+
+        write_exact(STDOUT_FILENO, applied, sizeof(applied));
         return 0;
     }
 
@@ -465,6 +513,11 @@ int main(int argc, char *argv[]) {
     /* ── Register parameters and apply default profile ─────────────── */
 
     register_parameters();
+
+    /* Enable visualizer (20 bands) and graphic EQ */
+    ds1_set_value(VCNB_INDEX, 20);
+    ds1_set_value(DDP_PARAM_GEON, 1);
+
     apply_profile(DDP_PROFILE_MUSIC);
 
     /* ── Enable ────────────────────────────────────────────────────── */
