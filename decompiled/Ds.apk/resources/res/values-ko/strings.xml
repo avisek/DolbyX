@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="remote_service_stopped">Remote service has stopped</string>
+    <string name="app_name">Dolby</string>
+    <string name="name_widget_extra_large">Dolby Digital Plus</string>
+    <string name="name_widget_large">Dolby Digital Plus</string>
+    <string name="name_widget_small">Dolby Digital Plus</string>
+    <string name="movie">영화</string>
+    <string name="music">음악</string>
+    <string name="game">게임</string>
+    <string name="voice">음성</string>
+    <string name="preset_1">사용자 지정 1</string>
+    <string name="preset_2">사용자 지정 2</string>
+</resources>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Inteligentny korektor dźwięku</string>
+    <string name="surround_virtualizer">Wirtualizacja dźwięku</string>
+    <string name="dialogue_enhancer">Uwydatnienie dialogów</string>
+    <string name="volume_leveler">Normalizacja głośności</string>
+    <string name="copyright">Dolby i symbol podwójnej litery D są zastrzeżonymi znakami towarowymi firmy Dolby Laboratories. © 2013 Dolby Laboratories Inc. Wszelkie prawa zastrzeżone.</string>
+    <string name="movie">Filmy</string>
+    <string name="music">Muzyka</string>
+    <string name="game">Gry</string>
+    <string name="voice">Głos</string>
+    <string name="preset_1">Własny 1</string>
+    <string name="preset_2">Własny 2</string>
+    <string name="open">Otwarty</string>
+    <string name="rich">Bogaty</string>
+    <string name="focused">Skupiony</string>
+    <string name="off">WYŁ.</string>
+    <string name="custom">Ręczny</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Korektor graficzny</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Odtwórz demonstrację</string>
+    <string name="tooltip_eq_title">Inteligentny korektor dźwięku/Korektor graficzny</string>
+    <string name="tooltip_eq_text">Inteligentny korektor dźwięku analizuje i dynamicznie koryguje dźwięk, aby odpowiadał on żądanej charakterystyce. Wybierz jedno z czterech pokazanych ustawień, a następnie dotknij Wizualizator spektralny, aby wprowadzić do korektora graficznego własne modyfikacje.</string>
+    <string name="tooltip_sv_title">Wirtualizacja dźwięku</string>
+    <string name="tooltip_sv_text">Wirtualizacja dźwięku tworzy realistyczny dźwięk przestrzenny dla dowolnego typu słuchawek lub głośników stereo. Włącz lub wyłącz przełącznik, aby kontrolować efekt dźwięku przestrzennego.</string>
+    <string name="tooltip_de_title">Uwydatnienie dialogów</string>
+    <string name="tooltip_de_text">Uwydatnienie dialogów poprawia jakość mowy we wszystkich rodzajach multimediów. Włącz lub wyłącz przełącznik, aby kontrolować uwydatnienie dialogów.</string>
+    <string name="tooltip_vl_title">Normalizacja głośności</string>
+    <string name="tooltip_vl_text">Normalizacja głośności zapewnia stały poziom głośności wszystkich odtwarzanych treści w odniesieniu do podstawowego poziomu głośności urządzenia. Włącz lub wyłącz przełącznik, aby kontrolować normalizację głośności.</string>
+</resources>

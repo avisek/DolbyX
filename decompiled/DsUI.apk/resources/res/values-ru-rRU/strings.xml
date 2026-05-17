@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Смарт-эквалайзер</string>
+    <string name="surround_virtualizer">Виртуализация</string>
+    <string name="dialogue_enhancer">Коррекция речи</string>
+    <string name="volume_leveler">Авто-громкость</string>
+    <string name="copyright">Dolby и эмблема в виде двойной буквы D являются зарегистрированными товарными знаками компании Dolby Laboratories. © Dolby Laboratories Inc., 2013. Все права защищены.</string>
+    <string name="movie">Фильмы</string>
+    <string name="music">Музыка</string>
+    <string name="game">Игры</string>
+    <string name="voice">Голос</string>
+    <string name="preset_1">Настройка 1</string>
+    <string name="preset_2">Настройка 2</string>
+    <string name="open">Открытый</string>
+    <string name="rich">Насыщенный</string>
+    <string name="focused">Сфокусированный</string>
+    <string name="off">ВЫКЛ.</string>
+    <string name="custom">Настройка</string>
+    <string name="db36">36 дБ</string>
+    <string name="db24">24 дБ</string>
+    <string name="db12">12 дБ</string>
+    <string name="db0">0 дБ</string>
+    <string name="dbn12">-12 дБ</string>
+    <string name="graphical_equalizer">Графический эквалайзер</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Демо-ролик</string>
+    <string name="tooltip_eq_title">Смарт-эквалайзер/Графический эквалайзер</string>
+    <string name="tooltip_eq_text">Смарт-эквалайзер анализирует и динамически изменяет параметры звука. Выберите один из четырех предлагаемых пресетов, а затем внесите необходимые изменения при помощи визуализатора спектра.</string>
+    <string name="tooltip_sv_title">Виртуализация</string>
+    <string name="tooltip_sv_text">Данная функция создает реалистичное объемное звучание в любых наушниках или стереоколонках. Для управления функцией используйте переключатель.</string>
+    <string name="tooltip_de_title">Коррекция речи</string>
+    <string name="tooltip_de_text">Данная функция повышает четкость речи при воспроизведении любых медиафайлов. Для управления функцией используйте переключатель.</string>
+    <string name="tooltip_vl_title">Авто-громкость</string>
+    <string name="tooltip_vl_text">Данная функция обеспечивает стабильный уровень громкости во всех приложениях и при воспроизведении любых медиафайлов, исходя из общего уровня громкости устройства. Для управления функцией используйте переключатель.</string>
+</resources>

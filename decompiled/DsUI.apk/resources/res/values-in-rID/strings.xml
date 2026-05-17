@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Equalizer Cerdas</string>
+    <string name="surround_virtualizer">Virtualizer Surround</string>
+    <string name="dialogue_enhancer">Peningkat Dialog</string>
+    <string name="volume_leveler">Penyeimbang Volume</string>
+    <string name="copyright">Dolby dan lambang D ganda adalah merek dagang terdaftar Dolby Laboratories. © 2013 Dolby Laboratories Inc. Hak cipta dilindungi undang-undang.</string>
+    <string name="movie">Film</string>
+    <string name="music">Musik</string>
+    <string name="game">Game</string>
+    <string name="voice">Suara</string>
+    <string name="preset_1">Kustom 1</string>
+    <string name="preset_2">Kustom 2</string>
+    <string name="open">Membahana</string>
+    <string name="rich">Mantap</string>
+    <string name="focused">Terpusat</string>
+    <string name="off">Mati</string>
+    <string name="custom">Sesuaikan</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Equalizer Grafis</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Putar Demo</string>
+    <string name="tooltip_eq_title">Equalizer Cerdas/Equalizer Grafis</string>
+    <string name="tooltip_eq_text">Equalizer Cerdas menganalisis dan secara dinamis menyetel audio agar sesuai dengan nada yang diinginkan. Pilihlah dari empat prasetel yang ditampilkan, lalu sentuh Visualizer Spektrum untuk memodifikasi Equalizer Grafis sesuai keinginan.</string>
+    <string name="tooltip_sv_title">Virtualizer Surround</string>
+    <string name="tooltip_sv_text">Virtualizer Surround membuat suara surround realistis dari perangkat headphone dan speaker stereo. Atur tombol ke posisi on atau off untuk mengontrol efek suara surround.</string>
+    <string name="tooltip_de_title">Peningkat Dialog</string>
+    <string name="tooltip_de_text">Peningkat Dialog meningkatkan kejelasan pembicaraan di media jenis apa pun. Atur tombol ke posisi on atau off untuk mengontrol peningkatan dialog.</string>
+    <string name="tooltip_vl_title">Penyeimbang Volume</string>
+    <string name="tooltip_vl_text">Penyeimbang Volume menghadirkan volume yang konsisten di semua konten dan aplikasi berdasarkan tingkat volume master dari perangkat tersebut. Atur tombol ke posisi on atau off untuk mengontrol penyeimbangan volume otomatis.</string>
+</resources>

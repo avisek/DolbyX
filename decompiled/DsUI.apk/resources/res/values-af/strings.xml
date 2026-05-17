@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="music">Musiek</string>
+    <string name="voice">Stem</string>
+    <string name="open">Open</string>
+    <string name="off">Af</string>
+    <string name="custom">Handmatig</string>
+    <string name="stop">Stop</string>
+</resources>

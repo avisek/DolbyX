@@ -1,0 +1,160 @@
+Signature-Version: 1.0
+SHA1-Digest-Manifest: 0HK7NocS6kHkNueD7PfWH7ujBLs=
+Created-By: 1.0 (Android SignApk)
+
+Name: res/drawable-hdpi-v4/preview_widget_status.png
+SHA1-Digest: bkAidaQ/F/8EBRIvbhZmjtQN73I=
+
+Name: res/drawable/voicedis.png
+SHA1-Digest: 5/V0qwsMGBrkV+qXRnTLB2u215A=
+
+Name: res/drawable/movieoff.png
+SHA1-Digest: bgT2WV4t3MKGEJqUrOT550XxdyM=
+
+Name: res/drawable-xhdpi-v4/preview_widget_status.png
+SHA1-Digest: 8qaEe8eVz4Onn7rEACrYPOPOrKE=
+
+Name: res/drawable/topselectedbackgroundback.png
+SHA1-Digest: LWUOOKmfCusqkQMqhcWFWLXphg4=
+
+Name: res/drawable/dslogo.png
+SHA1-Digest: Lpy3G8pnkeiJ6l8x/3HzFEB5Gvw=
+
+Name: res/drawable-mdpi-v4/ic_launcher.png
+SHA1-Digest: fdcKmVFR3p3pXP8iziRV6LP5uh0=
+
+Name: res/drawable/movieon.png
+SHA1-Digest: bLXe61z2Coy2WS8cJ69FfBz93F0=
+
+Name: res/drawable/gamedis.png
+SHA1-Digest: o7ka8v9hJjuLB5c1ZYzrEAN0gAQ=
+
+Name: res/drawable-ldpi-v4/preview_widget.png
+SHA1-Digest: A6p5ENOKD+kng/xJavOQK5shrGI=
+
+Name: res/layout-ldrtl/header.xml
+SHA1-Digest: ogmeyEUyYMbqgcobnPwK6OiWi0I=
+
+Name: res/drawable/power_touch.png
+SHA1-Digest: NiiPyTH60vdTgf788XODzUejt6w=
+
+Name: res/drawable/preset1on.png
+SHA1-Digest: Y+dcG3fxBbQtXJWfr18/DIMDO/Y=
+
+Name: res/drawable/musicon.png
+SHA1-Digest: aXo7eyySwJfp/7Pj0fpiV7SeJxQ=
+
+Name: res/xml/dolby_widget_small_provider.xml
+SHA1-Digest: nP23pVYZqgMPN6HjCwSW06DAcaE=
+
+Name: res/layout-ldrtl/widget_profile_layout.xml
+SHA1-Digest: EHiP+PRzRxIeCKuqhY/r1w257rg=
+
+Name: res/drawable-ldpi-v4/ic_launcher.png
+SHA1-Digest: WVUmYkyb99d2jbSlQcRmwsV/rKg=
+
+Name: res/drawable-ldpi-v4/preview_widget_status.png
+SHA1-Digest: BVbUpN35YBtzlsDKZQ6/GeugvZc=
+
+Name: res/layout-ldrtl/widget_status_layout.xml
+SHA1-Digest: Sx9yzheuwL4vXrVbirZMecIYgdY=
+
+Name: res/drawable/preset2off.png
+SHA1-Digest: g7JGCJGv6waQak43bkr1qXYYb5w=
+
+Name: res/xml/dolby_widget_xlarge_provider.xml
+SHA1-Digest: 9BOF1Pba9+DxCScP+9AxDlZdvnA=
+
+Name: res/drawable-xhdpi-v4/ic_launcher.png
+SHA1-Digest: VwBT2j9r77uaNgRU/QTj3Cina4Q=
+
+Name: res/drawable/moviedis.png
+SHA1-Digest: NAwTEA4dgk3tAIDvC5U7Et7bmkA=
+
+Name: res/drawable/gameon.png
+SHA1-Digest: z+vuZwHLLX6hcZu3kdxabkypeyk=
+
+Name: resources.arsc
+SHA1-Digest: 6Oe3pCPc1Oe/uFyjoMROdOaZdUU=
+
+Name: res/drawable-hdpi-v4/preview_widget.png
+SHA1-Digest: 5Vj1Li/UkiaZTdCsYUpPbI6PUVc=
+
+Name: res/layout/widget_profile_layout.xml
+SHA1-Digest: pDlB6j5pDljAcZiRAPSPWIrPLFE=
+
+Name: AndroidManifest.xml
+SHA1-Digest: u2DHAoDQ2GZtutX3jkikg8Tu/lA=
+
+Name: res/drawable/voiceon.png
+SHA1-Digest: 220eA5k6rjhH/cbuDyA5E0auXos=
+
+Name: res/drawable-hdpi-v4/ic_launcher.png
+SHA1-Digest: p8P6Pbqq0cwdmSIusr9CC6aZKns=
+
+Name: res/drawable/dslogodis.png
+SHA1-Digest: Ct1XMfeY31jem14lJBPqS9WTdlY=
+
+Name: res/drawable-mdpi-v4/preview_widget_status.png
+SHA1-Digest: fkwmHbF1R0p1ll76a2MdV1yXYTM=
+
+Name: res/layout/header.xml
+SHA1-Digest: 9jAiJ6tmhu+wvlNsB5xxeiR4tsQ=
+
+Name: res/drawable/preview_widget_status.png
+SHA1-Digest: D3Ml7t72ECfs/iiDa+MgtIeD9E8=
+
+Name: res/drawable/gameoff.png
+SHA1-Digest: bDMIdbnCd5vxHgXULSiGLVfsBb0=
+
+Name: res/drawable/musicoff.png
+SHA1-Digest: kXXgXNgb38PSBxpICbWaUl0j4d0=
+
+Name: res/drawable/voiceoff.png
+SHA1-Digest: ZztEsKMTAn+BLfe/lxvUnrpJtSs=
+
+Name: res/drawable-mdpi-v4/preview_widget.png
+SHA1-Digest: Ovrl5TqT4oW12Zno73Ze9lR1fkw=
+
+Name: res/drawable/preset1dis.png
+SHA1-Digest: QdMWTkRZtKirSIS8sDb09tCZFAY=
+
+Name: res/drawable/preset2dis.png
+SHA1-Digest: PSEDKPRQ9IfaDPJsoTI+qrowkOw=
+
+Name: res/drawable-xhdpi-v4/preview_widget.png
+SHA1-Digest: lXnEo9edTORGXiSw+lIt6/7Ctn0=
+
+Name: res/drawable/topselectedbackground.png
+SHA1-Digest: f63gzrn0SH7NzZIW2OSzpaF3oCw=
+
+Name: res/drawable/topbackground.png
+SHA1-Digest: nBMjqyDCMunwges6+4pHN014nP4=
+
+Name: res/drawable/musicdis.png
+SHA1-Digest: ORS46P2yfS+lG+bChg0VhaMCUEc=
+
+Name: res/drawable/power_off.png
+SHA1-Digest: nIPH+u/JbSz3ZMAABNp5Wdn4CVw=
+
+Name: res/drawable/preset1off.png
+SHA1-Digest: 9IhJZ9Nt7oLc0X4NK0wdHWlxk2A=
+
+Name: res/layout/widget_status_layout.xml
+SHA1-Digest: LYmVQLG480GBVrIW3scGY+ulqd0=
+
+Name: res/drawable/preset2on.png
+SHA1-Digest: +P/jJSGWGG7PLxVvbGmfpUu2BM8=
+
+Name: res/drawable/power_on.png
+SHA1-Digest: D89cPDdUbsD4Sg8P676P6CiNpvg=
+
+Name: res/drawable/preview_widget.png
+SHA1-Digest: bAbuPzdLSfmoo5lR1oJQvV4iHe0=
+
+Name: res/drawable/topselectedbackgroundwsmall.png
+SHA1-Digest: KtILu4Jxx7Mr9HorBH80eO6L3mA=
+
+Name: classes.dex
+SHA1-Digest: 2Y5zJOSURm1vq4/ojHExt7FOk9E=
+

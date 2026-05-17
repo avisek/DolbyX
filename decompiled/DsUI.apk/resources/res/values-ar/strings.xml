@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">المعادل الذكي</string>
+    <string name="surround_virtualizer">المحاكي المحيطي</string>
+    <string name="dialogue_enhancer">محسن الحوار</string>
+    <string name="volume_leveler">محدد مستوى الصوت</string>
+    <string name="copyright">إن Dolby ورمز D المزدوج تمثل علامات تجارية مسجلة لمعامل Dolby Laboratories‏. ‎© 2013 Dolby Laboratories Inc.‎ كافة الحقوق محفوظة.</string>
+    <string name="movie">فيلم</string>
+    <string name="music">موسيقى</string>
+    <string name="game">لعبة</string>
+    <string name="voice">صوت</string>
+    <string name="preset_1">التخصيص 1</string>
+    <string name="preset_2">التخصيص 2</string>
+    <string name="open">مفتوح</string>
+    <string name="rich">غني</string>
+    <string name="focused">مركّز</string>
+    <string name="off">متوقف</string>
+    <string name="custom">تخصيص</string>
+    <string name="db36">36dB‏</string>
+    <string name="db24">24dB‏</string>
+    <string name="db12">12dB‏</string>
+    <string name="db0">0dB‏</string>
+    <string name="dbn12">‎-12dB‏</string>
+    <string name="graphical_equalizer">المعادل الرسومي</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">تشغيل العرض التوضيحي</string>
+    <string name="tooltip_eq_title">المعادل الذكي/المعادل الرسومي</string>
+    <string name="tooltip_eq_text">يقوم المعادل الذكي بتحليل الصوت وتعديله ديناميكيًا ليطابق النغمة المطلوبة. اختر أحد الإعدادات المسبقة المعروضة، ثم المس المعدل الطيفي لإجراء تعديلات تخصيصية للمعدل الرسومي.</string>
+    <string name="tooltip_sv_title">المحاكي المحيطي</string>
+    <string name="tooltip_sv_text">ينشئ المحاكي المحيطي صوتًا محيطيًا واقعيًا من أي مجموعة سماعات رأس أو سماعات استيريو. ضع المفتاح في وضع التشغيل أو الإيقاف للتحكم في تأثير الصوت المحيطي.</string>
+    <string name="tooltip_de_title">محسن الحوار</string>
+    <string name="tooltip_de_text">يعمل محسن الحوار على تحسين وضوح الحديث في أي نوع من الوسائط. ضع المفتاح في وضع التشغيل أو الإيقاف للتحكم في تحسين الحوار.</string>
+    <string name="tooltip_vl_title">محدد مستوى الصوت</string>
+    <string name="tooltip_vl_text">يوفر محدد مستوى الصوت صوتًا ثابتًا عبر كل المحتويات والتطبيقات بناءً على مستوى الصوت الرئيسي للجهاز. ضع المفتاح في وضع التشغيل أو الإيقاف للتحكم في التحديد التلقائي لمستوى الصوت.</string>
+</resources>

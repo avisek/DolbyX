@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="TextAppearanceLargeBlue" parent="">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">0x1</item>
+        <item name="android:textColor">@color/text_color_bluehide</item>
+    </style>
+    <style name="SwitchButton" parent="">
+        <item name="android:background">@drawable/switch_button</item>
+        <item name="android:layout_width">-2</item>
+        <item name="android:layout_height">-2</item>
+        <item name="android:textOn"> </item>
+        <item name="android:textOff"> </item>
+    </style>
+    <style name="SwitchButton_ldrtl" parent="">
+        <item name="android:background">@drawable/switch_button_ldrtl</item>
+        <item name="android:layout_width">-2</item>
+        <item name="android:layout_height">-2</item>
+        <item name="android:textOn"> </item>
+        <item name="android:textOff"> </item>
+    </style>
+</resources>

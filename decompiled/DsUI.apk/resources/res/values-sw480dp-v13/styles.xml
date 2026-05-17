@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="TextAppearanceMedium" parent="">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">0x0</item>
+        <item name="android:textColor">@color/text_color</item>
+    </style>
+    <style name="TextAppearanceMediumBlue" parent="">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">0x0</item>
+        <item name="android:textColor">@color/text_color_bluehide</item>
+    </style>
+    <style name="TextAppearanceLargeBlue" parent="">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">0x1</item>
+        <item name="android:textColor">@color/text_color_bluehide</item>
+    </style>
+    <style name="TextAppearanceLarge" parent="">
+        <item name="android:textSize">34sp</item>
+        <item name="android:textStyle">0x0</item>
+        <item name="android:textColor">@color/text_color</item>
+    </style>
+    <style name="TextAppearanceCopyright" parent="">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">0x1</item>
+        <item name="android:textColor">#ff666666</item>
+    </style>
+    <style name="SwitchButton" parent="">
+        <item name="android:background">@drawable/switch_button</item>
+        <item name="android:layout_width">-2</item>
+        <item name="android:layout_height">-2</item>
+        <item name="android:textOn"> </item>
+        <item name="android:textOff"> </item>
+    </style>
+    <style name="EqualizerCustomButton" parent="">
+        <item name="android:background">@drawable/eq_custom_bkg</item>
+        <item name="android:src">@drawable/eq_custom_image</item>
+        <item name="android:scaleType">5</item>
+    </style>
+    <style name="SwitchButton_ldrtl" parent="">
+        <item name="android:background">@drawable/switch_button_ldrtl</item>
+        <item name="android:layout_width">-2</item>
+        <item name="android:layout_height">-2</item>
+        <item name="android:textOn"> </item>
+        <item name="android:textOff"> </item>
+    </style>
+</resources>

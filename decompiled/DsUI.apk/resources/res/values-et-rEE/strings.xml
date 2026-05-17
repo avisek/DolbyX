@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Intelligentne ekvalaiser</string>
+    <string name="surround_virtualizer">Ruumilise heli virtualiseerija</string>
+    <string name="dialogue_enhancer">Dialoogi täiustaja</string>
+    <string name="volume_leveler">Helitugevuse nivellija</string>
+    <string name="copyright">Dolby ja kaksik-D sümbol on Dolby Laboratories registreeritud kaubamärgid. © 2013 Dolby Laboratories. Kõik õigused tagatud.</string>
+    <string name="movie">Film</string>
+    <string name="music">Muusika</string>
+    <string name="game">Mäng</string>
+    <string name="voice">Hääl</string>
+    <string name="preset_1">Kohandatud 1</string>
+    <string name="preset_2">Kohandatud 2</string>
+    <string name="open">Avatud</string>
+    <string name="rich">Külluslik</string>
+    <string name="focused">Fokuseeritud</string>
+    <string name="off">VÄLJAS</string>
+    <string name="custom">Käsitsi</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Graafiline ekvalaiser</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Esita demo</string>
+    <string name="tooltip_eq_title">Intelligentne ekvalaiser/Graafiline ekvalaiser</string>
+    <string name="tooltip_eq_text">Reaalajaline Intelligentne ekvalaiser analüüsib pidevalt heli ja reguleerib seda dünaamiliselt, et see vastaks soovitud toonile. Valige nelja kuvatud eelseadistuse hulgast ja puudutage seejärel spektraalset virtualiseerijat, et reguleerida käsitsi graafilist ekvalaiserit.</string>
+    <string name="tooltip_sv_title">Ruumilise heli virtualiseerija</string>
+    <string name="tooltip_sv_text">Ruumilise heli virtualiseerija loob realistliku ruumilise heli mis tahes kõrvaklappides või stereokõlarites. Lülitage ruumilise heli efekt sisse või välja.</string>
+    <string name="tooltip_de_title">Dialoogi täiustaja</string>
+    <string name="tooltip_de_text">Dialoogi täiustaja parandab heli selgust mis tahes tüüpi meediumi puhul. Lülitage dialoogi täiustamine sisse või välja.</string>
+    <string name="tooltip_vl_title">Helitugevuse nivellija</string>
+    <string name="tooltip_vl_text">Helitugevuse nivellija tagab samalaadse helitugevuse taseme kogu sisu ja kõigi rakenduste jaoks, sõltuvalt seadme põhihelitugevusest. Lülitage helitugevuse nivelleerimine sisse või välja.</string>
+</resources>

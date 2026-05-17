@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Inteligentní ekvalizér</string>
+    <string name="surround_virtualizer">Simul. prostor. zvuku</string>
+    <string name="dialogue_enhancer">Zvýrazňovač dialogu</string>
+    <string name="volume_leveler">Vyrovnávač hlasitosti</string>
+    <string name="copyright">Dolby a symbol dvojitého D jsou ochranné známky společnosti Dolby Laboratories. © 2013 Dolby Laboratories Inc. Všechna práva vyhrazena.</string>
+    <string name="movie">Film</string>
+    <string name="music">Hudba</string>
+    <string name="game">Hra</string>
+    <string name="voice">Hlas</string>
+    <string name="preset_1">Vlastní 1</string>
+    <string name="preset_2">Vlastní 2</string>
+    <string name="open">Otevřít</string>
+    <string name="rich">Bohatý</string>
+    <string name="focused">Zvýrazněný</string>
+    <string name="off">VYPNUTO</string>
+    <string name="custom">Ruční</string>
+    <string name="db36">36 dB</string>
+    <string name="db24">24 dB</string>
+    <string name="db12">12 dB</string>
+    <string name="db0">0 dB</string>
+    <string name="dbn12">-12 dB</string>
+    <string name="graphical_equalizer">Grafický ekvalizér</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Přehrát demo</string>
+    <string name="tooltip_eq_title">Inteligentní ekvalizér/Grafický ekvalizér</string>
+    <string name="tooltip_eq_text">Inteligentní ekvalizér analyzuje a dynamicky upravuje zvuk tak, aby odpovídal požadované barvě zvuku. Vyberte ze čtyř zobrazených možností a poté volbou Spektrálního vizualizéru proveďte vlastní změny Grafického ekvalizéru.</string>
+    <string name="tooltip_sv_title">Simul. prostor. zvuku</string>
+    <string name="tooltip_sv_text">Simulátor prostorového zvuku vytváří realistický prostorový zvuk přes jakákoli sluchátka či stereo reproduktory. Spínačem vypněte nebo zapněte efekt prostorového zvuku.</string>
+    <string name="tooltip_de_title">Zvýrazňovač dialogu</string>
+    <string name="tooltip_de_text">Zvýrazňovač dialogu zlepšuje srozumitelnost mluvené řeči ze všech zdrojů signálu. Vypínačem zapněte nebo vypněte Zvýrazňovač dialogu.</string>
+    <string name="tooltip_vl_title">Vyrovnávač hlasitosti</string>
+    <string name="tooltip_vl_text">Vyrovnávač hlasitosti udržuje stálou hlasitost veškerého obsahu a aplikací na jedné úrovni - dané nastavením ovladače hlasitosti zařízení. Spínačem vypněte nebo zapněte automatické vyrovnávání hlasitosti.</string>
+</resources>

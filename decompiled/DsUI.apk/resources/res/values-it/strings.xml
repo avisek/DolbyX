@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="powerOn">Accensione</string>
+    <string name="powerOff">Spegnimento</string>
+    <string name="dolbyDigitalPlus">Dolby Digital Plus</string>
+    <string name="intelligent_equalizer">Equalizzatore Intelligente</string>
+    <string name="surround_virtualizer">Surround Virtuale</string>
+    <string name="dialogue_enhancer">Ottimizzazione Voce</string>
+    <string name="volume_leveler">Normalizzatore Volume</string>
+    <string name="copyright">Dolby e il simbolo della doppia D sono marchi registrati di Dolby Laboratories. © 2013 Dolby Laboratories Inc. Tutti i diritti riservati.</string>
+    <string name="movie">Film</string>
+    <string name="music">Musica</string>
+    <string name="game">Giochi</string>
+    <string name="voice">Voce</string>
+    <string name="preset_1">Personalizzato 1</string>
+    <string name="preset_2">Personalizzato 2</string>
+    <string name="bright">Luminoso</string>
+    <string name="open">Aperto</string>
+    <string name="rich">Ricco</string>
+    <string name="focused">Preciso</string>
+    <string name="off">Off</string>
+    <string name="custom">Personalizza</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Equalizzatore Grafico</string>
+    <string name="app_name">Dolby</string>
+    <string name="colon">:</string>
+    <string name="minimize_content_description">Pulsante Riduci</string>
+    <string name="placeholder">PLACEHOLDER</string>
+    <string name="instore_app_name">DsInStoreDemoApp</string>
+    <string name="instore_menu_text">Riproduci Demo</string>
+    <string name="replay">Riproduci di nuovo</string>
+    <string name="default_text">Invia</string>
+    <string name="stop">Interrompi</string>
+    <string name="exit">Esci</string>
+    <string name="tooltip_eq_title">Equalizzatore Intelligente/Equalizzatore Grafico</string>
+    <string name="tooltip_eq_text">L’equalizzatore intelligente analizza l’audio e lo regola in modo dinamico affinché produca il suono desiderato. Scegliere una delle quattro preimpostazioni indicate e quindi toccare il visualizzatore dello spettro audio per apportare modifiche personalizzate all’equalizzatore grafico.</string>
+    <string name="tooltip_sv_title">Surround Virtuale</string>
+    <string name="tooltip_sv_text">Surround virtuale crea un effetto surround sound realistico utilizzando un qualsiasi paio di cuffie o altoparlanti stereo. Per attivare o disattivare l’effetto surround sound, portare l’interruttore su On o su Off.</string>
+    <string name="tooltip_de_title">Ottimizzazione Voce</string>
+    <string name="tooltip_de_text">Ottimizzazione voce rende più chiara la voce all’interno di qualsiasi tipo di contenuto multimediale. Per attivare o disattivare l’ottimizzazione, portare l’interruttore su On o su Off.</string>
+    <string name="tooltip_vl_title">Normalizzatore Volume</string>
+    <string name="tooltip_vl_text">Il normalizzatore del volume uniforma il livello del volume indipendentemente dal contenuto o dall’applicazione in base al volume principale del dispositivo. Per attivare o disattivare il normalizzatore del volume, portare l’interruttore su On o su Off.</string>
+</resources>

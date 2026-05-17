@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="275dp"
+    android:minHeight="247dp"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_profile_layout"
+    android:previewImage="@drawable/preview_widget"/>

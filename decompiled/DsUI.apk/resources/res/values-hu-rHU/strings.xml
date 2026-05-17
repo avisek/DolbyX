@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Intelligens hangszínszabályzó</string>
+    <string name="surround_virtualizer">Térhatású virtualizáló</string>
+    <string name="dialogue_enhancer">Párbeszéd-kiemelő</string>
+    <string name="volume_leveler">Hangerő-kiegyenlítő</string>
+    <string name="copyright">A Dolby és a dupla D szimbólum a Dolby Laboratories bejegyzett védjegyei. © 2013 Dolby Laboratories, Inc. Minden jog fenntartva.</string>
+    <string name="movie">Film</string>
+    <string name="music">Zene</string>
+    <string name="game">Játék</string>
+    <string name="voice">Hang</string>
+    <string name="preset_1">1. egyedi</string>
+    <string name="preset_2">2. egyedi</string>
+    <string name="open">Nyílt</string>
+    <string name="rich">Gazdag</string>
+    <string name="focused">Fókuszált</string>
+    <string name="off">KI</string>
+    <string name="custom">Kézi</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Grafikus hangszínszabályzó</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Demo lejátszása</string>
+    <string name="tooltip_eq_title">Intelligens hangszínszabályzó/Grafikus hangszínszabályzó</string>
+    <string name="tooltip_eq_text">Az intelligens hangszínszabályzó elemzi és dinamikusan módosítja a hangot a kívánt hangzás eléréséhez. Válasszon a négy megadott beállítás közül, majd érintse meg a spektrum-megjelenítőt a grafikus hangszínszabályzó egyedi beállításához.</string>
+    <string name="tooltip_sv_title">Térhatású virtualizáló</string>
+    <string name="tooltip_sv_text">A térhatású virtualizáló élethű térhatásű hangzást hoz létre bármilyen fejhallgató-készlethez vagy beépített sztereó hangszóróhoz. A térhatású hangzás kezeléséhez kapcsolja be vagy ki a gombot.</string>
+    <string name="tooltip_de_title">Párbeszéd-kiemelő</string>
+    <string name="tooltip_de_text">A párbeszéd-kiemelő a beszéd tisztaságát javítja bármilyen típusú média lejátszása esetén. A párbeszédjavítás kezeléséhez kapcsolja be vagy ki a gombot.</string>
+    <string name="tooltip_vl_title">Hangerő-kiegyenlítő</string>
+    <string name="tooltip_vl_text">A hangerő-kiegyenlítő következetes hangerőt biztosít minden tartalomhoz és alkalmazáshoz a készülék fő hangerőszintje alapján. Az automatikus hangerőszabályzás kezeléséhez kapcsolja be vagy ki a gombot.</string>
+</resources>

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="powerOn">Вкл.</string>
+    <string name="powerOff">Выкл.</string>
+    <string name="dolbyDigitalPlus">Dolby Digital Plus</string>
+    <string name="intelligent_equalizer">Интеллектуальный эквалайзер:</string>
+    <string name="surround_virtualizer">Виртуализатор окружающего звука</string>
+    <string name="dialogue_enhancer">Диалоговый усилитель</string>
+    <string name="volume_leveler">Регулятор громкости</string>
+    <string name="copyright">Знаки Dolby и два D являются зарегистрированными знаками Dolby Laboratories. ©2012 Dolby Laboratories. Все права защищены.</string>
+    <string name="movie">Кино</string>
+    <string name="music">Музыка</string>
+    <string name="game">Игры</string>
+    <string name="voice">Голос</string>
+    <string name="preset_1">Польз. 1</string>
+    <string name="preset_2">Польз. 2</string>
+    <string name="bright">Яркий</string>
+    <string name="open">Нет</string>
+    <string name="rich">Насыщенный</string>
+    <string name="focused">Сфокусированный</string>
+    <string name="off">Выкл.</string>
+    <string name="custom">НАСТРОИТЬ</string>
+    <string name="db36">36 дБ</string>
+    <string name="db24">24 дБ</string>
+    <string name="db12">12 дБ</string>
+    <string name="db0">0 дБ</string>
+    <string name="dbn12">-12 дБ</string>
+    <string name="graphical_equalizer">Графический эквалайзер:</string>
+    <string name="app_name">Звуковой эффект Dolby</string>
+    <string name="colon">:</string>
+    <string name="minimize_content_description">Кнопка свертывания</string>
+    <string name="placeholder">СИМВОЛ-ЗАПОЛНИТЕЛЬ</string>
+    <string name="instore_app_name">DsInStoreDemoApp</string>
+    <string name="instore_menu_text">Воспр. демонстрацию</string>
+    <string name="replay">Повторить</string>
+    <string name="default_text" />
+    <string name="stop">Стоп</string>
+    <string name="exit">Выйти</string>
+    <string name="tooltip_eq_title">Интеллектуальный эквалайзер/графический компенсатор</string>
+    <string name="tooltip_eq_text">Интеллектуальный эквалайзер анализирует и динамически регулирует звук для получения нужного тона. Выберите одну из четырех настроек, а затем нажмите спектральный визуализатор, чтобы задать пользовательские настройки для графического эквалайзера.</string>
+    <string name="tooltip_sv_title">Виртуализатор окружающего звука</string>
+    <string name="tooltip_sv_text">Виртуализатор окружающего звука позволяет создавать реалистичный окружающий звук для любого комплекта наушников или стереофонической акустической системы. Эффектом окружающего звука можно управлять путем включения или отключения устройства.</string>
+    <string name="tooltip_de_title">Диалоговый усилитель</string>
+    <string name="tooltip_de_text">Диалоговый усилитель позволяет улучшать четкость речи для любых каналов передачи. Диалоговым усилением можно управлять путем включения или отключения устройства.</string>
+    <string name="tooltip_vl_title">Регулятор громкости</string>
+    <string name="tooltip_vl_text">Регулятор громкости обеспечивает постоянный уровень громкости для любого содержания и любых приложений, исходя из главной настройки громкости у устройства. Автоматическим регулятором громкости можно управлять путем его включения или отключения.</string>
+</resources>

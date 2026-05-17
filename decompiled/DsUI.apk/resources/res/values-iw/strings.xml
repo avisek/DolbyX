@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="powerOn">הפעלה</string>
+    <string name="powerOff">כיבוי</string>
+    <string name="dolbyDigitalPlus">Dolby Digital Plus</string>
+    <string name="intelligent_equalizer">אקולייזר חכם:</string>
+    <string name="surround_virtualizer">הדמיית סראונד</string>
+    <string name="dialogue_enhancer">הגברת דיבור</string>
+    <string name="volume_leveler">השוואת רמות עוצמה</string>
+    <string name="copyright">Dolby והסמל double-D הם סימנים מסחריים רשומים של Dolby Laboratories. ‎©2012 Dolby Laboratories. כל הזכויות שמורות.</string>
+    <string name="movie">סרט</string>
+    <string name="music">מוסיקה</string>
+    <string name="game">משחק</string>
+    <string name="voice">Google Voice</string>
+    <string name="preset_1">מותאם-אישית 1</string>
+    <string name="preset_2">מותאם-אישית 2</string>
+    <string name="bright">בהיר</string>
+    <string name="open">פתח</string>
+    <string name="rich">עשיר</string>
+    <string name="focused">ממוקד</string>
+    <string name="off">כבוי</string>
+    <string name="custom">מדריך</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">אקולייזר גרפי:</string>
+    <string name="app_name">דולבי</string>
+    <string name="colon">:</string>
+    <string name="minimize_content_description">לחצן מזעור</string>
+    <string name="placeholder">PLACEHOLDER</string>
+    <string name="instore_app_name">DsInStoreDemoApp</string>
+    <string name="instore_menu_text">הפעל הדגמה</string>
+    <string name="replay">הפעל שוב</string>
+    <string name="default_text">שליחה</string>
+    <string name="stop">עצור</string>
+    <string name="exit">יציאה</string>
+    <string name="tooltip_eq_title">אקולייזר חכם/אקולייזר גרפי</string>
+    <string name="tooltip_eq_text">האקולייזר החכם מנתח את השמע ומכוונן אותו באופן דינאמי, כך שיתאים לצליל הרצוי. בחר מתוך ארבע הגדרות קבועות מראש ולאחר מכן גע בכלי \'ספקטרום חזותי\' כדי להתאים אישית את האקולייזר הגרפי.</string>
+    <string name="tooltip_sv_title">הדמיית סראונד</string>
+    <string name="tooltip_sv_text">הכלי \'הדמיית סראונד\' יוצר צליל סראונד ריאליסטי בכל אוזניות או רמקולי סטריאו. העבר את המתג למצב פועל או כבוי כדי לשלוט באפקט הסראונד.</string>
+    <string name="tooltip_de_title">הגברת דיבור</string>
+    <string name="tooltip_de_text">הכלי \'הגברת דיבור\' משפר את בהירות הדיבור בכל סוגי המדיה. העבר את המתג למצב פועל או כבוי כדי לשלוט בהגברת הדיבור.</string>
+    <string name="tooltip_vl_title">השוואת רמות עוצמה</string>
+    <string name="tooltip_vl_text">הכלי \'השוואת רמות עוצמה\' מספק רמת עוצמה קבועה בכל התוכן והיישומים המבוססים על רמת העוצמה הראשית של ההתקן. העבר את המתג למצב פועל או כבוי כדי לשלוט בהשוואת רמות העוצמה האוטומטית.</string>
+</resources>

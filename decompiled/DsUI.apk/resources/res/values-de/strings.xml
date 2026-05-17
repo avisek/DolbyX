@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="powerOn">Einschalten</string>
+    <string name="powerOff">Ausschalten</string>
+    <string name="dolbyDigitalPlus">Dolby Digital Plus</string>
+    <string name="intelligent_equalizer">Intelligent EQ:</string>
+    <string name="surround_virtualizer">Surround Virtualizer</string>
+    <string name="dialogue_enhancer">Dialogue Enhancer</string>
+    <string name="volume_leveler">Volume Leveler</string>
+    <string name="copyright">Dolby und das Doppel-D-Symbol sind eingetragene Warenzeichen von Dolby Laboratories. © 2012 Dolby Laboratories. Alle Rechte vorbehalten.</string>
+    <string name="movie">Filme</string>
+    <string name="music">Musik</string>
+    <string name="game">Spiele</string>
+    <string name="voice">Sprache</string>
+    <string name="preset_1">Benutzerdefiniert 1</string>
+    <string name="preset_2">Benutzerdefiniert 2</string>
+    <string name="bright">Hell</string>
+    <string name="open">Offen</string>
+    <string name="rich">Voll</string>
+    <string name="focused">Fokussiert</string>
+    <string name="off">Aus</string>
+    <string name="custom">Anpassen</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Graphic EQ:</string>
+    <string name="app_name">Dolby</string>
+    <string name="colon">:</string>
+    <string name="minimize_content_description">Schaltfläche „Minimieren“</string>
+    <string name="placeholder">PLATZHALTER</string>
+    <string name="instore_app_name">DsInStoreDemoApp</string>
+    <string name="instore_menu_text">Demo abspielen</string>
+    <string name="replay">Erneut wiedergeben</string>
+    <string name="default_text">Senden</string>
+    <string name="stop">Anhalten</string>
+    <string name="exit">Verlassen</string>
+    <string name="tooltip_eq_title">Intelligent Equalizer/Graphic Equalizer</string>
+    <string name="tooltip_eq_text">Der Intelligent Equalizer analysiert das Audiosignal und passt es dynamisch an, damit es einem gewünschten Klang entspricht. Wählen Sie eine der vier Voreinstellungen aus und tippen Sie dann den Spektrum-Visualizer an, um eigene Änderungen am Graphic Equalizer vorzunehmen.</string>
+    <string name="tooltip_sv_title">Surround Virtualizer</string>
+    <string name="tooltip_sv_text">Der Surround Virtualizer erzeugt realistischen Surround-Sound für Kopfhörer oder Stereo-Lautsprecher. Stellen Sie den Schalter auf Aus oder Ein, um den Surround-Sound-Effekt zu steuern.</string>
+    <string name="tooltip_de_title">Dialogue Enhancer</string>
+    <string name="tooltip_de_text">Der Dialogue Enhancer verbessert die Sprachverständlichkeit für alle Medien. Stellen Sie den Schalter auf Aus oder Ein, um die Dialogverbesserung zu steuern.</string>
+    <string name="tooltip_vl_title">Volume Leveler</string>
+    <string name="tooltip_vl_text">Der Volume Leveler gewährleistet einen gleichbleibenden Lautstärkepegel für alle Medien und Anwendungen, angepasst an die am Gerät eingestellte Lautstärke. Stellen Sie den Schalter auf Aus oder Ein, um den Lautstärkeausgleich zu steuern.</string>
+</resources>

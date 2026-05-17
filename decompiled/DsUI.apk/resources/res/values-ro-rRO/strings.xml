@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Egalizator inteligent</string>
+    <string name="surround_virtualizer">Virtualizator surround</string>
+    <string name="dialogue_enhancer">Dialog mai clar</string>
+    <string name="volume_leveler">Egalizator volum</string>
+    <string name="copyright">Dolby şi simbolul double-D sunt mărci comerciale înregistrate ale Dolby Laboratories. © 2013 Dolby Laboratories Inc. Toate drepturile rezervate.</string>
+    <string name="movie">Film</string>
+    <string name="music">Muzică</string>
+    <string name="game">Joc</string>
+    <string name="voice">Voce</string>
+    <string name="preset_1">Personalizat 1</string>
+    <string name="preset_2">Personalizat 2</string>
+    <string name="open">Deschis</string>
+    <string name="rich">Bogat</string>
+    <string name="focused">Focalizat</string>
+    <string name="off">OPRIT</string>
+    <string name="custom">Manual</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Egalizator grafic</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Redare demo</string>
+    <string name="tooltip_eq_title">Egalizator inteligent/Egalizator grafic</string>
+    <string name="tooltip_eq_text">Egalizatorul inteligent analizează şi ajustează dinamic sunetul pentru a ajunge la tonul dorit. Selectaţi una dintre cele patru setări predefinite, apoi selectaţi Vizualizatorul spectral pentru a aduce modificări personalizate Egalizatorului grafic.</string>
+    <string name="tooltip_sv_title">Virtualizator surround</string>
+    <string name="tooltip_sv_text">Virtualizatorul surround creează un sunet surround realist, indiferent de căştile sau difuzoarele stereo folosite. Glisați comutatorul în poziţia Pornit sau Oprit pentru a controla efectul de sunet surround.</string>
+    <string name="tooltip_de_title">Dialog mai clar</string>
+    <string name="tooltip_de_text">Această tehnologie îmbunătăţeşte claritatea vocii pe orice tip de suport media. Glisați comutatorul în poziţia Pornit sau Oprit pentru a controla claritatea dialogului.</string>
+    <string name="tooltip_vl_title">Egalizator volum</string>
+    <string name="tooltip_vl_text">Egalizatorul de volum asigură un volum consistent pentru toate tipurile de conţinut şi aplicaţii, pe baza nivelului de volum master al dispozitivului. Glisați comutatorul în poziţia Pornit sau Oprit pentru a controla egalizarea volumului.</string>
+</resources>

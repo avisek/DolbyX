@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="remote_service_stopped">השירות המרוחק הופסק</string>
+    <string name="app_name">דולבי</string>
+    <string name="name_widget_extra_large">Dolby Digital Plus</string>
+    <string name="name_widget_large">Dolby Digital Plus</string>
+    <string name="name_widget_small">Dolby Digital Plus</string>
+    <string name="movie">סרט</string>
+    <string name="music">מוסיקה</string>
+    <string name="game">משחק</string>
+    <string name="voice">Google Voice</string>
+    <string name="preset_1">מותאם-אישית 1</string>
+    <string name="preset_2">מותאם-אישית 2</string>
+</resources>

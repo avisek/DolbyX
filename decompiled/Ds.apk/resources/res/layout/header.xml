@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="horizontal"
+    android:background="@drawable/topbackground"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <ImageView
+        android:id="@+id/powerButtonOff"
+        android:layout_width="99dp"
+        android:layout_height="82dp"
+        android:src="@drawable/power_off"
+        android:soundEffectsEnabled="false"/>
+    <ImageView
+        android:id="@+id/powerButtonOn"
+        android:layout_width="99dp"
+        android:layout_height="82dp"
+        android:src="@drawable/power_on"
+        android:soundEffectsEnabled="false"/>
+    <ImageView
+        android:layout_gravity="center"
+        android:id="@+id/dsLogo"
+        android:layout_width="141dp"
+        android:layout_height="28dp"
+        android:src="@drawable/dslogo"
+        android:scaleType="centerInside"
+        android:layout_toRightOf="@+id/powerButtonOn"
+        android:layout_centerHorizontal="true"
+        android:layout_centerVertical="true"
+        android:soundEffectsEnabled="false"/>
+</RelativeLayout>

@@ -62,6 +62,18 @@ Throughout this folder:
   desktop). "The UI" means whichever client is talking to the service —
   `DsUI.apk` on Android, the Web UI on desktop.
 
+## Decompiled sources
+
+The decompiled sources live in `decompiled/` at the repo root:
+
+| Path | Contents |
+|------|----------|
+| `decompiled/Ds.apk/sources/` | Service-side Java (DsService, DsEffect, DsAkSettings, etc.) |
+| `decompiled/Ds.apk/resources/` | AndroidManifest, layouts, drawables |
+| `decompiled/DsUI.apk/sources/` | UI-side Java (DsClient, activities, fragments, widgets) |
+| `decompiled/DsUI.apk/resources/` | UI layouts, drawables, XML configs |
+| `decompiled/dolby_ds.jar/sources/` | Shared library classes (DsAkSettings, DsConstants, etc.) |
+
 ## Status
 
 These documents reflect the state of the original DDP module as shipped in

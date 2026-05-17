@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="intelligent_equalizer">Inteligentni ekvilajzer</string>
+    <string name="surround_virtualizer">Virtuelni okružujući zvuk</string>
+    <string name="dialogue_enhancer">Poboljšavanje dijaloga</string>
+    <string name="volume_leveler">Nivelacija jačine zvuka</string>
+    <string name="copyright">Dolby i simbol sa duplim D su registrovani zaštićeni znaci kompanije Dolby Laboratories. © 2013 Dolby Laboratories Inc. Sva prava zadržana.</string>
+    <string name="movie">Film</string>
+    <string name="music">Muzika</string>
+    <string name="game">Igra</string>
+    <string name="voice">Glas</string>
+    <string name="preset_1">Prilagođeno 1</string>
+    <string name="preset_2">Prilagođeno 2</string>
+    <string name="open">Otvoren</string>
+    <string name="rich">Bogat</string>
+    <string name="focused">Fokusiran</string>
+    <string name="off">ISKLJUČENO</string>
+    <string name="custom">Ručno</string>
+    <string name="db36">36dB</string>
+    <string name="db24">24dB</string>
+    <string name="db12">12dB</string>
+    <string name="db0">0dB</string>
+    <string name="dbn12">-12dB</string>
+    <string name="graphical_equalizer">Grafički ekvilajzer</string>
+    <string name="app_name">Dolby</string>
+    <string name="instore_menu_text">Reprodukuj demonstraciju</string>
+    <string name="tooltip_eq_title">Inteligentni ekvilajzer/Grafički ekvilajzer</string>
+    <string name="tooltip_eq_text">Inteligentni ekvilajzer analizira i dinamički podešava zvuk radi usklađivanja sa željenim tonom. Odaberite neku od četiri unapred podešene vrednosti, a zatim dodirnite vizuelizator spektra da biste uneli prilagođene izmene u grafički ekvilajzer.</string>
+    <string name="tooltip_sv_title">Virtuelni okružujući zvuk</string>
+    <string name="tooltip_sv_text">Funkcija za virtuelni okružujući zvuk kreira realističan okružujući zvuk na bilo kojim slušalicama ili stereo zvučnicima. Podesite prekidač na „uključeno“ ili „isključeno“ da biste kontrolisali efekat okružujućeg zvuka.</string>
+    <string name="tooltip_de_title">Poboljšavanje dijaloga</string>
+    <string name="tooltip_de_text">Funkcija za poboljšavanje dijaloga poboljšava jasnoću govora u bilo kojoj vrsti medija. Podesite prekidač na „uključeno“ ili „isključeno“ da biste kontrolisali poboljšanje dijaloga.</string>
+    <string name="tooltip_vl_title">Nivelacija jačine zvuka</string>
+    <string name="tooltip_vl_text">Funkcija za nivelaciju jačine zvuka pruža ujednačenu jačinu zvuka u svim sadržajima i aplikacijama u skladu sa glavnom jačinom zvuka koja je podešena na uređaju. Postavite prekidač na „uključeno“ ili „isključeno“ da biste kontrolisali automatsko nivelisanje jačine zvuka.</string>
+</resources>

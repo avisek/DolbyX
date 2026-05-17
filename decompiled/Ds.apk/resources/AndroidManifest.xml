@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="com.dolby"
+    android:versionCode="19"
+    android:versionName="4.4.2-1"
+    package="com.dolby"
+    platformBuildVersionCode="28"
+    platformBuildVersionName="9">
+    <uses-sdk
+        android:minSdkVersion="17"
+        android:targetSdkVersion="17"/>
+    <supports-screens
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"/>
+    <compatible-screens>
+        <screen
+            android:screenSize="normal"
+            android:screenDensity="mdpi"/>
+        <screen
+            android:screenSize="normal"
+            android:screenDensity="hdpi"/>
+        <screen
+            android:screenSize="large"
+            android:screenDensity="mdpi"/>
+        <screen
+            android:screenSize="xlarge"
+            android:screenDensity="mdpi"/>
+    </compatible-screens>
+    <application
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:name="com.dolby.DS1Application"
+        android:persistent="true"
+        android:supportsRtl="true">
+        <receiver
+            android:label="@string/name_widget_extra_large"
+            android:name="com.dolby.DolbyWidgetExtraLargeProvider">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dolby_widget_xlarge_provider"/>
+        </receiver>
+        <receiver
+            android:label="@string/name_widget_small"
+            android:name="com.dolby.DolbyWidgetSmallProvider">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dolby_widget_small_provider"/>
+        </receiver>
+        <service
+            android:name="com.dolby.DsService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.dolby.IDs"/>
+                <action android:name="com.dolby.DsService"/>
+                <action android:name="com.dolby.DsBooter"/>
+            </intent-filter>
+        </service>
+        <receiver
+            android:name="com.dolby.DsBooter"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+        <uses-library android:name="android.dolby"/>
+    </application>
+    <uses-permission android:name="android.permission.GET_TASKS"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+</manifest>
