@@ -157,7 +157,7 @@ per-stream memory duplication compared to the current code.
 When the Unicorn or static-binary backend lands, the daemon configuration
 swaps the trait impl and nothing else changes.
 
-### Decision 2 — IEQ presets are global, decoupled from profiles
+### Decision 2 — IEQ presets are global, decoupled from profiles, generalized as EQ presets
 
 A clean simplification over the original DDP model.
 
@@ -190,13 +190,10 @@ struct EqPreset {
     id: PresetId,                         // e.g. "off", "rich", "user_91c2"
     name: String,                         // display name, user-editable
     is_factory: bool,                     // factory presets can be reset but not deleted
-    ieq: BandCurve,                       // ieon + iebt
-    geq: BandCurve,                       // geon + gebg
-}
-
-enum BandCurve {
-    Off,
-    Curve([i16; 20]),
+    is_ieq_on: bool,                      // ieon
+    ieq_band_targets: [i16; 20],          // iebt
+    is_geq_on: bool,                      // geon
+    geq_band_gains: [i16; 20],            // gebg
 }
 ```
 
@@ -221,82 +218,6 @@ Visualizer/Equalizer UI, and `iebt` curves could not be edited beyond their
 factory values. DolbyX will keep this behavior for now. In the future,
 DolbyX will support editing the `iebt` curve as well (through the same
 Visualizer/Equalizer, behind a toggle).
-
-#### State mutation semantics
-
-Every mutation is described here exactly, as a spec for the `ddp-state` crate.
-
-**`set_profile(id)`**
-
-1. Update `selected_profile`.
-2. Push all of the new profile's `params` overrides to the engine.
-3. Push `gebg = profile.geq` to the engine.
-4. Resolve `profile.selected_eq_preset`; push `ieon = (preset.iebt.is_some() as i16)`.
-   If not Off, push `iebt = preset.iebt`.
-5. Broadcast `state` to all WS clients except originator.
-
-**`set_eq_preset(id)`**
-
-1. Update `profiles[selected].selected_eq_preset`.
-2. Push `ieon` and (if not Off) `iebt` to the engine.
-3. `gebg` is **not** touched — the profile's GEQ curve persists.
-4. Broadcast.
-
-**`set_geq(bands)`**
-
-1. Update `profiles[selected].geq`.
-2. Push `gebg` to the engine.
-3. Broadcast.
-
-**`edit_eq_preset_targets(id, iebt)`**
-
-1. Update `eq_presets[id].iebt`.
-2. If the currently active profile has that preset selected, push the new `iebt`
-   to the engine. Otherwise, no engine call.
-3. Broadcast.
-
-**`add_profile { from, name }`**
-
-1. Clone the source profile, assign a fresh stable id and the user's name.
-2. Set `is_factory = false`.
-3. Append to `profiles`.
-4. Broadcast.
-
-**`add_eq_preset { from, name }`**
-
-1. Clone the source preset, assign a fresh stable id and name.
-2. Set `is_factory = false`.
-3. Append to `eq_presets`.
-4. Broadcast.
-
-**`remove_profile(id)`**
-
-1. Reject if `is_factory`.
-2. If currently selected, switch to `"music"` first (which triggers `set_profile` above).
-3. Remove from `profiles`.
-4. Broadcast.
-
-**`remove_eq_preset(id)`**
-
-1. Reject if `is_factory`.
-2. For every profile whose `selected_eq_preset == id`, set it to `"off"`.
-3. If the deletion caused the active profile's preset to fall back, push updated
-   `ieon`/`iebt` to the engine.
-4. Remove from `eq_presets`.
-5. Broadcast.
-
-**`reset_profile(id)`** / **`reset_eq_preset(id)`**
-Restore the item's fields from `factory-defaults.toml`. If the reset item is
-currently active, push the restored parameters to the engine. Broadcast.
-
-**`set_power(on)`**
-
-1. Update `power`.
-2. Call `engine.set_enabled(session, on)` — uses `EFFECT_CMD_DISABLE` / `EFFECT_CMD_ENABLE`
-   on the engine directly, without mutating any parameter.
-3. Broadcast.
-
----
 
 ### Decision 3 — Parameter metadata as the single source of truth
 
@@ -357,14 +278,13 @@ pub enum ParamCategory {
 
 The table covers all 64 AK parameters (see
 [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md)). Of these,
-~42 are settable; the rest are read-only (build, version, license, endpoint).
+~42 are settable; the others are read-only (build, version, license,
+endpoint, etc.).
 
-Wire and storage use the 4-CC name string throughout. Saved configs are
-stable under reordering the table. Adding a new parameter to the Advanced
-section is a one-line edit: append to the table; the UI auto-discovers it on
-the next fetch of `/api/parameters`.
-
----
+Wire and storage are name-based (4-CC string). Saved configs are stable
+under reordering the table. Adding a new parameter to the Advanced section
+is a one-line edit: append to the table; the UI auto-discovers it on next
+fetch of `/api/parameters`.
 
 ### Decision 4 — Wire protocol: name-based, originator-aware
 
@@ -384,45 +304,45 @@ Commands (client → daemon):
 
 ```jsonc
 { "cmd": "get_state" }
-{ "cmd": "set_power",         "on": true }
-{ "cmd": "set_profile",       "id": "music" }
-{ "cmd": "set_param",         "name": "dvla", "value": 4 }
-{ "cmd": "set_param",         "name": "iebt", "values": [67, 95, ...] }
-{ "cmd": "set_geq",           "bands_db": [-2.0, 0.0, 1.5, ...] }
-{ "cmd": "set_eq_preset",    "id": "rich" }
+{ "cmd": "set_power", "on": true }
+{ "cmd": "set_profile", "id": "music" }
+{ "cmd": "set_param", "name": "dvla", "value": 4 }
+{ "cmd": "set_param", "name": "iebt", "values": [67, 95, ...] }
+{ "cmd": "set_param", "name": "gebg", "values": [24, -8, ...] }
+{ "cmd": "set_eq_preset", "id": "rich" }
 
-{ "cmd": "add_profile",       "from": "music", "name": "My Music" }
-{ "cmd": "rename_profile",    "id": "user_a3f1", "name": "Late Night" }
-{ "cmd": "remove_profile",    "id": "user_a3f1" }
-{ "cmd": "reset_profile",     "id": "music" }
+{ "cmd": "add_profile", "from": "music", "name": "My Music" }
+{ "cmd": "rename_profile", "id": "user_a3f1", "name": "Late Night" }
+{ "cmd": "remove_profile", "id": "user_a3f1" }
+{ "cmd": "reset_profile", "id": "music" }
 
-{ "cmd": "add_eq_preset",    "from": "rich", "name": "Vocal Forward" }
+{ "cmd": "add_eq_preset", "from": "rich", "name": "Vocal Forward" }
 { "cmd": "rename_eq_preset", "id": "user_91c2", "name": "Vocal" }
-{ "cmd": "edit_eq_preset",   "id": "user_91c2", "iebt_db": [...] }
+{ "cmd": "edit_eq_preset", "id": "user_91c2", "gebg": [...] }
 { "cmd": "remove_eq_preset", "id": "user_91c2" }
-{ "cmd": "reset_eq_preset",  "id": "rich" }
+{ "cmd": "reset_eq_preset", "id": "rich" }
 ```
 
 Events (daemon → client):
 
 ```jsonc
-{ "type": "state",         "snapshot": { /* full state */ } }
-{ "type": "vis",           "excitations_db": [...], "gains_db": [...] }
+{ "type": "state", "snapshot": { /* full state */ } }
+{ "type": "vis", "excitations": [...], "gains": [...] }
 { "type": "vis_suspended", "suspended": true }
-{ "type": "ack",           "request_id": "...", "ok": true }
-{ "type": "error",         "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
+{ "type": "ack", "request_id": "...", "ok": true }
+{ "type": "error", "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
 ```
 
 The full `state` snapshot is also sent on `get_state`, on connect, and any
-time the daemon's internal state mutates from a non-WS source (e.g.
-config-file reload). At DolbyX's state scale (hundreds of bytes) full
+time the daemon's internal state mutates from a non-WS source (e.g. config
+file edit reload). At DolbyX's state scale (hundreds of bytes) full
 snapshots are preferable to partial diffs.
 
 The daemon also serves two static HTTP endpoints fetched once at UI startup:
 
 ```
 GET /api/parameters       → ParameterDef[]   (the metadata table)
-GET /api/factory_defaults → factory profiles + IEQ presets
+GET /api/factory_defaults → factory profiles + EQ presets
 ```
 
 #### Daemon ↔ engine subprocess (binary, length-prefixed)
@@ -471,8 +391,6 @@ A future optimisation (Phase 8) replaces byte-stream socket audio with a
 shared-memory ring buffer plus a socket for signalling, removing per-block
 kernel transitions. Defer until measured latency motivates the work.
 
----
-
 ### Decision 5 — Daemon in Rust
 
 Rust gives us:
@@ -496,8 +414,6 @@ Code quality bar:
 - Unit tests for the state model, the metadata table, and the persistence layer.
 - Integration tests that spin up the daemon with a mock engine and drive it
   through the WebSocket protocol.
-
----
 
 ### Decision 6 — Web UI in React with TypeScript, separate dev workflow
 
@@ -571,8 +487,6 @@ src/
     └── units.ts           # int16 ↔ dB helpers
 ```
 
----
-
 ### Decision 7 — Persistence layout
 
 One TOML file in the platform-standard data location:
@@ -580,9 +494,9 @@ One TOML file in the platform-standard data location:
 - Windows: `%PROGRAMDATA%\DolbyX\config.toml`
 - Linux: `/var/lib/dolbyx/config.toml`
 
-A separate read-only `factory-defaults.toml` ships bundled with the daemon.
+A separate `factory-defaults.toml` ships with the daemon.
 It defines all four factory profiles and four factory IEQ presets with their
-original DDP values. The user's `config.toml` stores only deltas — matching
+original default values. The user's `config.toml` stores only deltas — matching
 the overlay model the original DDP used with `ds1-default.xml` /
 `ds1-current.xml`. The `factory-defaults.toml` also drives `reset_profile`
 and `reset_eq_preset` actions.
@@ -618,6 +532,7 @@ iebt = [67, 95, 172, 163, 168, 201, 189, 242, 196, 221,
 id = "focused"
 name = "Focused"
 is_factory = true
+ieon = false
 iebt = [-419, -112, 75, 116, 113, 160, 165, 80, 61, 79,
           98,  121, 64,  70,  44, -71, -33, -100, -238, -411]
 
@@ -626,7 +541,8 @@ id = "music"
 name = "Music"
 is_factory = true
 selected_eq_preset = "rich"
-geq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+geon = true
+gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 [profile.params]
 # Only parameters that differ from the bundled factory defaults are stored
@@ -666,15 +582,13 @@ Power is on, Music profile is selected, no per-profile overrides. The user
 hears the original DDP Music profile defaults the first time they play audio.
 This is "preserve the original default behaviour" made concrete.
 
----
-
 ### Decision 9 — Custom profiles have no category
 
 The original DDP categorised profiles as Movie / Music / Game / Voice /
 Customized. The category had no engine semantics; it only drove UI grouping
 and an icon. In DolbyX v2, factory profiles keep their category-derived
 display names. Custom profiles have no category — they are simply listed
-under "Custom" with their user-chosen name.
+in the profiles with their user-chosen name.
 
 This eliminates a UI affordance the user would have to make a decision about
 with no functional consequence.
@@ -682,27 +596,27 @@ with no functional consequence.
 ### Decision 10 — Visualizer pump rate and rendering
 
 The pump runs at a fixed 50 ms cadence, matching the original DDP. Hardcoded
-as a named constant, not a user setting:
+as a named constant, easy to modify, not a user-facing setting:
 
 ```rust
 // crates/ddp-daemon/src/visualizer_pump.rs
 pub const VISUALIZER_PUMP_INTERVAL: Duration = Duration::from_millis(50);
-pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // consecutive near-silent reads
+pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // consecutive silent reads
 ```
 
 Each tick:
 
 1. Call `engine.get_visualizer_data(session)` → `(gains[20], excitations[20])`.
-2. If all excitations are below 1 dB for `VISUALIZER_SUSPENDED_THRESHOLD`
+2. If all gains are 0 dB for `VISUALIZER_SUSPENDED_THRESHOLD`
    consecutive ticks, broadcast `vis_suspended: true` and suppress further
    `vis` events until activity resumes.
-3. Otherwise broadcast `{ type: "vis", gains_db: [...], excitations_db: [...] }`
+3. Otherwise broadcast `{ type: "vis", gains: [...], excitations: [...] }`
    with values converted from 1/16 dB i16 to float dB.
 
 UI rendering — a single `<svg>` with layered groups matching the original DDP:
 
 - Background: radial gradient (dark navy → near-black).
-- Spectrum bars: 20 columns × 48 rows driven by `excitations_db`, quantized to
+- Spectrum bars: 20 columns × 48 rows driven by `gains`, quantized to
   grid cells. Colour bands: red rows 0–11, yellow 12–17, blue 18–47.
 - EQ curve: Catmull-Rom spline through the profile's stored `geq` values (not
   the `vcbg` read-back from the engine — the stored `geq` is the source of
@@ -715,46 +629,36 @@ UI rendering — a single `<svg>` with layered groups matching the original DDP:
 
 ### Decision 11 — Bundle `libdseffect.so` with releases
 
-The release artifact contains:
+The binary is shipped alongside the daemon executable. The release
+artifact contains:
 
 ```
 dolbyx/
-├── dolbyx-daemon          # Rust binary (UI embedded)
-├── dolbyx-engine-arm      # ARM-side engine binary (cross-compiled ARMv7)
+├── dolbyx-daemon          # the Rust binary (UI embedded)
+├── dolbyx-engine-arm      # the ARM-side engine binary (statically built)
 ├── libdseffect.so         # bundled
 └── README.txt
 ```
 
 Plus platform-specific extras (the VST DLL on Windows, the LV2 bundle on
-Linux). For early development and the v2.0 release, `libdseffect.so` is
-embedded in the daemon binary via `include_bytes!`. On first run the daemon
-extracts it to a known cache location (`%PROGRAMDATA%\DolbyX\engine\` on
-Windows, `/var/lib/dolbyx/engine/` on Linux) and loads it from there.
-Subsequent runs reuse the cached copy.
+Linux). The daemon resolves `libdseffect.so` from the same directory.
 
 This is a deliberate tradeoff: ease-of-install over legal cleanliness.
-Distribution is for personal use. A future release can flip to a
-"supply your own .so" model with no other changes.
+Distribution is for personal use; the project README is explicit that
+DolbyX is a wrapper around a third-party proprietary binary. Legal review
+is deferred until and unless DolbyX is offered as a commercial product.
 
 ### Decision 12 — Logging and observability
 
-The daemon emits structured logs via `tracing` with a `RUST_LOG` filter.
+The daemon emits structured logs via `tracing` with an environment-variable
+filter (`RUST_LOG`). Three log targets:
 
-- `stdout` (default): human-readable, level-colored, for development.
-- `stderr`: errors and warnings duplicated here even when `stdout` is silenced.
+- `stdout` (default): human-readable, level-colored, used during
+  development.
+- `stderr`: errors and warnings duplicated here even when `stdout` is
+  silenced.
 - Optional rotating file at `%PROGRAMDATA%\DolbyX\logs\dolbyx.log` (Windows)
   or `/var/log/dolbyx/dolbyx.log` (Linux), 7-day retention.
-
-A diagnostic endpoint at `GET /api/diagnostics` returns:
-
-- Current engine version (`"APPv1 version 1.8.0.0"`).
-- Active backend (`qemu` / `unicorn` / `static`).
-- Active session ids and their sample rates.
-- Last visualizer-suspended timestamp.
-- Last error events.
-
-This is shown in the UI's "About" panel and is the entry point for support
-diagnostics.
 
 ## Data model
 
@@ -777,7 +681,6 @@ pub struct Profile {
     pub name: String,
     pub is_factory: bool,
     pub selected_eq_preset: PresetId,
-    pub geq: [i16; 20],                          // 1/16 dB; UI shows dB
     pub params: HashMap<&'static str, Vec<i16>>, // AK param overrides keyed by 4-CC
 }
 
@@ -785,7 +688,10 @@ pub struct EqPreset {
     pub id: PresetId,
     pub name: String,
     pub is_factory: bool,
-    pub iebt: Option<[i16; 20]>,                 // None for the "Off" sentinel
+    pub is_ieq_on: bool,
+    pub ieq_band_targets: [i16; 20],
+    pub is_geq_on: bool,
+    pub geq_band_gains: [i16; 20],
 }
 ```
 
@@ -794,12 +700,9 @@ Factory items (`is_factory = true`):
 - **Factory profiles**: `movie`, `music`, `game`, `voice`. Cannot be deleted
   or renamed. Can be reset to bundled defaults.
 - **Factory IEQ presets**: `off`, `open`, `rich`, `focused`. Cannot be deleted
-  or renamed. Can be reset to bundled defaults. `off` has no `iebt`; selecting
-  it causes the daemon to push `ieon = 0` to the engine.
+  or renamed. Can be reset to bundled defaults.
 
 Custom items (`is_factory = false`) can be freely renamed, edited, or deleted.
-
----
 
 ## Module structure
 
@@ -979,8 +882,6 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
   retained for signalling.
 - End-to-end latency profiling; tighten where measurements warrant.
 
----
-
 ## Code quality standards
 
 **Rust**: `#![deny(missing_docs, warnings)]` at crate roots.
@@ -1008,8 +909,6 @@ example where reasonable. The `ui/` directory has a README describing the
 component architecture and dev workflow. The repo root README has a quickstart
 for both end users and contributors.
 
----
-
 ## What this changes vs v1
 
 | Aspect                    | v1                                                   | v2                                                                           |
@@ -1027,39 +926,6 @@ for both end users and contributors.
 | Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                             |
 | First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                   |
 
----
-
-## Open questions — resolve before Phase 0
-
-These decisions affect the scope and naming of the implementation.
-
-1. **Release branding**: should v2.0 keep calling itself "DolbyX" or adopt
-   version-specific naming (e.g. "DolbyX 2", "DolbyX Reborn")? This affects
-   the README, plugin display names, and the named pipe / socket path.
-
-2. **Per-stream profile override**: when multiple plugins are connected,
-   should they all share the active profile (the default — the typical user
-   mental model), or can individual streams carry their own override? The
-   plan defaults to shared; per-stream routing is a later affordance. Confirm
-   this is the right call for v2.0.
-
-3. **Plugin auto-launch of daemon**: should the VST/LV2 plugin start the
-   daemon automatically if it isn't running ("it just works"), or should the
-   daemon be an explicit separate launch? The original DDP was always-on as a
-   system service. Recommendation: auto-launch via the platform's service
-   mechanism (Windows Service, systemd) set up by the installer.
-
-4. **UI port number**: 9876 is the current choice. If you'd prefer something
-   more memorable, or an ephemeral port written to a discovery file, decide
-   before the wire protocol is locked.
-
-5. **EQ band count in the UI**: the engine works in 20 bands. The original DDP
-   UI exposed a 5-knob abstraction (interpolated to 20). Should the v2 UI
-   expose all 20 directly (more control) or keep the 5-knob model (familiar
-   feel)? The Advanced section always shows 20 either way.
-
----
-
 ## Deferred technical questions
 
 These don't block the plan and can be decided during implementation:
@@ -1071,8 +937,6 @@ These don't block the plan and can be decided during implementation:
 - How aggressively to debounce parameter writes during a slider drag — the
   original DDP does 60 ms; we may match or go faster on desktop where network
   isn't a constraint.
-
----
 
 ## What this plan does not change
 
