@@ -17,17 +17,24 @@ version of that array with explanatory annotations.
   the engine are case-sensitive on the lowercase form.
 * **len**: number of `int16` values. `1` means a scalar; `20` means a
   20-element array (typically per-band); `40` means 40 elements
-  (typically per-band per-channel for stereo); `329` is the special
-  Audio Optimizer band-gains length.
+  (typically per-band per-channel for stereo). `329` is the engine's
+  worst-case-max for the Audio Optimizer band-gains array — see the
+  `aobg` row below; the runtime length is rewritten by
+  `setConstantAkParam("aonb", …)` to `(aonb + 1) × aocc` (= 42 for the
+  standard 20-band stereo config).
 * **bounds**: clamped at `DsAkSettings.set` time. Values outside the
   range are silently clamped, not rejected.
 * **dB scaling**: most dB-valued parameters are stored as
   `int16 = round(dB × 16)`. So a +6 dB setting is stored as `+96`.
   This 1/16 dB resolution applies uniformly to gains, leveler targets,
   visualizer outputs, and more — see `DsProfileSettings.DB_SCALING_FACTOR`.
-* **settable**: whether the parameter accepts writes via `setSingleSetting`
-  / `setProfileSettings` / `setDsApParam`. Non-settable params are
-  read-only or define-only. Source: `DsAkSettings.isParamSettable`.
+* **settable**: whether the parameter is exposed for writes via the
+  Java AIDL API (`setSingleSetting` / `setProfileSettings` /
+  `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **Note:
+  this is a Java-side whitelist, not an engine-level constraint.** The
+  native `_akSet` in `libdseffect.so` accepts writes to any declared
+  parameter index; whether the engine actually uses the value depends
+  on the parameter's role (see the "Rule of thumb" at the end).
 * **basic**: whether the parameter is one of the 5 booleans digested
   into `DsClientSettings`. Setting a basic param fires
   `onProfileSettingsChanged`; setting a non-basic settable param fires
@@ -135,7 +142,7 @@ or 3, not by 4-CC. (See [03-binary-protocol.md](03-binary-protocol.md).)
 |--:|------|----:|--------|---------|-------------|
 | 20 | `aonb` | 1 | 1..40 | yes (constant) | Audio Optimizer band count. Must equal `arnb`. |
 | 21 | `aobf` | 40 | 20..20000 | yes | Audio Optimizer band centre frequencies. |
-| 22 | `aobg` | 329 | -480..480 | yes | Audio Optimizer band gains in 1/16 dB. The 329 entries are `(aonb + 1) × 2` rounded up — pairs of `[gain_L, gain_R]` per band plus a header. |
+| 22 | `aobg` | 329 (max) | -480..480 | yes | Audio Optimizer band gains in 1/16 dB. The static `329` is the engine's worst-case-max `= aocc_max (8) × (aonb_max (40) + 1 channel-id) + 1 sentinel`. The **runtime length** is `(aonb + 1) × aocc` (= 42 for the standard 20-band stereo config), set by `setConstantAkParam("aonb", …)`. Layout is **channel-id-prefixed**, not header+pairs: `[AK_CHAN_L, L_gain_0..L_gain_(aonb-1), AK_CHAN_R, R_gain_0..R_gain_(aonb-1), …]` for up to `aocc` channels, optionally terminated by `AK_CHAN_EMPTY`. (Source: libdseffect.so `aobg` description string.) |
 | 23 | `aoon` | 1 | 0..2 | yes | Audio Optimizer enable. **0 = off, 1 = on (all endpoints), 2 = auto (only when output is SPEAKER).** |
 | 49 | `aocc` | 1 | 0..8 | yes (constant) | Audio Optimizer constant clamp. Hard-coded to 2 in the standard config. |
 
@@ -309,11 +316,26 @@ pre-clamp; the engine will silently clamp anything outside them:
 | `dvmc` | Slider (dB) | -20 to +20 dB (×16 → -320..320) |
 | `arod` | Slider (dB) | 0 to +12 dB (×16 → 0..192) |
 | `arbl[i]`, `arbh[i]` | 20 sliders each | -130 to 0 dB (×16 → -2080..0) |
-| `aobg[i]` | 40 paired sliders L/R | -30 to +30 dB (×16 → -480..480) |
+| `aobg[i]` | `aonb` × `aocc` per-channel sliders (typically 20 × 2) | -30 to +30 dB (×16 → -480..480); see the `aobg` row for the channel-id-prefixed layout |
 | `aobf[i]`, `arbf[i]`, `gebf[i]`, `iebf[i]` | Read-only labels | The band centre frequencies |
 
-For the planned Advanced section in DolbyX, the rule of thumb is: any
-parameter with `settable = yes` in the table above should be exposable;
-any parameter with `settable = no` should be read-only diagnostic info
-(except `vcbg` and `vcbe`, which are the visualizer's purpose, and
-`endp`, which the platform owns).
+For the planned Advanced section in DolbyX, the rule of thumb is more
+nuanced than "settable=yes → editable, settable=no → diagnostic",
+because Java's `isParamSettable` is a UI whitelist and the engine's
+`_akSet` accepts writes to any declared parameter index. DolbyX
+classifies params into three buckets (see `docs/REARCHITECTURE_PLAN.md`
+Decision 3):
+
+- **Settable** — every param with `settable = yes` above. Engine
+  reads the slot → user writes take effect.
+- **ReadOnly** — engine fills the slot every audio block, or pure
+  static metadata: `bver`, `bndl`, `ver`, `vcnb`, `vcbf`, `vcbg`,
+  `vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`, `lcmf`, `lcvd`, `lcsz`,
+  `lcpt`, `vol` (limiter readout). Writes have no effect.
+- **Experimental** — not exposed by original DDP, but the engine
+  treats the slot as a real DSP input: `preg`, `pstg`, `endp`, `mxou`,
+  `ocf`, `ven`. DolbyX exposes them with an "experimental" badge.
+  (Evidence: DolbyX's `arm/ddp_processor.c` already writes `endp = 2`
+  and `vcnb = 20` via `setSingleSetting`; the libdseffect.so `preg`
+  description string says "this parameter should be set to reflect
+  how much gain has been applied".)

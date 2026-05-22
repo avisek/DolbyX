@@ -38,8 +38,10 @@ build a cleaner foundation that:
 5. Custom IEQ presets can be added, edited, renamed, and removed. IEQ
    presets are global — a change to a preset reflects across every profile
    that has it currently selected.
-6. Every `libdseffect.so`-settable AK parameter is exposable through an
-   Advanced UI section, driven by metadata.
+6. Every one of `libdseffect.so`'s 64 AK parameters is exposed in the
+   Advanced UI section, driven by metadata — including non-settable
+   ones (for live monitoring) and engine-internal ones (DolbyX is also
+   a research vehicle for `libdseffect.so`).
 7. Backend-agnostic engine layer: the QEMU subprocess approach is the
    default for v2.0; Unicorn Engine and Static Binary Translation slot in
    as alternative backends without touching the rest of the code.
@@ -65,9 +67,9 @@ build a cleaner foundation that:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  React UI (Vite-built SPA, separate dev workflow)                         │
+│  Web UI (React-powered Vite-built SPA, separate dev workflow)             │
 │  - Auto-generated Advanced section from /api/parameters                   │
-│  - dB units throughout; daemon does the fixed-point conversion            │
+│  - int16 1/16-dB on the wire; UI converts ↔ dB for display only           │
 │  - Auto-reconnecting WebSocket                                            │
 └────────────────────────┬──────────────────────────────────────────────────┘
                          │ JSON over WebSocket
@@ -139,6 +141,12 @@ pub struct VisualizerData {
 }
 ```
 
+The `i16` values throughout this trait are the engine's native 1/16-dB
+units. The trait is the canonical boundary where this format stays
+consistent end-to-end: persistence, state, wire protocol, and engine
+all carry i16s. Only the Web UI converts i16 ↔ float dB at display
+and input time.
+
 Three impls are anticipated, but only one ships in v2.0:
 
 | Backend               | Status           | Where it works                 | Notes                                                                                                                                                                                     |
@@ -181,7 +189,6 @@ struct State {
 struct Profile {
     id: ProfileId,                        // stable string id, e.g. "music", "user_a3f1"
     name: String,                         // display name, user-editable
-    is_factory: bool,                     // factory profiles can be reset but not deleted
     selected_eq_preset: PresetId,         // points into State.eq_presets
     params: HashMap<String, Vec<i16>>,    // AK param overrides keyed by 4-CC
 }
@@ -189,13 +196,16 @@ struct Profile {
 struct EqPreset {
     id: PresetId,                         // e.g. "off", "rich", "user_91c2"
     name: String,                         // display name, user-editable
-    is_factory: bool,                     // factory presets can be reset but not deleted
     is_ieq_on: bool,                      // ieon
     ieq_band_targets: [i16; 20],          // iebt
     is_geq_on: bool,                      // geon
     geq_band_gains: [i16; 20],            // gebg
 }
 ```
+
+`is_factory` is not a stored field; it's derived at load time by
+checking whether the id exists in `defaults.toml`. Factory items can
+be reset (overrides cleared) but not deleted or renamed.
 
 User-visible consequences:
 
@@ -208,9 +218,10 @@ User-visible consequences:
   (This is a deliberate simplification from the original, where GEQ was
   per-(profile, preset).)
 
-Factory IEQ presets are `Off`, `Open`, `Rich`, `Focused`. Factory profiles
-are `Movie`, `Music`, `Game`, `Voice`. Factory items cannot be deleted;
-they can be reset to their bundled defaults.
+Factory EQ presets are `Off`, `Open`, `Rich`, `Focused`. `Off` has no
+`iebt`/`gebg` curve — selecting it disables the IEQ engine. Factory
+profiles are `Movie`, `Music`, `Game`, `Voice`. Factory items cannot
+be deleted; they can be reset to their bundled defaults.
 
 Note:
 Original DDP only allowed `gebg` curves to be edited through the
@@ -221,72 +232,126 @@ Visualizer/Equalizer, behind a toggle).
 
 ### Decision 3 — Parameter metadata as the single source of truth
 
-All AK parameters are declared once in a static metadata table. Everything
-else — wire protocol, engine init, persistence, UI generation, range
-validation — derives from this table.
+All 64 AK parameters are declared once in a static metadata table.
+Everything else — wire protocol, engine init, persistence, UI
+generation, range validation — derives from this table.
 
 ```rust
 pub struct ParameterDef {
     pub name: &'static str,             // 4-CC: "dvla", "iebt", …
-    pub length: usize,                  // 1 for scalars, 20 for per-band, etc.
+    pub length: ParamLength,            // fixed or aonb-derived
     pub range: (i16, i16),              // inclusive engine-unit bounds
     pub default: ParamDefault,          // scalar or per-band array
     pub kind: ParamKind,                // drives UI widget choice
     pub category: ParamCategory,        // for UI grouping
+    pub access: ParamAccess,            // Settable / ReadOnly / Experimental
     pub label: &'static str,            // human-readable display name
     pub help: &'static str,             // tooltip text
-    pub settable: bool,                 // can be written by the daemon
     pub basic: bool,                    // member of the 5-bool digest
-    pub visible_in_advanced: bool,
+}
+
+pub enum ParamLength {
+    Fixed(usize),               // 1 for scalars, 20 for per-band, etc.
+    AobgChannelMajor { max: usize }, // (aonb + 1) × aocc at runtime, max 329
 }
 
 pub enum ParamDefault {
     Scalar(i16),
-    PerBand([i16; 20]),    // iebt, gebg, iebf, gebf, …
-    PerBandLR([i16; 40]),  // aobg
+    PerBand([i16; 20]),
+    Aobg(Vec<i16>),             // channel-id-prefixed runtime size
 }
 
 pub enum ParamKind {
-    Toggle,             // 0/1
-    Tristate { on: i16 }, // 0/1/2, where "on" = 1 or 2 depending on parameter
+    Toggle,                     // 0/1
+    Tristate { on: i16 },       // 0/1/2, where "on" = 1 or 2
     Integer { max: u16 },
     Decibel { lkfs: bool, divisor: u16 }, // divisor = 16 typically
     FrequencyHz,
     Degrees,
     PerBand,
-    PerBandLR,                     // for aobg (40 entries = 20 bands × 2 ch)
-    ReadOnly,
+    AobgChannelMajor,           // for aobg (channel-id-prefixed)
+    Opaque,                     // license blobs etc — render as int[]
+}
+
+pub enum ParamAccess {
+    Settable,                   // engine reads slot → write takes effect
+    ReadOnly,                   // engine fills slot every block / static
+    Experimental,               // engine accepts write but original DDP hid it
 }
 
 pub enum ParamCategory {
-    Basic,
-    Ieq,
-    Geq,
-    VolumeLeveller,
-    DialogEnhancer,
-    HeadphoneVirtualizer,
-    SpeakerVirtualizer,
-    NextGenSurround,
-    AudioRegulator,
-    AudioOptimizer,
-    VolumeMaximizer,
-    PeakLimiter,
-    Visualizer,
-    Diagnostic,
+    Basic, Ieq, Geq,
+    VolumeLeveller, DialogEnhancer,
+    HeadphoneVirtualizer, SpeakerVirtualizer, NextGenSurround,
+    AudioRegulator, AudioOptimizer, VolumeMaximizer, PeakLimiter,
+    Visualizer, EndpointVolume, BuildVersion, License,
 }
 ```
 
-The table covers all 64 AK parameters (see
-[docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md)). Of these,
-~42 are settable; the others are read-only (build, version, license,
-endpoint, etc.).
+**Three-bucket settability classification.** This is a deliberate
+deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
+binary. Java's `DsAkSettings.isParamSettable` is a UI gatekeeper — the
+native `libdseffect.so` `_akSet` function accepts writes to any
+declared parameter index without checking. DolbyX classifies into:
 
-Wire and storage are name-based (4-CC string). Saved configs are stable
-under reordering the table. Adding a new parameter to the Advanced section
-is a one-line edit: append to the table; the UI auto-discovers it on next
-fetch of `/api/parameters`.
+- **Settable** — every param in Java's `isParamSettable` whitelist
+  (41 params). Editable widgets in the Advanced panel.
+- **ReadOnly** — engine fills the slot each audio block, or pure
+  static metadata: `bver`, `bndl`, `ver`, `vcnb`, `vcbf`, `vcbg`,
+  `vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`, `lcmf`, `lcvd`, `lcsz`,
+  `lcpt`, `vol` (limiter readout). Live-updated read-only displays.
+- **Experimental** — not exposed by original DDP, but the engine
+  accepts the write and uses it as a real DSP input: `preg`, `pstg`,
+  `endp`, `mxou`, `ocf`, `ven`. Editable behind an "experimental"
+  badge. (Evidence: DolbyX's `arm/ddp_processor.c:165` already writes
+  `endp=2` and `vcnb=20` via `setSingleSetting`. The libdseffect.so
+  `preg` description string says "this parameter should be set to
+  reflect how much gain has been applied".)
+
+**`aobg` layout.** The static `329` declared in
+`DsAkSettings.akParams_[22]` is the engine's **worst-case max** =
+`aocc_max (8) × (aonb_max (40) + 1 channel-id) + 1 sentinel`. The
+runtime length is rewritten by `setConstantAkParam("aonb", …)` to
+`(aonb + 1) × aocc` (= 42 for the standard 20-band stereo config).
+The layout is **channel-id-prefixed** (per the libdseffect.so
+description string), not header + interleaved pairs:
+
+```
+[AK_CHAN_L, L_gain_0..L_gain_(aonb-1),
+ AK_CHAN_R, R_gain_0..R_gain_(aonb-1),
+ …,                                       // up to aocc channels
+ AK_CHAN_EMPTY?]                          // optional terminator
+```
+
+`iebt` stays in the Settable bucket. Java's whitelist already includes
+it; only the higher-level `Ds.setDsApParam` rejects user writes to
+preserve the IEQ-preset abstraction. The engine accepts iebt writes
+via `setSingleSetting`, and DolbyX plans to support direct editing
+behind a toggle (see Decision 2).
+
+Wire and storage are name-based (4-CC string). Saved configs are
+stable under reordering the table. Adding a new parameter to the
+Advanced section is a one-line edit: append to the table; the UI
+auto-discovers it on next fetch of `/api/parameters`.
+
+**Advanced-panel layout.** A CSS Grid with
+`grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))` and
+`gap: var(--space-3)`. Each parameter renders as a compact card: the
+4-CC code, the human label, the current value(s), and either an input
+(Settable / Experimental) or a read-only display (ReadOnly).
+Experimental cards get a small "experimental" badge. Long arrays
+(`aobg` ≤ 329, `lcpt` 168, `arbi`/`arbl`/`arbh`/`aobf`/`arbf` 40)
+render in a wide card with `grid-column: 1 / -1`, collapsed behind a
+toggle by default. Tiny scalars pack densely; bulky arrays stay out
+of the way. Category headers introduce visual groupings.
 
 ### Decision 4 — Wire protocol: name-based, originator-aware
+
+**Wire format.** The state snapshot, all `set_param`/`get_param`
+commands, and the binary engine protocol carry raw int16 1/16-dB
+values end-to-end — no pre-conversion to dB. Only the UI does
+the int16 ↔ float dB conversion at the display/input boundary. JSON
+examples below show values exactly as they appear on the wire.
 
 #### UI ↔ daemon (WebSocket, JSON on `localhost:9876/ws`)
 
@@ -327,7 +392,7 @@ Events (daemon → client):
 
 ```jsonc
 { "type": "state", "snapshot": { /* full state */ } }
-{ "type": "vis", "excitations": [...], "gains": [...] }
+{ "type": "vis", "gains": [...], "excitations": [...], "params": { /* dynamic ReadOnly params */ } }
 { "type": "vis_suspended", "suspended": true }
 { "type": "ack", "request_id": "...", "ok": true }
 { "type": "error", "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
@@ -336,14 +401,37 @@ Events (daemon → client):
 The full `state` snapshot is also sent on `get_state`, on connect, and any
 time the daemon's internal state mutates from a non-WS source (e.g. config
 file edit reload). At DolbyX's state scale (hundreds of bytes) full
-snapshots are preferable to partial diffs.
+snapshots are preferable to partial diffs. Static ReadOnly params (`bver`,
+`bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`) are included in this
+snapshot once and never re-broadcast — they don't change at runtime.
 
-The daemon also serves two static HTTP endpoints fetched once at UI startup:
+**Visualizer source.** The daemon always reads the `vis` event's data
+from the **oldest session** (the first entry in the session list),
+regardless of its suspended state. If that session has no audio
+flowing, `vis_suspended: true` is broadcast. The source does not
+switch when the oldest session goes silent — it only changes when
+that session ends, at which point the next-oldest becomes the source.
+This keeps the visualiser predictable and avoids flicker between
+sources.
+
+**Dynamic ReadOnly param updates.** Dynamic ReadOnly params (`vcbg`,
+`vcbe`, `vcnb`, `vcbf`, `vnnb`, `vnbf`, `vnbg`, `vnbe`, `vol`) are
+polled from the visualizer session at the same 50 ms cadence and
+embedded in the `vis` event under `params`. Total payload stays
+under 1 KB per tick. Experimental params (`preg`, `pstg`, `endp`,
+`mxou`, `ocf`, `ven`) update through the regular state-snapshot path
+since the daemon owns the write side.
+
+The daemon also serves one static HTTP endpoint fetched once at UI
+startup:
 
 ```
 GET /api/parameters       → ParameterDef[]   (the metadata table)
-GET /api/factory_defaults → factory profiles + EQ presets
 ```
+
+There is no `/api/factory_defaults` endpoint — the daemon owns reset
+logic via `reset_profile` / `reset_eq_preset` commands, so the UI
+never needs raw defaults.
 
 #### Daemon ↔ engine subprocess (binary, length-prefixed)
 
@@ -425,32 +513,48 @@ Stack:
 - **React 19 + TypeScript** with `strict: true`, `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`.
 - **Vite** for dev server and production build.
-- **Tailwind CSS** with a custom theme matching the original DDP's dark navy
-  background and Dolby cyan accent.
+- **Plain CSS with BEM** naming. No utility framework. Theming via CSS
+  custom properties in a `theme.css` (DDP-styled defaults: dark navy
+  background, Dolby cyan accent), so future skins can swap styles
+  without code changes. The SVG visualizer (Decision 10) plays well
+  with CSS-driven theming.
 - **Zustand** for state management — small, low ceremony, no provider hell.
-- **Vitest** for unit tests, **Playwright** for E2E against a mock daemon.
+- **Vitest** for unit tests with a mocked WebSocket. **Playwright**
+  for E2E against a real daemon running a `StubBackend` engine impl
+  (no `libdseffect.so` involved — see Code quality standards).
 - **ESLint** with `@typescript-eslint/strict-type-checked`, **Prettier**.
 
-Development workflow:
+Development workflow. The repo root carries a single `Justfile`
+(`cargo install just` once). `just dev` runs both `cargo watch -x 'run
+-p ddp-daemon'` and `pnpm --prefix ui dev` concurrently with
+prefixed/coloured output. Rust changes restart the daemon; TS and CSS
+changes hot-reload via Vite. Vite proxies `/api` and `/ws` to
+`localhost:9876`.
 
 ```bash
-# Terminal 1 — daemon
-cargo run -p dolbyx-daemon
+just dev      # daemon + UI together (recommended)
 
-# Terminal 2 — UI with hot reload
-cd ui && pnpm dev      # Vite at http://localhost:5173, proxies /api and /ws to :9876
+# or, equivalently, in two terminals:
+cargo watch -x 'run -p ddp-daemon'
+pnpm --prefix ui dev
 ```
+
+Recommended VS Code extensions: **rust-analyzer**, **Even Better TOML**,
+**ESLint**, **Prettier**. WSL note for this codebase: develop on WSL2;
+the daemon and UI both run as Linux processes. The Windows VST plugin
+builds separately as a cross-compile target in a later phase.
 
 Production build:
 
 ```bash
-cd ui && pnpm build                                           # → ui/dist/
-cargo build --release --features embedded-ui                  # embeds ui/dist/ via rust-embed
+just build-release
+# → ui/dist/ built by Vite
+# → cargo build --release --features embedded-ui embeds ui/dist via rust-embed
 ```
 
-With `embedded-ui` enabled, the daemon serves the UI at `/`. Without it
-(the dev default), the daemon returns a landing page pointing to the Vite
-dev server. This keeps the production deployment a single self-contained
+With `embedded-ui` enabled, the daemon serves the UI at `/`. Without
+it (the dev default), the daemon returns a landing page pointing to
+the Vite dev server. This keeps production a single self-contained
 binary while allowing UI iteration without Rust rebuilds.
 
 UI component tree:
@@ -462,6 +566,10 @@ src/
 ├── store/
 │   ├── state.ts           # Zustand store — mirrors daemon state shape
 │   └── ws.ts              # WebSocket client + auto-reconnect
+├── styles/
+│   ├── theme.css          # CSS custom properties (colours, spacing, radii)
+│   ├── base.css           # element resets and base typography
+│   └── components/        # one BEM file per component family
 ├── components/
 │   ├── PowerToggle.tsx
 │   ├── ProfileTabs.tsx
@@ -479,8 +587,10 @@ src/
 │   │   ├── DecibelWidget.tsx
 │   │   ├── FrequencyWidget.tsx
 │   │   ├── DegreesWidget.tsx
-│   │   └── ArrayPerBandWidget.tsx
-│   └── WidgetFactory.tsx  # ParamKind → widget
+│   │   ├── ArrayPerBandWidget.tsx
+│   │   ├── AobgWidget.tsx       # channel-id-prefixed layout
+│   │   └── ReadOnlyWidget.tsx   # live-updated value display
+│   └── WidgetFactory.tsx  # ParamKind + ParamAccess → widget
 └── lib/
     ├── ws.ts              # WebSocket types and auto-reconnect logic
     ├── parameters.ts      # types for /api/parameters
@@ -489,63 +599,75 @@ src/
 
 ### Decision 7 — Persistence layout
 
-One TOML file in the platform-standard data location:
+Two TOML files in the platform-standard data location:
 
-- Windows: `%PROGRAMDATA%\DolbyX\config.toml`
-- Linux: `/var/lib/dolbyx/config.toml`
+- Windows: `%PROGRAMDATA%\DolbyX\config.toml` (user state)
+- Linux: `/var/lib/dolbyx/config.toml` (user state)
+- A bundled `defaults.toml` ships with the daemon (read-only).
 
-A separate `factory-defaults.toml` ships with the daemon.
-It defines all four factory profiles and four factory IEQ presets with their
-original default values. The user's `config.toml` stores only deltas — matching
-the overlay model the original DDP used with `ds1-default.xml` /
-`ds1-current.xml`. The `factory-defaults.toml` also drives `reset_profile`
-and `reset_eq_preset` actions.
+`defaults.toml` declares all factory profiles and EQ presets with
+their full default values. `config.toml` stores **only deltas** —
+matching the overlay model the original DDP used with
+`ds1-default.xml` / `ds1-current.xml`. `defaults.toml` also drives
+`reset_profile` and `reset_eq_preset` actions (reset = remove the
+user's overrides).
 
-Schema:
+`is_factory` is not stored on disk. It is derived at load time: any
+id present in `defaults.toml` is a factory item; any id present only
+in `config.toml` is custom.
+
+Schema notes:
+
+- No `[state]` table header; `power` and `selected_profile` live at
+  top level for ergonomics.
+- Profiles and EQ presets are keyed by id using table-per-id syntax
+  (`[profile.music]`, `[eq_preset.rich]`), not array-of-tables. The id
+  becomes the table key.
+- AK param overrides (4-CC keys) live directly under
+  `[profile.<id>]` or `[eq_preset.<id>]` — no `[profile.params]`
+  sub-table. Serde uses `#[serde(flatten)] params: HashMap<String,
+ParamValue>` to collect unknown keys.
+
+`defaults.toml` (bundled, read-only) — abbreviated:
 
 ```toml
-[state]
 power = true
 selected_profile = "music"
 
-[[eq_preset]]
-id = "off"
+[eq_preset.off]
 name = "Off"
-is_factory = true
-# no iebt — IEQ engine disabled when this preset is active
-
-[[eq_preset]]
-id = "open"
-name = "Open"
-is_factory = true
-iebt = [117, 133, 188, 176, 141, 149, 175, 185, 185, 200,
-        236, 242, 228, 213, 182, 132, 110,  68, -27, -240]
-
-[[eq_preset]]
-id = "rich"
-name = "Rich"
-is_factory = true
-iebt = [67, 95, 172, 163, 168, 201, 189, 242, 196, 221,
-       192, 186, 168, 139, 102,  57,  35,   9, -55, -235]
-
-[[eq_preset]]
-id = "focused"
-name = "Focused"
-is_factory = true
-ieon = false
-iebt = [-419, -112, 75, 116, 113, 160, 165, 80, 61, 79,
-          98,  121, 64,  70,  44, -71, -33, -100, -238, -411]
-
-[[profile]]
-id = "music"
-name = "Music"
-is_factory = true
-selected_eq_preset = "rich"
-geon = true
+ieon = 0
+iebt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+geon = 0
 gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-[profile.params]
-# Only parameters that differ from the bundled factory defaults are stored
+[eq_preset.open]
+name = "Open"
+ieon = 1
+iebt = [117, 133, 188, 176, 141, 149, 175, 185, 185, 200,
+        236, 242, 228, 213, 182, 132, 110,  68, -27, -240]
+geon = 0
+gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[eq_preset.rich]
+name = "Rich"
+ieon = 1
+iebt = [67, 95, 172, 163, 168, 201, 189, 242, 196, 221,
+        192, 186, 168, 139, 102,  57,  35,   9, -55, -235]
+geon = 0
+gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[eq_preset.focused]
+name = "Focused"
+ieon = 0
+iebt = [-419, -112,  75, 116, 113, 160, 165,  80,  61,  79,
+          98,  121,  64,  70,  44, -71, -33,-100,-238,-411]
+geon = 0
+gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[profile.music]
+name = "Music"
+selected_eq_preset = "rich"
 dvla = 4
 deon = 1
 dea = 2
@@ -555,32 +677,61 @@ ngon = 2
 aoon = 2
 plmd = 4
 vmb = 144
+
+# … movie, game, voice
 ```
 
-Persistence write semantics:
-
-- `[state]` (power + selected_profile) writes are debounced 500 ms.
-- `[[profile]]` and `[[eq_preset]]` writes are debounced 2 s.
-- All pending writes are flushed on graceful daemon shutdown (SIGTERM /
-  Windows console close handler).
-- The legacy v1 TOML schema (positional `[ProfileName]` sections with
-  positional params arrays) is migrated automatically on first load and
-  re-saved in the new schema.
-
-### Decision 8 — First-run UX
-
-On a fresh install (no `config.toml` exists), the daemon initializes from
-`factory-defaults.toml` and writes a minimal config:
+`config.toml` (fresh install):
 
 ```toml
-[state]
 power = true
 selected_profile = "music"
 ```
 
-Power is on, Music profile is selected, no per-profile overrides. The user
-hears the original DDP Music profile defaults the first time they play audio.
-This is "preserve the original default behaviour" made concrete.
+`config.toml` (after some user edits):
+
+```toml
+power = false
+selected_profile = "music"
+
+[profile.music]
+dvla = 5
+
+[profile.user_a3f1]
+name = "Late Night"
+selected_eq_preset = "rich"
+dvla = 2
+dea = 6
+
+[eq_preset.user_91c2]
+name = "Vocal Forward"
+ieon = 1
+iebt = [...]
+geon = 1
+gebg = [...]
+```
+
+Persistence write semantics:
+
+- All on-disk state changes (power, selected_profile, profile params,
+  EQ preset edits) are debounced together with a single 500 ms timer.
+- All pending writes are flushed on graceful daemon shutdown (SIGTERM
+  / Windows console close handler).
+
+### Decision 8 — First-run UX
+
+On a fresh install (no `config.toml` exists), the daemon initializes
+from `defaults.toml` and writes a minimal config:
+
+```toml
+power = true
+selected_profile = "music"
+```
+
+Power is on, Music profile is selected, no per-profile overrides. The
+user hears the original DDP Music profile defaults the first time
+they play audio. This is "preserve the original default behaviour"
+made concrete.
 
 ### Decision 9 — Custom profiles have no category
 
@@ -595,23 +746,35 @@ with no functional consequence.
 
 ### Decision 10 — Visualizer pump rate and rendering
 
-The pump runs at a fixed 50 ms cadence, matching the original DDP. Hardcoded
-as a named constant, easy to modify, not a user-facing setting:
+The pump runs at a fixed 50 ms cadence, matching the original DDP.
+Hardcoded as a named constant, easy to modify, not a user-facing
+setting:
 
 ```rust
 // crates/ddp-daemon/src/visualizer_pump.rs
 pub const VISUALIZER_PUMP_INTERVAL: Duration = Duration::from_millis(50);
-pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // consecutive silent reads
+pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // 10 ticks ≈ 500 ms hysteresis
 ```
+
+The pump always reads from the **oldest session** (the first entry in
+the session list), regardless of suspended state — see Decision 4.
 
 Each tick:
 
-1. Call `engine.get_visualizer_data(session)` → `(gains[20], excitations[20])`.
-2. If all gains are 0 dB for `VISUALIZER_SUSPENDED_THRESHOLD`
-   consecutive ticks, broadcast `vis_suspended: true` and suppress further
-   `vis` events until activity resumes.
-3. Otherwise broadcast `{ type: "vis", gains: [...], excitations: [...] }`
-   with values converted from 1/16 dB i16 to float dB.
+1. Call `engine.get_visualizer_data(session)` → returns either
+   `Some((gains[20], excitations[20]))` or `None` when the engine has
+   no fresh audio data.
+2. Suspended-state detection matches original DDP
+   (`DsService.visualizerUpdate`): a returned length of 0 (None) for
+   `VISUALIZER_SUSPENDED_THRESHOLD` consecutive ticks transitions into
+   suspended; a non-zero return for the same threshold transitions
+   back out. While suspended, the daemon broadcasts a single
+   `vis_suspended: true` and suppresses `vis` events until activity
+   resumes.
+3. Otherwise broadcast
+   `{ type: "vis", gains: [...], excitations: [...], params: { ... } }`
+   with raw int16 1/16-dB values (UI converts on display). The
+   `params` field carries the dynamic ReadOnly params per Decision 4.
 
 UI rendering — a single `<svg>` with layered groups matching the original DDP:
 
@@ -624,8 +787,6 @@ UI rendering — a single `<svg>` with layered groups matching the original DDP:
 - Draggable knob handles for GEQ editing. Touch editing uses an event queue
   with the `GAIN_SMOOTHER` kernel matching the original DDP's feel (see
   [docs/ddp/04-ui-data-flow.md](ddp/04-ui-data-flow.md#example-2--moving-an-eq-slider)).
-
----
 
 ### Decision 11 — Bundle `libdseffect.so` with releases
 
@@ -679,15 +840,13 @@ pub struct State {
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
-    pub is_factory: bool,
     pub selected_eq_preset: PresetId,
-    pub params: HashMap<&'static str, Vec<i16>>, // AK param overrides keyed by 4-CC
+    pub params: HashMap<String, Vec<i16>>, // AK param overrides keyed by 4-CC
 }
 
 pub struct EqPreset {
     pub id: PresetId,
     pub name: String,
-    pub is_factory: bool,
     pub is_ieq_on: bool,
     pub ieq_band_targets: [i16; 20],
     pub is_geq_on: bool,
@@ -695,26 +854,32 @@ pub struct EqPreset {
 }
 ```
 
-Factory items (`is_factory = true`):
+`is_factory` is derived at load time, not stored: any id present in
+`defaults.toml` is factory; any id present only in `config.toml` is
+custom.
 
-- **Factory profiles**: `movie`, `music`, `game`, `voice`. Cannot be deleted
-  or renamed. Can be reset to bundled defaults.
-- **Factory IEQ presets**: `off`, `open`, `rich`, `focused`. Cannot be deleted
-  or renamed. Can be reset to bundled defaults.
+- **Factory profiles**: `movie`, `music`, `game`, `voice`. Cannot be
+  deleted or renamed. Can be reset to bundled defaults.
+- **Factory EQ presets**: `off`, `open`, `rich`, `focused`. Cannot be
+  deleted or renamed. Can be reset to bundled defaults.
 
-Custom items (`is_factory = false`) can be freely renamed, edited, or deleted.
+Custom items can be freely renamed, edited, or deleted. Removing a
+custom EQ preset that some profile has selected: those profiles fall
+back to the `Off` preset.
 
 ## Module structure
 
 ```
 DolbyX/
 ├── Cargo.toml                       # Cargo workspace
+├── Justfile                         # `just dev`, `just build-release`, …
 ├── rust-toolchain.toml              # pin a stable Rust version
 ├── flake.nix                        # Nix shell + NixOS module (Linux)
 ├── crates/
 │   ├── ddp-engine/                  # Engine trait + backend impls
-│   │   ├── src/lib.rs               #   trait Engine
+│   │   ├── src/lib.rs               #   trait Engine + StubBackend (testing)
 │   │   ├── src/qemu.rs              #   QemuBackend (shared subprocess)
+│   │   ├── src/stub.rs              #   StubBackend — no libdseffect.so
 │   │   ├── src/protocol.rs          #   binary protocol (shared with engine-arm)
 │   │   ├── src/backend_unicorn/     #   future, scaffolded empty
 │   │   ├── src/backend_sbt/         #   future, scaffolded empty
@@ -725,12 +890,12 @@ DolbyX/
 │   │   ├── src/preset.rs
 │   │   ├── src/state.rs             #   State aggregate + all mutations
 │   │   ├── src/parameters.rs        #   AK metadata table (static, 64 entries)
-│   │   └── src/conversion.rs        #   int16 ↔ dB helpers
+│   │   └── src/conversion.rs        #   int16 ↔ dB helpers (used by UI tests too)
 │   ├── ddp-persistence/             # TOML load/save — separate from state logic
 │   │   ├── src/lib.rs
 │   │   ├── src/schema.rs            #   serde structs matching the TOML
-│   │   ├── src/factory.rs           #   bundled factory-defaults.toml
-│   │   └── src/debounce.rs          #   write debouncing (500 ms / 2 s)
+│   │   ├── src/factory.rs           #   bundled defaults.toml
+│   │   └── src/debounce.rs          #   write debouncing (500 ms uniform)
 │   ├── ddp-daemon/                  # The dolbyx-daemon binary
 │   │   ├── src/main.rs
 │   │   ├── src/http_server.rs       #   axum routes + rust-embed UI serving
@@ -742,7 +907,7 @@ DolbyX/
 │   │   ├── src/platform/
 │   │   │   ├── windows.rs           #   named pipe accept
 │   │   │   └── unix.rs              #   AF_UNIX accept
-│   │   └── tests/integration.rs     #   mock-engine WebSocket protocol tests
+│   │   └── tests/integration.rs     #   StubBackend WebSocket protocol tests
 │   ├── ddp-engine-arm/              # ARM-side engine binary (cross-compiled ARMv7)
 │   │   ├── src/main.rs              #   loads libdseffect.so via dlopen
 │   │   ├── src/protocol.rs          #   mirrors ddp-engine/src/protocol.rs
@@ -761,11 +926,10 @@ DolbyX/
 │   ├── pnpm-lock.yaml
 │   ├── vite.config.ts               # proxies /api + /ws to localhost:9876
 │   ├── tsconfig.json
-│   ├── tailwind.config.ts
 │   ├── index.html
 │   └── src/                         # (see Decision 6 for component tree)
-├── factory-defaults/
-│   ├── factory-defaults.toml        # bundled factory profiles + IEQ presets
+├── defaults/
+│   ├── defaults.toml                # bundled factory profiles + EQ presets
 │   └── parameters.toml              # source for the AK metadata codegen
 ├── vendored/
 │   └── libdseffect.so               # v8.1 build, bundled
@@ -781,8 +945,6 @@ is intentionally I/O-free so it can be unit-tested in isolation, ported, or
 wrapped for FFI later. The `ddp-persistence` crate is a separate member to
 keep I/O concerns out of the state model.
 
----
-
 ## Implementation phases
 
 Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
@@ -790,24 +952,31 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 ### Phase 0 — Workspace bootstrap (≈ 1 week)
 
 - New Cargo workspace with the crate skeleton above.
+- Top-level `Justfile` with `dev`, `build-release`, `lint`, `test`
+  recipes.
 - CI scaffolding: GitHub Actions running `cargo check`, `cargo test`,
   `cargo clippy`, `cargo fmt --check` on Linux + Windows.
-- React + Vite UI scaffolding with TypeScript, ESLint, Prettier.
-- `factory-defaults.toml` created with factory profiles and IEQ presets
+- React + Vite UI scaffolding with TypeScript, ESLint, Prettier. No
+  Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
+- `defaults.toml` created with factory profiles and EQ presets
   transcribed from `ds1-default.xml`.
-- AK parameter metadata table (`parameters.toml` + codegen) populated with
-  all 64 entries from [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md).
+- AK parameter metadata table (`parameters.toml` + codegen) populated
+  with all 64 entries from
+  [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md), with the
+  three-bucket Settable/ReadOnly/Experimental classification from
+  Decision 3.
 - No functional behaviour yet; CI is green on a skeleton.
 
 ### Phase 1 — State + persistence (≈ 1 week)
 
-- `ddp-state` crate: full data model, factory loading, all mutation operations
-  as specified in Decision 2.
-- `ddp-persistence` crate: TOML load/save, factory-defaults overlay, debounced
-  writes (500 ms for `[state]`, 2 s for profiles/presets).
+- `ddp-state` crate: full data model, factory loading, all mutation
+  operations as specified in Decision 2. `is_factory` derived from
+  defaults.toml presence.
+- `ddp-persistence` crate: TOML load/save, defaults overlay, uniform
+  500 ms debounced writes.
 - Migration from v1 TOML schema.
-- Unit + property tests cover the state model fully, including bidirectional
-  `f32 dB ↔ i16` 1/16-dB conversion via `proptest`.
+- Unit + property tests cover the state model fully, including
+  bidirectional `f32 dB ↔ i16` 1/16-dB conversion via `proptest`.
 - No engine, no server yet; verify with unit tests only.
 
 ### Phase 2 — Engine integration (≈ 2 weeks)
@@ -836,16 +1005,20 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 
 ### Phase 4 — React UI (≈ 2–3 weeks)
 
-- Core controls: power, profile picker, the three master toggles (Volume
-  Leveller / Dialog Enhancer / Surround Virtualizer), IEQ preset picker, reset.
+- Core controls: power, profile picker, the three master toggles with amount
+  sliders (Volume Leveller / Dialog Enhancer / Surround Virtualizer),
+  EQ preset picker, EQ preset reset, profile-level reset.
 - SVG visualizer matching the original DDP look: spectrum bars from
-  excitations, EQ curve overlay (Catmull-Rom spline), draggable handles
-  with `GAIN_SMOOTHER` kernel.
-- Profile and IEQ-preset management: add, delete, rename.
-- Advanced panel auto-generated from `/api/parameters` metadata.
+  excitations, EQ curve overlay (Catmull-Rom spline), draggable
+  handles with `GAIN_SMOOTHER` kernel.
+- Profile and EQ-preset management: add, delete, rename.
+- Advanced panel auto-generated from `/api/parameters` metadata,
+  rendered as a CSS-grid of compact cards with Settable / ReadOnly /
+  Experimental treatment (Decision 3).
+- BEM CSS + CSS variables for theming; SVG visualizer; no Tailwind.
 - WebSocket auto-reconnect, dev/prod build flows.
-- Tests: Vitest for components, Playwright for end-to-end flows against a
-  mock daemon.
+- Tests: Vitest for components with a mocked WebSocket; Playwright
+  E2E against a real daemon running the `StubBackend` engine impl.
 
 ### Phase 5 — Plugins (≈ 1.5 weeks)
 
@@ -889,15 +1062,22 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 `cargo fmt --check`. `#![forbid(unsafe_code)]` everywhere except the engine
 FFI boundary; that boundary has `// SAFETY:` comments on every invariant.
 
-**Tests**: unit tests live next to the code in `#[cfg(test)] mod tests`.
-Integration tests in `tests/`. Property tests via `proptest` for
-invertible conversions (dB ↔ 1/16 dB, dB-clamp ↔ engine-clamp).
-Mock-engine integration tests for the daemon's WebSocket protocol.
+**Tests**: unit tests live next to the code in `#[cfg(test)] mod
+tests`. Integration tests in `tests/`. Property tests via `proptest`
+for invertible conversions (dB ↔ 1/16 dB, dB-clamp ↔ engine-clamp).
+The daemon's WebSocket protocol tests use the `StubBackend` engine
+impl so they don't need QEMU or the proprietary blob in CI.
 
 **TypeScript**: `strict: true`, `noUncheckedIndexedAccess: true`,
 `exactOptionalPropertyTypes: true`. ESLint with
-`@typescript-eslint/strict-type-checked`. Prettier. Components have unit
-tests in Vitest; flows have E2E tests in Playwright.
+`@typescript-eslint/strict-type-checked`. Prettier. Components have
+unit tests in Vitest with a mocked WebSocket; user flows have E2E
+tests in Playwright against a real daemon running the `StubBackend` —
+the daemon's command/state/broadcast logic is what we want covered
+end-to-end. Mocking the daemon's WebSocket would duplicate the
+daemon's logic in test fixtures and drift over time; mocking only the
+engine gives confidence in the protocol and reset-flow logic without
+QEMU.
 
 **CI**: GitHub Actions runs the full test matrix on Linux + Windows for every
 push and PR. Required checks before merge: `cargo test`,
@@ -911,20 +1091,22 @@ for both end users and contributors.
 
 ## What this changes vs v1
 
-| Aspect                    | v1                                                   | v2                                                                           |
-| ------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Daemon language           | C                                                    | Rust                                                                         |
-| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait |
-| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                 |
-| IEQ preset model          | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                  |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per profile                                                          |
-| Wire protocol             | Parameter indices                                    | Parameter names (4-CC); single source of truth via metadata table            |
-| Web UI                    | Vanilla JS embedded in daemon                        | React + TypeScript + Vite; separate dev workflow; embedded at release build  |
-| Persistence               | Multi-file XML                                       | Single TOML file with factory-defaults overlay; same delta semantics         |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection                               |
-| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; no parameter mutation                    |
-| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                             |
-| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                   |
+| Aspect                    | v1                                                   | v2                                                                                                 |
+| ------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Daemon language           | C                                                    | Rust                                                                                               |
+| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                       |
+| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                       |
+| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                        |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                     |
+| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                 |
+| Wire protocol             | Parameter indices                                    | Parameter names (4-CC); single source of truth via metadata table                                  |
+| Param coverage            | 24 of 64 AK params                                   | All 64 exposed; Settable / ReadOnly / Experimental classification                                  |
+| Web UI                    | Vanilla JS embedded in daemon                        | React + TypeScript + Vite; plain CSS + BEM; separate dev workflow; embedded at release build       |
+| Persistence               | Multi-file XML                                       | Two TOML files (`defaults.toml` + `config.toml`); table-per-id; overlay semantics; 500 ms debounce |
+| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                |
+| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; no parameter mutation                                          |
+| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                   |
+| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                         |
 
 ## Deferred technical questions
 
