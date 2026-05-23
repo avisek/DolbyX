@@ -288,6 +288,14 @@ pub enum ParamCategory {
 }
 ```
 
+**Decibel kind.** `Decibel { lkfs, divisor }` keeps `divisor` as
+metadata so the UI never hardcodes the 1/16 conversion factor —
+each widget reads `def.divisor` from `/api/parameters` and divides.
+Every dB-coded AK param uses `divisor = 16` today (the binary
+documents "scaled by 16 ie. 16 = 1 dB"); the metadata table stays
+the canonical source. `lkfs: bool` switches the unit label from
+`dB` to `LKFS` for `dvli`/`dvlo`.
+
 **Three-bucket settability classification.** This is a deliberate
 deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
 binary. Java's `DsAkSettings.isParamSettable` is a UI gatekeeper — the
@@ -297,16 +305,27 @@ declared parameter index without checking. DolbyX classifies into:
 - **Settable** — every param in Java's `isParamSettable` whitelist
   (41 params). Editable widgets in the Advanced panel.
 - **ReadOnly** — engine fills the slot each audio block, or pure
-  static metadata: `bver`, `bndl`, `ver`, `vcnb`, `vcbf`, `vcbg`,
-  `vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`, `lcmf`, `lcvd`, `lcsz`,
-  `lcpt`, `vol` (limiter readout). Live-updated read-only displays.
+  static metadata: `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `vnnb`,
+  `vnbf`, `vnbg`, `vnbe`, `lcmf`, `lcvd`, `lcsz`, `lcpt`.
+  Live-updated read-only displays. Three sub-categories distinguished
+  by source (per the libdseffect.so AK description strings cited in
+  `docs/ddp/02-ak-parameters.md`): build constants
+  (`bver`/`bndl`/`ver`), init-only host inputs
+  (`lcmf`/`lcsz`/`lcpt`) and the engine's own auth result (`lcvd`)
+  are stable for the lifetime of the engine instance and ship once
+  in the state snapshot; the visualizer readouts
+  (`vcbg`/`vcbe`/`vnnb`/`vnbf`/`vnbg`/`vnbe`) are per-block dynamic
+  and ride the visualizer pump (see Decision 4).
 - **Experimental** — not exposed by original DDP, but the engine
   accepts the write and uses it as a real DSP input: `preg`, `pstg`,
-  `endp`, `mxou`, `ocf`, `ven`. Editable behind an "experimental"
-  badge. (Evidence: DolbyX's `arm/ddp_processor.c:165` already writes
-  `endp=2` and `vcnb=20` via `setSingleSetting`. The libdseffect.so
-  `preg` description string says "this parameter should be set to
-  reflect how much gain has been applied".)
+  `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`. Editable
+  behind an "experimental" badge. (`vol` is a host volume hint the
+  leveler reads; `vcnb`/`vcbf` configure custom-visualizer mode when
+  `ven` is `ON`. Evidence for the broader pattern: DolbyX's
+  `arm/ddp_processor.c:165` already writes `endp=2` and `vcnb=20`
+  via `setSingleSetting`; the libdseffect.so `preg` description
+  string says "this parameter should be set to reflect how much
+  gain has been applied".)
 
 **`aobg` layout.** The static `329` declared in
 `DsAkSettings.akParams_[22]` is the engine's **worst-case max** =
@@ -396,6 +415,7 @@ Events (daemon → client):
 { "type": "vis_suspended", "suspended": true }
 { "type": "ack", "request_id": "...", "ok": true }
 { "type": "error", "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
+{ "type": "error", "request_id": "...", "code": "ENGINE_REJECTED", "status": -22, "message": "..." }
 ```
 
 The full `state` snapshot is also sent on `get_state`, on connect, and any
@@ -404,6 +424,25 @@ file edit reload). At DolbyX's state scale (hundreds of bytes) full
 snapshots are preferable to partial diffs. Static ReadOnly params (`bver`,
 `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`) are included in this
 snapshot once and never re-broadcast — they don't change at runtime.
+
+**Engine acceptance.** Writes are validated in two layers. First the
+daemon checks every `set_param` against the `ParameterDef` metadata
+(4-CC declared, length matches, value within range); failures
+short-circuit with
+`{ "type": "error", "code": "INVALID_PARAM", "request_id": "...",
+"message": "..." }` and the engine is never called. Second the
+engine itself can reject — wrong parameter index, wrong setting
+index, non-zero start offset, or length mismatch against
+`akParams_[i].len`. It returns a negative status, which the daemon
+surfaces as
+`{ "type": "error", "code": "ENGINE_REJECTED", "request_id": "...",
+"status": -22, "message": "..." }`. Note the engine does **not**
+validate value ranges or semantics; that's the daemon's job via the
+metadata table. (Evidence: libdseffect.so strings include
+`_akSet: Wrong parameter index %d`,
+`DS_PARAM_SINGLE_DEVICE_VALUE setting_index %i is invalid` and
+`Wrong start offset %i, the start offset must always be 0!`; no
+range-check strings exist.)
 
 **Visualizer source.** The daemon always reads the `vis` event's data
 from the **oldest session** (the first entry in the session list),
@@ -415,12 +454,12 @@ This keeps the visualiser predictable and avoids flicker between
 sources.
 
 **Dynamic ReadOnly param updates.** Dynamic ReadOnly params (`vcbg`,
-`vcbe`, `vcnb`, `vcbf`, `vnnb`, `vnbf`, `vnbg`, `vnbe`, `vol`) are
-polled from the visualizer session at the same 50 ms cadence and
-embedded in the `vis` event under `params`. Total payload stays
-under 1 KB per tick. Experimental params (`preg`, `pstg`, `endp`,
-`mxou`, `ocf`, `ven`) update through the regular state-snapshot path
-since the daemon owns the write side.
+`vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`) are polled from the
+visualizer session at the same 50 ms cadence and embedded in the
+`vis` event under `params`. Total payload stays under 1 KB per
+tick. Experimental params (`preg`, `pstg`, `endp`, `mxou`, `ocf`,
+`ven`, `vol`, `vcnb`, `vcbf`) update through the regular
+state-snapshot path since the daemon owns the write side.
 
 The daemon also serves one static HTTP endpoint fetched once at UI
 startup:
@@ -520,8 +559,14 @@ Stack:
   with CSS-driven theming.
 - **Zustand** for state management — small, low ceremony, no provider hell.
 - **Vitest** for unit tests with a mocked WebSocket. **Playwright**
-  for E2E against a real daemon running a `StubBackend` engine impl
-  (no `libdseffect.so` involved — see Code quality standards).
+  for E2E against a real daemon driving the real engine
+  (`QemuBackend` + `libdseffect.so`), so the binary
+  protocol, init handshake, and `DEFINE_PARAMS` / `DEFINE_SETTINGS`
+  dance are covered too. `StubBackend` stays in `ddp-engine` for
+  Rust unit/integration tests of daemon command dispatch — see
+  Code quality standards. CI runs `apt-get install qemu-user-static`
+  on the Linux image; `libdseffect.so` is bundled in the repo (see
+  Decision 11).
 - **ESLint** with `@typescript-eslint/strict-type-checked`, **Prettier**.
 
 Development workflow. The repo root carries a single `Justfile`
@@ -599,11 +644,13 @@ src/
 
 ### Decision 7 — Persistence layout
 
-Two TOML files in the platform-standard data location:
+Two TOML files in distinct locations:
 
-- Windows: `%PROGRAMDATA%\DolbyX\config.toml` (user state)
-- Linux: `/var/lib/dolbyx/config.toml` (user state)
-- A bundled `defaults.toml` ships with the daemon (read-only).
+- `config.toml` — user state, editable, in the platform-standard data dir.
+  Windows: `%PROGRAMDATA%\DolbyX\config.toml`. Linux:
+  `/var/lib/dolbyx/config.toml`.
+- `defaults.toml` — factory defaults, user-editable, in the **same directory
+  as the daemon binary**.
 
 `defaults.toml` declares all factory profiles and EQ presets with
 their full default values. `config.toml` stores **only deltas** —
@@ -611,6 +658,16 @@ matching the overlay model the original DDP used with
 `ds1-default.xml` / `ds1-current.xml`. `defaults.toml` also drives
 `reset_profile` and `reset_eq_preset` actions (reset = remove the
 user's overrides).
+
+Both files are first-class state for the daemon. A `notify`-based
+file watcher subscribes to changes on both paths; on an external
+edit the daemon debounces for 500 ms (matching the write-side
+debounce), re-overlays the two files, and broadcasts a fresh state
+snapshot to every connected client. Users can hand-edit either
+file and watch the UI catch up. To avoid the watcher firing on the
+daemon's own writes, the daemon records each `(path, mtime)` it
+flushed and suppresses watcher events that match within a 1 s
+quiet window.
 
 `is_factory` is not stored on disk. It is derived at load time: any
 id present in `defaults.toml` is a factory item; any id present only
@@ -628,7 +685,7 @@ Schema notes:
   sub-table. Serde uses `#[serde(flatten)] params: HashMap<String,
 ParamValue>` to collect unknown keys.
 
-`defaults.toml` (bundled, read-only) — abbreviated:
+`defaults.toml` (lives next to the daemon binary) — abbreviated:
 
 ```toml
 power = true
@@ -798,6 +855,7 @@ dolbyx/
 ├── dolbyx-daemon          # the Rust binary (UI embedded)
 ├── dolbyx-engine-arm      # the ARM-side engine binary (statically built)
 ├── libdseffect.so         # bundled
+├── defaults.toml          # factory profiles + EQ presets, user-inspectable
 └── README.txt
 ```
 
@@ -885,18 +943,23 @@ DolbyX/
 │   │   ├── src/backend_sbt/         #   future, scaffolded empty
 │   │   └── tests/qemu_smoke.rs
 │   ├── ddp-state/                   # Pure state model — no I/O
+│   │   ├── build.rs                 #   codegen: parameters.toml → parameters.rs
+│   │   ├── parameters.toml          #   source for the AK metadata codegen
 │   │   ├── src/lib.rs
 │   │   ├── src/profile.rs
 │   │   ├── src/preset.rs
 │   │   ├── src/state.rs             #   State aggregate + all mutations
-│   │   ├── src/parameters.rs        #   AK metadata table (static, 64 entries)
+│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 64 entries)
 │   │   └── src/conversion.rs        #   int16 ↔ dB helpers (used by UI tests too)
 │   ├── ddp-persistence/             # TOML load/save — separate from state logic
 │   │   ├── src/lib.rs
 │   │   ├── src/schema.rs            #   serde structs matching the TOML
-│   │   ├── src/factory.rs           #   bundled defaults.toml
+│   │   ├── src/factory.rs           #   loads defaults.toml from $(daemon-dir)
+│   │   ├── src/file_watcher.rs      #   notify-rs watcher on both TOML files
 │   │   └── src/debounce.rs          #   write debouncing (500 ms uniform)
 │   ├── ddp-daemon/                  # The dolbyx-daemon binary
+│   │   ├── build.rs                 #   copies defaults.toml next to the binary
+│   │   ├── defaults.toml            #   factory profiles + EQ presets (source-of-truth)
 │   │   ├── src/main.rs
 │   │   ├── src/http_server.rs       #   axum routes + rust-embed UI serving
 │   │   ├── src/ws_server.rs         #   WebSocket session handling
@@ -907,7 +970,8 @@ DolbyX/
 │   │   ├── src/platform/
 │   │   │   ├── windows.rs           #   named pipe accept
 │   │   │   └── unix.rs              #   AF_UNIX accept
-│   │   └── tests/integration.rs     #   StubBackend WebSocket protocol tests
+│   │   ├── tests/integration.rs     #   StubBackend command-dispatch tests
+│   │   └── tests/e2e_qemu.rs        #   real-engine E2E (cargo feature `qemu`)
 │   ├── ddp-engine-arm/              # ARM-side engine binary (cross-compiled ARMv7)
 │   │   ├── src/main.rs              #   loads libdseffect.so via dlopen
 │   │   ├── src/protocol.rs          #   mirrors ddp-engine/src/protocol.rs
@@ -928,9 +992,6 @@ DolbyX/
 │   ├── tsconfig.json
 │   ├── index.html
 │   └── src/                         # (see Decision 6 for component tree)
-├── defaults/
-│   ├── defaults.toml                # bundled factory profiles + EQ presets
-│   └── parameters.toml              # source for the AK metadata codegen
 ├── vendored/
 │   └── libdseffect.so               # v8.1 build, bundled
 └── scripts/
@@ -1018,7 +1079,8 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - BEM CSS + CSS variables for theming; SVG visualizer; no Tailwind.
 - WebSocket auto-reconnect, dev/prod build flows.
 - Tests: Vitest for components with a mocked WebSocket; Playwright
-  E2E against a real daemon running the `StubBackend` engine impl.
+  E2E against a real daemon driving the real engine (QemuBackend +
+  `libdseffect.so`).
 
 ### Phase 5 — Plugins (≈ 1.5 weeks)
 
@@ -1065,19 +1127,28 @@ FFI boundary; that boundary has `// SAFETY:` comments on every invariant.
 **Tests**: unit tests live next to the code in `#[cfg(test)] mod
 tests`. Integration tests in `tests/`. Property tests via `proptest`
 for invertible conversions (dB ↔ 1/16 dB, dB-clamp ↔ engine-clamp).
-The daemon's WebSocket protocol tests use the `StubBackend` engine
-impl so they don't need QEMU or the proprietary blob in CI.
+The daemon's command-dispatch integration tests use the `StubBackend`
+engine impl for speed and determinism; the daemon's real-engine integration
+test (`ddp-daemon/tests/e2e_qemu.rs`, gated by the `qemu` cargo
+feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU
+
+- libdseffect.so path. UI E2E (Playwright) drives the real daemon
+  with the real engine so the binary protocol and init handshake are
+  covered end-to-end.
 
 **TypeScript**: `strict: true`, `noUncheckedIndexedAccess: true`,
 `exactOptionalPropertyTypes: true`. ESLint with
 `@typescript-eslint/strict-type-checked`. Prettier. Components have
 unit tests in Vitest with a mocked WebSocket; user flows have E2E
-tests in Playwright against a real daemon running the `StubBackend` —
-the daemon's command/state/broadcast logic is what we want covered
-end-to-end. Mocking the daemon's WebSocket would duplicate the
-daemon's logic in test fixtures and drift over time; mocking only the
-engine gives confidence in the protocol and reset-flow logic without
-QEMU.
+tests in Playwright against a real daemon driving the real engine
+(`QemuBackend` + `libdseffect.so`). Mocking the daemon's WebSocke
+would duplicate the daemon's logic in test fixtures and
+drift over time; mocking the engine would skip the binary protocol,
+init handshake, and `DEFINE_PARAMS` / `DEFINE_SETTINGS` dance —
+where the integration risk actually lives. `StubBackend` is still
+used by `ddp-daemon`'s Rust integration tests for command dispatch
+where engine I/O isn't the point. CI provisions
+`qemu-user-static` via apt; `libdseffect.so` is bundled.
 
 **CI**: GitHub Actions runs the full test matrix on Linux + Windows for every
 push and PR. Required checks before merge: `cargo test`,
@@ -1091,22 +1162,23 @@ for both end users and contributors.
 
 ## What this changes vs v1
 
-| Aspect                    | v1                                                   | v2                                                                                                 |
-| ------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Daemon language           | C                                                    | Rust                                                                                               |
-| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                       |
-| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                       |
-| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                        |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                     |
-| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                 |
-| Wire protocol             | Parameter indices                                    | Parameter names (4-CC); single source of truth via metadata table                                  |
-| Param coverage            | 24 of 64 AK params                                   | All 64 exposed; Settable / ReadOnly / Experimental classification                                  |
-| Web UI                    | Vanilla JS embedded in daemon                        | React + TypeScript + Vite; plain CSS + BEM; separate dev workflow; embedded at release build       |
-| Persistence               | Multi-file XML                                       | Two TOML files (`defaults.toml` + `config.toml`); table-per-id; overlay semantics; 500 ms debounce |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                |
-| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; no parameter mutation                                          |
-| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                   |
-| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                         |
+| Aspect                    | v1                                                   | v2                                                                                                                                                |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon language           | C                                                    | Rust                                                                                                                                              |
+| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                      |
+| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                      |
+| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                       |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                    |
+| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                |
+| Wire protocol             | Parameter indices                                    | Parameter names (4-CC); single source of truth via metadata table                                                                                 |
+| Param coverage            | 24 of 64 AK params                                   | All 64 exposed; Settable / ReadOnly / Experimental classification                                                                                 |
+| Web UI                    | Vanilla JS embedded in daemon                        | React + TypeScript + Vite; plain CSS + BEM; separate dev workflow; embedded at release build                                                      |
+| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce |
+| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                            |
+| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                               |
+| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; no parameter mutation                                                                                         |
+| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                  |
+| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                        |
 
 ## Deferred technical questions
 
