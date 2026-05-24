@@ -91,17 +91,27 @@ typedef int32_t (*EffectRelease_t)(effect_handle_t handle);
 typedef int32_t (*EffectGetDescriptor_t)(const effect_uuid_t* uuid,
                                          effect_descriptor_t* pDescriptor);
 
-#define EFFECT_CMD_INIT           0
-#define EFFECT_CMD_SET_CONFIG     1
-#define EFFECT_CMD_RESET          2
-#define EFFECT_CMD_ENABLE         3
-#define EFFECT_CMD_DISABLE        4
-#define EFFECT_CMD_SET_PARAM      5
-#define EFFECT_CMD_GET_PARAM      6
-#define EFFECT_CMD_SET_DEVICE     7
-#define EFFECT_CMD_SET_VOLUME     8
-#define EFFECT_CMD_SET_AUDIO_MODE 9
-#define EFFECT_CMD_GET_CONFIG     10
+/* Effect command codes — must match AOSP audio_effect.h numbering.
+ * Verified empirically against libdseffect.so (cmd_probe): codes 0..5,
+ * 8, 9, 10, 11 are dispatched by the engine; 6, 7, 12, 13, 14 are
+ * unhandled and fall through to "Unknown command code". */
+#define EFFECT_CMD_INIT                0
+#define EFFECT_CMD_SET_CONFIG          1
+#define EFFECT_CMD_RESET               2
+#define EFFECT_CMD_ENABLE              3
+#define EFFECT_CMD_DISABLE             4
+#define EFFECT_CMD_SET_PARAM           5
+#define EFFECT_CMD_SET_PARAM_DEFERRED  6  /* not impl in our engine */
+#define EFFECT_CMD_SET_PARAM_COMMIT    7  /* not impl in our engine */
+#define EFFECT_CMD_GET_PARAM           8
+#define EFFECT_CMD_SET_DEVICE          9
+#define EFFECT_CMD_SET_VOLUME         10
+#define EFFECT_CMD_SET_AUDIO_MODE     11
+#define EFFECT_CMD_SET_CONFIG_REVERSE 12  /* not impl in our engine */
+#define EFFECT_CMD_SET_INPUT_DEVICE   13  /* not impl in our engine */
+#define EFFECT_CMD_GET_CONFIG         14  /* not impl in our engine */
+#define EFFECT_CMD_GET_CONFIG_REVERSE 15
+/* 16..19: feature/source/offload — not impl. 0x10000+ proprietary. */
 
 typedef struct {
     int32_t  status;

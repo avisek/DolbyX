@@ -146,12 +146,10 @@ static int ds1_get_array(int param_index, int16_t *values, int count) {
     uint32_t rs = total;
     int32_t r = (*g_handle)->command(g_handle, EFFECT_CMD_GET_PARAM,
                                      total, buf, &rs, buf);
-
-    if (r == 0 && ep->status == 0) {
-        memcpy(values, vdata + 8, count * 2);
-    }
+    int ok = (r == 0 && ep->status == 0);
+    if (ok) memcpy(values, vdata + 8, count * 2);
     free(buf);
-    return (r == 0 && ep->status == 0) ? 0 : -1;
+    return ok ? 0 : -1;
 }
 
 /* ── Parameter Registration ───────────────────────────────────────── */
