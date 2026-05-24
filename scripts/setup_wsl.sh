@@ -16,7 +16,7 @@ UI_DIR="$PROJECT_DIR/ui"
 echo "[1/5] Installing build dependencies..."
 sudo apt-get update -qq 2>/dev/null
 sudo apt-get install -y -qq gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
-    qemu-user-static gcc-mingw-w64-x86-64 make python3 nodejs npm 2>/dev/null
+    qemu-user-static gcc-mingw-w64-x86-64 make python3 2>/dev/null
 echo ""
 
 if [ ! -f "$ARM_DIR/lib/libdseffect.so" ]; then
