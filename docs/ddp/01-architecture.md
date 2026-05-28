@@ -44,11 +44,11 @@ Each section below describes one layer.
 The ARM32 native library that does the actual DSP. It implements the
 standard Android `AudioEffect` HAL surface (`EffectQueryNumberEffects`,
 `EffectQueryEffect`, `EffectCreate`, `EffectRelease`,
-`EffectGetDescriptor`, plus the per-instance `process` /  `command` /
+`EffectGetDescriptor`, plus the per-instance `process` / `command` /
 `get_descriptor` function pointers). One effect type is exposed:
 
-* **Type UUID** `46d279d9-9be7-453d-9d7c-ef937f675587` (the DDP type)
-* **Implementation UUID** `9d4921da-8225-4f29-aefa-39537a04bcaa` (this
+- **Type UUID** `46d279d9-9be7-453d-9d7c-ef937f675587` (the DDP type)
+- **Implementation UUID** `9d4921da-8225-4f29-aefa-39537a04bcaa` (this
   particular DDP build)
 
 The engine processes 16-bit signed PCM stereo samples in `process()`
@@ -76,39 +76,39 @@ It is bound to via `bindService(new Intent("android.dolby.IDs"), ...)`.
 
 The service owns:
 
-* A single **`Ds`** instance (`android.dolby.ds.Ds`), which owns:
-  * **`DsEffect`** — wraps the live `AudioEffect` instance and implements
+- A single **`Ds`** instance (`android.dolby.ds.Ds`), which owns:
+  - **`DsEffect`** — wraps the live `AudioEffect` instance and implements
     the binary encoder/decoder for the 8 command codes.
-  * **`DsProfileSettings[6]`** in `currentProfiles_` — the live state.
+  - **`DsProfileSettings[6]`** in `currentProfiles_` — the live state.
     One slot per profile (Movie, Music, Game, Voice, Custom 1, Custom 2).
     Each slot holds a `Map<AudioDevice, DsAkSettings>` — but in practice
     only `DEVICE_WIRED_HEADPHONE` is ever populated, because
     `DsEndpoint.GENERIC` maps to that one device.
-  * **`DsProfileSettings[6]`** in `defaultProfiles_` — a frozen copy of
+  - **`DsProfileSettings[6]`** in `defaultProfiles_` — a frozen copy of
     the factory defaults loaded from `ds1-default.xml`. Used for the
     "is this profile modified?" check.
-  * The current `selectedProfile_` (0..5) and `isDsOn_` flags.
-* The **`AudioEffect`** instance bound to audio session 0 (the global
+  - The current `selectedProfile_` (0..5) and `isDsOn_` flags.
+- The **`AudioEffect`** instance bound to audio session 0 (the global
   output mix).
-* A **callback registry** (`RemoteCallbackList<IDsServiceCallbacks>`)
+- A **callback registry** (`RemoteCallbackList<IDsServiceCallbacks>`)
   with each registered callback tagged by an integer `handle` (the client
   uses `connection_.hashCode()`).
-* A **visualizer subscriber list** (`ArrayList<Integer> visualizerList_`)
+- A **visualizer subscriber list** (`ArrayList<Integer> visualizerList_`)
   that tracks which client handles want visualizer events.
-* A **DS-AP-param subscriber list** (`ArrayList<Integer>
-  dsApParamEventList_`) for the secondary callback channel that fires
+- A **DS-AP-param subscriber list** (`ArrayList<Integer>
+dsApParamEventList_`) for the secondary callback channel that fires
   for non-basic AK parameter changes.
-* A **`HandlerThread`** named `"visualiser thread"` that runs the 50 ms
+- A **`HandlerThread`** named `"visualiser thread"` that runs the 50 ms
   visualizer poll loop.
-* The **persistence layer** (`DsStoreUtil`) that writes
+- The **persistence layer** (`DsStoreUtil`) that writes
   `ds1-state.xml` and `ds1-current.xml` to the app's private data
   directory.
 
 The service exposes two thread contexts to the rest of the system:
 
-* **Binder thread pool** — handles incoming AIDL calls. Each call is
+- **Binder thread pool** — handles incoming AIDL calls. Each call is
   guarded by `lockDolbyContext_` and (where relevant) `lockCallbacks_`.
-* **Visualizer thread** — polls the engine every 50 ms, posts updates
+- **Visualizer thread** — polls the engine every 50 ms, posts updates
   to `mHandler` (the binder-thread handler) which then broadcasts to
   subscribed clients.
 
@@ -124,26 +124,26 @@ infinite re-renders. This is described in detail in
 
 The framework jar contains:
 
-* The **AIDL interfaces**: `IDs` (30 transactions, descriptor
+- The **AIDL interfaces**: `IDs` (30 transactions, descriptor
   `android.dolby.IDs`), `IDsServiceCallbacks` (8 transactions,
   descriptor `android.dolby.IDsServiceCallbacks`).
-* **`DsClient`** — a high-level wrapper that any UI can use. It owns
+- **`DsClient`** — a high-level wrapper that any UI can use. It owns
   the `ServiceConnection`, registers a single callback, marshals
   arguments, translates error codes to exceptions, and (importantly)
   pre-allocates the visualizer `gains_[]` and `excitations_[]` arrays
   so that visualizer events don't allocate per-frame.
-* **`DsClientSettings`** — a tiny Parcelable carrying just 5 booleans:
+- **`DsClientSettings`** — a tiny Parcelable carrying just 5 booleans:
   the on/off state of GEQ, Dialog Enhancer, Volume Leveler, Headphone
   Virtualizer, and Speaker Virtualizer. This is the digest pattern
   described in [05-profiles-and-persistence.md](05-profiles-and-persistence.md#the-5-bit-dsclientsettings-digest).
-* **Three event listener interfaces** that the UI implements:
-  * `IDsClientEvents` — connect/disconnect/profile/settings/EQ events
-  * `IDsVisualizerEvents` — visualizer update + suspend
-  * `IDsApParamEvents` — generic AK parameter changes (for non-basic
+- **Three event listener interfaces** that the UI implements:
+  - `IDsClientEvents` — connect/disconnect/profile/settings/EQ events
+  - `IDsVisualizerEvents` — visualizer update + suspend
+  - `IDsApParamEvents` — generic AK parameter changes (for non-basic
     parameters that aren't in the 5-bit digest)
-* **`DsConstants`** — public constants like `GEQ_BAND_GAIN_RANGE = {-36, +36}`
+- **`DsConstants`** — public constants like `GEQ_BAND_GAIN_RANGE = {-36, +36}`
   (in floating-point dB), `IEQ_PRESETS_NUMBER = 4`, `PROFILES_NUMBER = 6`.
-* **`DsCommon`** — message codes, action strings for widget intents,
+- **`DsCommon`** — message codes, action strings for widget intents,
   the `IEQ_PRESET_NAMES` and `GEQ_NAMES_XML` lookup tables.
 
 The threading rule for `DsClient` is strict: callbacks arrive on the
@@ -158,14 +158,14 @@ hold onto memory the UI thread is about to read.
 The UI is built around fragments. Each fragment owns one slice of the
 control surface and talks to the service via `DsClient` only.
 
-| Fragment | Owns | Talks to |
-|----------|------|----------|
-| `FragPower` | The big DD logo / power button | `DsClient.setDsOn` |
-| `FragProfilePresets` | The 6-button profile picker | `DsClient.setSelectedProfile` |
-| `FragProfilePresetEditor` | Custom-profile rename UI | `DsClient.setProfileName` |
-| `FragSwitches` | The three master toggles (Volume Leveler, Dialog Enhancer, Surround Virtualizer) | `DsClient.setProfileSettings(profile, DsClientSettings)` |
-| `FragGraphicVisualizer` | The visualizer + EQ panel + IEQ preset grid | `DsClient.registerVisualizer`, `setIeqPreset`, `setGeq` |
-| `FragEqualizerPresets` | (Mobile layout only) The IEQ preset list | `DsClient.setIeqPreset` |
+| Fragment                  | Owns                                                                             | Talks to                                                 |
+| ------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `FragPower`               | The big DD logo / power button                                                   | `DsClient.setDsOn`                                       |
+| `FragProfilePresets`      | The 6-button profile picker                                                      | `DsClient.setSelectedProfile`                            |
+| `FragProfilePresetEditor` | Custom-profile rename UI                                                         | `DsClient.setProfileName`                                |
+| `FragSwitches`            | The three master toggles (Volume Leveler, Dialog Enhancer, Surround Virtualizer) | `DsClient.setProfileSettings(profile, DsClientSettings)` |
+| `FragGraphicVisualizer`   | The visualizer + EQ panel + IEQ preset grid                                      | `DsClient.registerVisualizer`, `setIeqPreset`, `setGeq`  |
+| `FragEqualizerPresets`    | (Mobile layout only) The IEQ preset list                                         | `DsClient.setIeqPreset`                                  |
 
 The `MainActivity` is the top-level glue. It binds the service, holds
 the `DsClient`, implements the various `IDsFrag…Observer` interfaces,
@@ -182,13 +182,13 @@ explicitly.
 
 The actual visualizer is split between two custom classes:
 
-* **`GraphicVisualiser`** — a `SurfaceView` running its own
+- **`GraphicVisualiser`** — a `SurfaceView` running its own
   `HandlerThread "VisPaint"` (priority −4). Holds two pre-allocated
   `float[20]` arrays (`mGainsUi[]`, `mGainsUserSmoothed[]`) which the
   two painters share.
-* **`GraphicVisualiserPainter`** — draws the spectrum bars (red /
+- **`GraphicVisualiserPainter`** — draws the spectrum bars (red /
   yellow / blue) reading from `mExcitations[20]`.
-* **`GraphicEqualizerPainter`** — draws the EQ curve overlay and the
+- **`GraphicEqualizerPainter`** — draws the EQ curve overlay and the
   per-band slider thumbs, and handles touch input for editing the
   curve. Maintains its own `mEventQueue` of touch events drained by
   the 60 ms `mRecalcPositions` runnable, applies a smoother kernel
@@ -200,15 +200,15 @@ runnable so that the spectrum bars and the EQ curve composit correctly.
 
 ## Threading model summary
 
-| Thread | Owner | What runs on it |
-|--------|-------|-----------------|
-| UI / main | UI process | Fragment lifecycle, all `View` methods, `DsClientCache` lookups |
-| Binder pool | Service process | All AIDL handlers, the callback `RemoteCallbackList` broadcasts |
-| `"visualiser thread"` (HandlerThread) | Service process | The 50 ms polling loop calling `Ds.getVisualizerData` |
-| `mHandler` of `DsService` | Service process | Posts `Message` objects from the visualizer thread back to the binder pool for callback broadcast |
-| `DsClient.handler_` | UI process | Marshals incoming `IDsServiceCallbacks` calls onto the UI thread before invoking the listener |
-| `"VisPaint"` (HandlerThread) | UI process | Locks the `SurfaceHolder` canvas, runs `GraphicVisualiserPainter.onDraw` then `GraphicEqualizerPainter.onDraw` |
-| `DS1Application.HANDLER` (main looper) | UI process | Hosts the 60 ms `mRecalcPositions` (touch event drain + smoother + push to engine) and the 5 second hide-EQ-overlay action |
+| Thread                                 | Owner           | What runs on it                                                                                                            |
+| -------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| UI / main                              | UI process      | Fragment lifecycle, all `View` methods, `DsClientCache` lookups                                                            |
+| Binder pool                            | Service process | All AIDL handlers, the callback `RemoteCallbackList` broadcasts                                                            |
+| `"visualiser thread"` (HandlerThread)  | Service process | The 50 ms polling loop calling `Ds.getVisualizerData`                                                                      |
+| `mHandler` of `DsService`              | Service process | Posts `Message` objects from the visualizer thread back to the binder pool for callback broadcast                          |
+| `DsClient.handler_`                    | UI process      | Marshals incoming `IDsServiceCallbacks` calls onto the UI thread before invoking the listener                              |
+| `"VisPaint"` (HandlerThread)           | UI process      | Locks the `SurfaceHolder` canvas, runs `GraphicVisualiserPainter.onDraw` then `GraphicEqualizerPainter.onDraw`             |
+| `DS1Application.HANDLER` (main looper) | UI process      | Hosts the 60 ms `mRecalcPositions` (touch event drain + smoother + push to engine) and the 5 second hide-EQ-overlay action |
 
 The two-process boundary (UI process ↔ service process) is crossed only
 via the AIDL binder. Everything else stays within its process.

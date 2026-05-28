@@ -47,10 +47,10 @@ minimal.
   audiodg.exe (LOCAL SERVICE) cannot access (error 10013). Named pipes bypass
   Winsock via the kernel filesystem stack. Therefore:
 
-  | Path                  | Windows                        | Linux / macOS                  |
-  |-----------------------|--------------------------------|--------------------------------|
-  | Plugin → daemon audio | Named pipe `\\.\pipe\DolbyX`   | AF_UNIX `/tmp/dolbyx.sock`     |
-  | Browser → daemon ctrl | HTTP/WS `localhost:9876`       | HTTP/WS `localhost:9876`       |
+  | Path                  | Windows                      | Linux / macOS              |
+  | --------------------- | ---------------------------- | -------------------------- |
+  | Plugin → daemon audio | Named pipe `\\.\pipe\DolbyX` | AF_UNIX `/tmp/dolbyx.sock` |
+  | Browser → daemon ctrl | HTTP/WS `localhost:9876`     | HTTP/WS `localhost:9876`   |
 
 - The Web UI is served by the daemon over HTTP + WebSocket on `localhost:9876`.
   The daemon logs a clickable URL on startup; it does not auto-launch the
@@ -64,7 +64,7 @@ minimal.
   AudioServerPlugin (HAL).
 
   | Platform | Mechanism                                                |
-  |----------|----------------------------------------------------------|
+  | -------- | -------------------------------------------------------- |
   | Windows  | Windows Service (`sc create`, runs as `LOCAL SERVICE`)   |
   | Linux    | systemd system service (`systemd.services`)              |
   | macOS    | LaunchDaemon (`/Library/LaunchDaemons/com.dolbyx.plist`) |
@@ -72,10 +72,10 @@ minimal.
 - Config format is **TOML**, parsed with `tomlc17` (single `.c` + `.h`, C99,
   maintained successor to `tomlc99`). System-level paths:
 
-  | Platform | Path                                         |
-  |----------|----------------------------------------------|
-  | Windows  | `C:\ProgramData\DolbyX\config.toml`          |
-  | Linux    | `/var/lib/dolbyx/config.toml`                |
+  | Platform | Path                                              |
+  | -------- | ------------------------------------------------- |
+  | Windows  | `C:\ProgramData\DolbyX\config.toml`               |
+  | Linux    | `/var/lib/dolbyx/config.toml`                     |
   | macOS    | `/Library/Application Support/DolbyX/config.toml` |
 
   The daemon owns all reads and writes. Plugins never touch the config directly.
@@ -134,6 +134,7 @@ Dolby cyan accent. The UI works in offline mode: once loaded, WebSocket auto-rec
 on daemon restart without requiring a page refresh.
 
 **macOS-specific controls** (absent on Windows and Linux):
+
 - Output device selector (populated from daemon CoreAudio enumeration)
 - Button to set DolbyX as system default output (opt-in, not automatic)
 - Checkbox for automatic output switching on device plug/unplug (off by default)
@@ -146,6 +147,7 @@ PipeWire respectively — no device controls needed.
 The visualizer is a single `<svg>` with layered `<g>` groups:
 
 **`<defs>` block:**
+
 - `<radialGradient id="bg-gradient">` — dark navy center blooming to near-black
 - `<pattern id="grid">` — repeating horizontal + vertical lines. Bar widths are
   integer multiples of the grid cell so bars snap naturally
@@ -153,6 +155,7 @@ The visualizer is a single `<svg>` with layered `<g>` groups:
   closed region above the curve for highlight clipping
 
 **`<g>` layer stack (bottom to top):**
+
 1. `background` — gradient rect + grid rect
 2. `spectrum` — dim semi-transparent teal `<rect>` per band, heights updated at
    ~30fps from WebSocket visualizer data
@@ -197,6 +200,7 @@ Audio processing continues over named pipe as before.
 ## 4. Linux / NixOS: LV2 Plugin + PipeWire
 
 `libdolbyx.lv2` — minimal LV2 plugin:
+
 - `lv2:AudioPort` stereo in/out
 - Connects to daemon via AF_UNIX socket at `/tmp/dolbyx.sock`
 - Forwards audio buffers, returns processed audio
@@ -220,6 +224,7 @@ On Linux, the daemon spawns `qemu-arm-static` directly (no WSL needed).
 ```
 
 Declares:
+
 - PipeWire filter-chain config via `services.pipewire.extraConfig`
 - `dolbyx` as `systemd.services` (system-level) with `Restart = always`
 
@@ -234,6 +239,7 @@ Unicorn Engine uses the same TCG JIT backend as QEMU but provides a bare
 CPU emulator API with no OS dependency.
 
 Implementation:
+
 - Custom ELF loader (parse libdseffect.so sections, map into Unicorn memory)
 - ARM stub resolver (hook android:: imports to our C++ stubs)
 - EffectCreate / Effect_process invocation via Unicorn API
@@ -248,6 +254,7 @@ and enables a future standalone single-DLL VST.
 
 `DolbyX.driver` — macOS AudioServerPlugin virtual audio device, using libASPL
 or BGMDriver as reference:
+
 - Appears as stereo output in CoreAudio
 - Does NOT set itself as system default automatically (opt-in via Web UI)
 - Captures audio → forwards to daemon via AF_UNIX → returns processed audio
@@ -349,6 +356,7 @@ DolbyX/
 ## Phased Implementation
 
 ### Phase 0: Repo Restructure
+
 **Dependencies:** None
 **Effort:** 1 session
 
@@ -361,6 +369,7 @@ DolbyX/
 - Everything still builds and works after restructure
 
 ### Phase 1: Daemon HTTP + WebSocket Server
+
 **Dependencies:** Phase 0
 **Effort:** 2 sessions
 
@@ -374,6 +383,7 @@ DolbyX/
 - TOML config persistence (tomlc17)
 
 ### Phase 2: Web UI — Core Controls
+
 **Dependencies:** Phase 1
 **Effort:** 2-3 sessions
 
@@ -388,6 +398,7 @@ DolbyX/
 - esbuild → xxd → embedded C header build pipeline
 
 ### Phase 3: Web UI — Visualizer + EQ
+
 **Dependencies:** Phase 2
 **Effort:** 2-3 sessions
 
@@ -402,6 +413,7 @@ DolbyX/
 - Real-time graphic EQ updates via WebSocket
 
 ### Phase 4: VST Simplification
+
 **Dependencies:** Phase 2
 **Effort:** 1 session
 
@@ -413,6 +425,7 @@ DolbyX/
 - Update setup scripts and README
 
 ### Phase 5: Linux / NixOS
+
 **Dependencies:** Phase 1
 **Effort:** 2-3 sessions
 
@@ -424,6 +437,7 @@ DolbyX/
 - Test: `nixos-rebuild switch` → DolbyX active system-wide
 
 ### Phase 6: Unicorn Engine
+
 **Dependencies:** Phase 1
 **Effort:** 3-5 sessions
 
@@ -435,6 +449,7 @@ DolbyX/
 - Packaged as library for daemon on all platforms
 
 ### Phase 7: macOS
+
 **Dependencies:** Phase 6 + Phase 1
 **Effort:** 3-5 sessions
 
@@ -465,8 +480,8 @@ Phases 2-5 can partially overlap. Phase 6 fully blocks Phase 7.
 
 ## Release Plan
 
-| Version | Milestone | Phases |
-|---------|-----------|--------|
-| v2.0 | Windows + Web UI | 0, 1, 2, 3, 4 |
-| v2.1 | Linux / NixOS | 5 |
-| v3.0 | macOS | 6, 7 |
+| Version | Milestone        | Phases        |
+| ------- | ---------------- | ------------- |
+| v2.0    | Windows + Web UI | 0, 1, 2, 3, 4 |
+| v2.1    | Linux / NixOS    | 5             |
+| v3.0    | macOS            | 6, 7          |

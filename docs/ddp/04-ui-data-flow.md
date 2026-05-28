@@ -18,78 +18,78 @@ list grouped by purpose:
 
 ### Master state
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 1 | `setDsOn(handle, on)` | Master on/off — calls `AudioEffect.setEnabled` |
-| 2 | `getDsOn()` | Read master state |
-| 3 | `setNonPersistentMode(on)` | When true, suppresses `saveDsStateAndSettings` calls |
+| #   | Method                     | Purpose                                              |
+| --- | -------------------------- | ---------------------------------------------------- |
+| 1   | `setDsOn(handle, on)`      | Master on/off — calls `AudioEffect.setEnabled`       |
+| 2   | `getDsOn()`                | Read master state                                    |
+| 3   | `setNonPersistentMode(on)` | When true, suppresses `saveDsStateAndSettings` calls |
 
 ### Profile management
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 4 | `getProfileCount()` | Always returns 6 |
-| 5 | `getProfileNames()` | Returns the 6 display names from `currentProfiles_` |
-| 8 | `setSelectedProfile(handle, profile)` | Switches the active profile (issues command 2 internally) |
-| 9 | `getSelectedProfile()` | Read current profile index |
-| 13 | `setProfileName(handle, profile, name)` | Renames a custom profile |
-| 11 | `getProfileSettings(profile, out_DsClientSettings)` | Read the 5-bit digest for one profile |
-| 10 | `setProfileSettings(handle, profile, DsClientSettings)` | Diff against the current digest, push changed bits via command 3 |
-| 12 | `resetProfile(handle, profile)` | Restores `currentProfiles_[profile]` from `defaultProfiles_[profile]` |
-| 19 | `getProfileModified(profile, out_bitmap)` | Returns bit 0 = settings modified, bit 1 = name modified |
+| #   | Method                                                  | Purpose                                                               |
+| --- | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| 4   | `getProfileCount()`                                     | Always returns 6                                                      |
+| 5   | `getProfileNames()`                                     | Returns the 6 display names from `currentProfiles_`                   |
+| 8   | `setSelectedProfile(handle, profile)`                   | Switches the active profile (issues command 2 internally)             |
+| 9   | `getSelectedProfile()`                                  | Read current profile index                                            |
+| 13  | `setProfileName(handle, profile, name)`                 | Renames a custom profile                                              |
+| 11  | `getProfileSettings(profile, out_DsClientSettings)`     | Read the 5-bit digest for one profile                                 |
+| 10  | `setProfileSettings(handle, profile, DsClientSettings)` | Diff against the current digest, push changed bits via command 3      |
+| 12  | `resetProfile(handle, profile)`                         | Restores `currentProfiles_[profile]` from `defaultProfiles_[profile]` |
+| 19  | `getProfileModified(profile, out_bitmap)`               | Returns bit 0 = settings modified, bit 1 = name modified              |
 
 ### Equalizer (IEQ + GEQ)
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 17 | `setIeqPreset(handle, profile, preset)` | Switches IEQ preset, reloads stored GEQ for `(profile, preset)`, pushes via command 2 |
-| 18 | `getIeqPreset(profile, out_int)` | Read the current preset (0=Off, 1=Open, 2=Rich, 3=Focused) |
-| 20 | `setGeq(handle, profile, preset, float[20])` | Stores the gains in `geqBandGains_[preset]`, pushes via command 3 if `selectedProfile_ == profile` |
-| 21 | `getGeq(profile, preset, float[20])` | Read stored gains, divided by 16 to dB |
-| 6 | `getBandCount(out_int)` | Returns `genb` (= 20) |
-| 7 | `getBandFrequencies(out_int[20])` | Returns `gebf` |
+| #   | Method                                       | Purpose                                                                                            |
+| --- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 17  | `setIeqPreset(handle, profile, preset)`      | Switches IEQ preset, reloads stored GEQ for `(profile, preset)`, pushes via command 2              |
+| 18  | `getIeqPreset(profile, out_int)`             | Read the current preset (0=Off, 1=Open, 2=Rich, 3=Focused)                                         |
+| 20  | `setGeq(handle, profile, preset, float[20])` | Stores the gains in `geqBandGains_[preset]`, pushes via command 3 if `selectedProfile_ == profile` |
+| 21  | `getGeq(profile, preset, float[20])`         | Read stored gains, divided by 16 to dB                                                             |
+| 6   | `getBandCount(out_int)`                      | Returns `genb` (= 20)                                                                              |
+| 7   | `getBandFrequencies(out_int[20])`            | Returns `gebf`                                                                                     |
 
 ### Generic AK access
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 22 | `setDsApParam(handle, "iea", int[1])` | Set any non-`gebg` settable param. Pushes via command 3. |
-| 23 | `getDsApParam("dvla", out_int[1])` | Read any settable param's stored value |
-| 24 | `getDsApParamLength("aobg", out_int[1])` | Returns the param's array length |
+| #   | Method                                   | Purpose                                                  |
+| --- | ---------------------------------------- | -------------------------------------------------------- |
+| 22  | `setDsApParam(handle, "iea", int[1])`    | Set any non-`gebg` settable param. Pushes via command 3. |
+| 23  | `getDsApParam("dvla", out_int[1])`       | Read any settable param's stored value                   |
+| 24  | `getDsApParamLength("aobg", out_int[1])` | Returns the param's array length                         |
 
 ### Misc
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 14 | `getDsApVersion(out_String[1])` | Returns the engine version |
-| 16 | `getDsVersion(out_String[1])` | Returns the service-side version string |
-| 15 | `getMonoSpeaker(out_bool[1])` | Hardware probe for mono-speaker devices |
+| #   | Method                          | Purpose                                 |
+| --- | ------------------------------- | --------------------------------------- |
+| 14  | `getDsApVersion(out_String[1])` | Returns the engine version              |
+| 16  | `getDsVersion(out_String[1])`   | Returns the service-side version string |
+| 15  | `getMonoSpeaker(out_bool[1])`   | Hardware probe for mono-speaker devices |
 
 ### Subscription
 
-| # | Method | Purpose |
-|---|--------|---------|
-| 27 | `registerCallback(IDsServiceCallbacks, handle)` | Subscribe to general events |
-| 28 | `unregisterCallback(IDsServiceCallbacks)` | Unsubscribe — also triggers `saveDsStateAndSettings` |
-| 25 | `registerDsApParamEvents(handle)` | Subscribe to `onDsApParamChange` for non-basic AK params |
-| 26 | `unregisterDsApParamEvents(handle)` | |
-| 29 | `registerVisualizerData(handle)` | Start the visualizer pump (if first subscriber) |
-| 30 | `unregisterVisualizerData(handle)` | Stop the visualizer pump (if last subscriber) |
+| #   | Method                                          | Purpose                                                  |
+| --- | ----------------------------------------------- | -------------------------------------------------------- |
+| 27  | `registerCallback(IDsServiceCallbacks, handle)` | Subscribe to general events                              |
+| 28  | `unregisterCallback(IDsServiceCallbacks)`       | Unsubscribe — also triggers `saveDsStateAndSettings`     |
+| 25  | `registerDsApParamEvents(handle)`               | Subscribe to `onDsApParamChange` for non-basic AK params |
+| 26  | `unregisterDsApParamEvents(handle)`             |                                                          |
+| 29  | `registerVisualizerData(handle)`                | Start the visualizer pump (if first subscriber)          |
+| 30  | `unregisterVisualizerData(handle)`              | Stop the visualizer pump (if last subscriber)            |
 
 ## The 8 callback events
 
 `IDsServiceCallbacks` (descriptor `android.dolby.IDsServiceCallbacks`):
 
-| # | Method | When it fires |
-|---|--------|---------------|
-| 1 | `onDsOn(boolean)` | Master state changed by another client |
-| 2 | `onProfileSelected(int)` | Active profile changed by another client |
-| 3 | `onProfileSettingsChanged(int profile)` | One of the 5 basic toggles changed for some profile |
-| 4 | `onProfileNameChanged(int, String)` | A custom profile got renamed |
-| 5 | `onVisualizerUpdated(float[20] gains, float[20] excitations)` | Every 50 ms while subscribed |
-| 6 | `onVisualizerSuspended(boolean)` | Audio stream silent for `COUNTER_THRESHOLD` ticks |
-| 7 | `onEqSettingsChanged(int profile, int preset)` | IEQ preset switched OR GEQ written by another client |
-| 8 | `onDsApParamChange(int profile, String paramName)` | Non-basic AK param changed by another client |
+| #   | Method                                                        | When it fires                                        |
+| --- | ------------------------------------------------------------- | ---------------------------------------------------- |
+| 1   | `onDsOn(boolean)`                                             | Master state changed by another client               |
+| 2   | `onProfileSelected(int)`                                      | Active profile changed by another client             |
+| 3   | `onProfileSettingsChanged(int profile)`                       | One of the 5 basic toggles changed for some profile  |
+| 4   | `onProfileNameChanged(int, String)`                           | A custom profile got renamed                         |
+| 5   | `onVisualizerUpdated(float[20] gains, float[20] excitations)` | Every 50 ms while subscribed                         |
+| 6   | `onVisualizerSuspended(boolean)`                              | Audio stream silent for `COUNTER_THRESHOLD` ticks    |
+| 7   | `onEqSettingsChanged(int profile, int preset)`                | IEQ preset switched OR GEQ written by another client |
+| 8   | `onDsApParamChange(int profile, String paramName)`            | Non-basic AK param changed by another client         |
 
 The two callback lists (general + DS-AP-param) exist for a small
 optimization: a UI that only cares about visualizer + master on/off
@@ -230,16 +230,16 @@ User drags a band on the visualizer. The sequence:
 
 Two important details:
 
-* The engine is updated at most every 60 ms during a drag. This is
+- The engine is updated at most every 60 ms during a drag. This is
   intentional: faster than that and the engine's command processing
   would saturate.
-* The engine is updated with **the smoothed curve**, not the raw
+- The engine is updated with **the smoothed curve**, not the raw
   pointer-position curve. The smoothing is what makes the curve look
   nice between adjacent slider thumbs (otherwise you'd get sharp
   zig-zags). The inverse-smoother matrix `GAIN_SMOOTHER_INV` is used
   in the opposite direction when the IEQ preset changes — given the
   stored `gebg` curve, compute what `mUserGainsTemp` would have to be
-  to *produce* that curve, so that subsequent touches behave
+  to _produce_ that curve, so that subsequent touches behave
   consistently.
 
 ### Example 3 — switching IEQ preset
@@ -407,10 +407,10 @@ indexing where 0 = Off). "Custom" is just the UI-side state of "the
 user has been editing the EQ manually" — it's not a separate preset
 in the engine. When Custom is selected:
 
-* `ieon` is set to 0 (turning off the IEQ amount-applied-to-target
+- `ieon` is set to 0 (turning off the IEQ amount-applied-to-target
   behaviour).
-* `geon` is set to 1 (turning on the GEQ).
-* The currently-displayed GEQ curve is whatever the user last drew.
+- `geon` is set to 1 (turning on the GEQ).
+- The currently-displayed GEQ curve is whatever the user last drew.
 
 When the user picks Open / Rich / Focused, the previous Custom curve
 for that profile is discarded — the engine reloads the stored
@@ -424,16 +424,16 @@ That's the matrix DolbyX needs to mirror.
 
 ## Summary cheat-sheet
 
-| User action | UI method | AIDL call | Engine command |
-|-------------|-----------|-----------|----------------|
-| Toggle master | `FragPower.onClick` | `setDsOn` | `EFFECT_CMD_ENABLE / DISABLE` (graceful crossfade — see below) |
-| Pick profile | `FragProfilePresets.onClick` | `setSelectedProfile` | command 2 |
-| Toggle a switch (VL/DE/SV) | `FragSwitches.onClick` | `setProfileSettings` (with diff) | command 3 (one or more times) |
-| Pick IEQ preset | `EqualizerAdapter.onTouch` | `setIeqPreset` | command 2 |
-| Drag EQ band | `GraphicEqualizerPainter.onTouchEvent` | `setGeq` (debounced 60 ms) | command 3 (gebg, 20 values) |
-| Pick "Custom" cell | `FragGraphicVisualizer.onClick equalizerCustom` | `setIeqPreset(0)` then `setGeq` after edits | as above |
-| Reset profile | `FragProfilePresetEditor.reset` | `resetProfile` | command 2 (with default values) |
-| Rename custom profile | `FragProfilePresetEditor.save` | `setProfileName` | (no engine update — just metadata) |
+| User action                | UI method                                       | AIDL call                                   | Engine command                                                 |
+| -------------------------- | ----------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| Toggle master              | `FragPower.onClick`                             | `setDsOn`                                   | `EFFECT_CMD_ENABLE / DISABLE` (graceful crossfade — see below) |
+| Pick profile               | `FragProfilePresets.onClick`                    | `setSelectedProfile`                        | command 2                                                      |
+| Toggle a switch (VL/DE/SV) | `FragSwitches.onClick`                          | `setProfileSettings` (with diff)            | command 3 (one or more times)                                  |
+| Pick IEQ preset            | `EqualizerAdapter.onTouch`                      | `setIeqPreset`                              | command 2                                                      |
+| Drag EQ band               | `GraphicEqualizerPainter.onTouchEvent`          | `setGeq` (debounced 60 ms)                  | command 3 (gebg, 20 values)                                    |
+| Pick "Custom" cell         | `FragGraphicVisualizer.onClick equalizerCustom` | `setIeqPreset(0)` then `setGeq` after edits | as above                                                       |
+| Reset profile              | `FragProfilePresetEditor.reset`                 | `resetProfile`                              | command 2 (with default values)                                |
+| Rename custom profile      | `FragProfilePresetEditor.save`                  | `setProfileName`                            | (no engine update — just metadata)                             |
 
 ### Master toggle semantics
 

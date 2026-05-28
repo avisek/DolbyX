@@ -7,6 +7,7 @@ emulation with zero quality compromise.
 ## What Does It Sound Like?
 
 DolbyX processes audio through a 28-node filterbank DSP pipeline:
+
 - **Spatial audio** — HRTF-based headphone virtualizer with crossfeed
 - **Intelligent EQ** — content-adaptive spectral shaping
 - **Surround upmix** — stereo/mono → virtual 5.1/7.1
@@ -16,6 +17,7 @@ DolbyX processes audio through a 28-node filterbank DSP pipeline:
 ## Quick Start (Windows)
 
 ### Prerequisites
+
 - Windows 10/11 with [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) + Ubuntu
 - [EqualizerAPO](https://sourceforge.net/projects/equalizerapo/) installed
 
@@ -33,9 +35,11 @@ cp windows/vst/DolbyDDP.dll "/mnt/c/Program Files/EqualizerAPO/VSTPlugins/"
 ### Usage
 
 **Step 1:** Start the daemon (keep terminal open):
+
 ```bash
 cd /mnt/c && ~/DolbyX/daemon/dolbyx.exe /home/$USER/DolbyX/arm
 ```
+
 Or double-click `scripts/start-dolbyx.bat` from Windows Explorer.
 
 **Step 2:** In EqualizerAPO Configuration Editor, add DolbyDDP as a VST plugin.
@@ -87,20 +91,20 @@ DolbyX/
 
 ## Performance
 
-| Metric | Value |
-|--------|-------|
-| Offline processing | 12× realtime |
-| Real-time latency | ~10ms perceived |
-| Sample rates | 32000, 44100, **48000** Hz (native) |
+| Metric             | Value                               |
+| ------------------ | ----------------------------------- |
+| Offline processing | 12× realtime                        |
+| Real-time latency  | ~10ms perceived                     |
+| Sample rates       | 32000, 44100, **48000** Hz (native) |
 
 ## Roadmap
 
-| Version | Platform | Status |
-|---------|----------|--------|
-| v1.x | Windows (EqualizerAPO + WSL2) | ✅ Working |
-| v2.0 | Windows + Web UI | In progress |
-| v2.1 | Linux / NixOS (PipeWire) | Planned |
-| v3.0 | macOS (AudioServerPlugin) | Planned |
+| Version | Platform                      | Status      |
+| ------- | ----------------------------- | ----------- |
+| v1.x    | Windows (EqualizerAPO + WSL2) | ✅ Working  |
+| v2.0    | Windows + Web UI              | In progress |
+| v2.1    | Linux / NixOS (PipeWire)      | Planned     |
+| v3.0    | macOS (AudioServerPlugin)     | Planned     |
 
 See [docs/CROSS_PLATFORM_PLAN.md](docs/CROSS_PLATFORM_PLAN.md) for the full plan.
 
