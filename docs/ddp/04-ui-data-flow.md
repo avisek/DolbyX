@@ -5,6 +5,11 @@ finger down to `libdseffect.so` and back. It also describes the
 visualizer pump and the equalizer paint loop — the two hot loops that
 have to keep running smoothly without blocking the UI.
 
+Rendered reference for the look-and-feel target is in
+[`../ui-reference/`](../ui-reference/) — profile picker, per-profile
+detail page (Manual GEQ + Intelligent EQ modes), and a zoomed
+visualizer+EQ overlay crop.
+
 ## The AIDL contract
 
 The interface descriptor is `android.dolby.IDs`. Defined in
@@ -281,6 +286,11 @@ perspective.
 
 ## Visualizer rendering
 
+See [`../ui-reference/original-ui-visualizer-eq-overlay.png`](../ui-reference/original-ui-visualizer-eq-overlay.png)
+for the rendered output, and
+[`../ui-reference/original-ui-music-profile-manual-geq.png`](../ui-reference/original-ui-music-profile-manual-geq.png)
+for how it sits in the profile detail page.
+
 The visualizer panel shows two things composited:
 
 1. **Spectrum bars** — 20 bars × 48 vertical "rows", each row 1 dB
@@ -416,7 +426,7 @@ That's the matrix DolbyX needs to mirror.
 
 | User action | UI method | AIDL call | Engine command |
 |-------------|-----------|-----------|----------------|
-| Toggle master | `FragPower.onClick` | `setDsOn` | `EFFECT_CMD_ENABLE / DISABLE` |
+| Toggle master | `FragPower.onClick` | `setDsOn` | `EFFECT_CMD_ENABLE / DISABLE` (graceful crossfade — see below) |
 | Pick profile | `FragProfilePresets.onClick` | `setSelectedProfile` | command 2 |
 | Toggle a switch (VL/DE/SV) | `FragSwitches.onClick` | `setProfileSettings` (with diff) | command 3 (one or more times) |
 | Pick IEQ preset | `EqualizerAdapter.onTouch` | `setIeqPreset` | command 2 |
@@ -424,3 +434,19 @@ That's the matrix DolbyX needs to mirror.
 | Pick "Custom" cell | `FragGraphicVisualizer.onClick equalizerCustom` | `setIeqPreset(0)` then `setGeq` after edits | as above |
 | Reset profile | `FragProfilePresetEditor.reset` | `resetProfile` | command 2 (with default values) |
 | Rename custom profile | `FragProfilePresetEditor.save` | `setProfileName` | (no engine update — just metadata) |
+
+### Master toggle semantics
+
+The "Toggle master" row is more subtle than the others: the engine
+performs an internal **graceful crossfade** on both commands —
+**ENABLE over 7560 samples (~171 ms at 44.1 kHz)** and **DISABLE over
+5512 samples (~125 ms)** — and both commands are **idempotent**
+(second invocation in a row logs `Already enabled/disabled, ignoring`
+and returns reply 0). Parameter state survives the cycle: the cache
+and the AK registry are not touched, so re-enabling resumes
+processing with whatever settings the host had pushed before.
+
+See [05-profiles-and-persistence.md → "What 'OFF' means"](05-profiles-and-persistence.md#what-off-means-in-the-original-ddp)
+for the full empirical picture, and
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) section 6 for
+the engine logs that demonstrate this.

@@ -22,19 +22,28 @@ version of that array with explanatory annotations.
   `aobg` row below; the runtime length is rewritten by
   `setConstantAkParam("aonb", …)` to `(aonb + 1) × aocc` (= 42 for the
   standard 20-band stereo config).
-- **bounds**: clamped at `DsAkSettings.set` time. Values outside the
-  range are silently clamped, not rejected.
+- **bounds**: clamped at `DsAkSettings.set` time
+  (`Ds.apk/.../DsAkSettings.java:278-326`). Values outside the range
+  are silently clamped, not rejected. **The engine itself does NOT
+  clamp or validate values** — direct probe evidence in
+  [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 110
+  into `dvla` (range 0..10) produces an engine log line
+  `settingsCache[...] updated with value 110` (verbatim, no clamp);
+  the DSP then reads the raw 110 and produces correspondingly
+  out-of-spec output. Clamping is exclusively a Java-side concern;
+  any non-Java host that wants safety must validate before forwarding
+  to the engine.
 - **dB scaling**: most dB-valued parameters are stored as
   `int16 = round(dB × 16)`. So a +6 dB setting is stored as `+96`.
   This 1/16 dB resolution applies uniformly to gains, leveler targets,
   visualizer outputs, and more — see `DsProfileSettings.DB_SCALING_FACTOR`.
 - **settable**: whether the parameter is exposed for writes via the
   Java AIDL API (`setSingleSetting` / `setProfileSettings` /
-  `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **Note:
-  this is a Java-side whitelist, not an engine-level constraint.** The
-  native `_akSet` in `libdseffect.so` accepts writes to any declared
-  parameter index; whether the engine actually uses the value depends
-  on the parameter's role (see the "Rule of thumb" at the end).
+  `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **This is a
+  Java-side UI whitelist, not an engine-level constraint** — see the
+  ["Engine vs Java settability" section](#engine-vs-java-settability)
+  near the end of this document for the empirical detail. The engine's
+  `_akSet` accepts writes to any declared parameter index.
 - **basic**: whether the parameter is one of the 5 booleans digested
   into `DsClientSettings`. Setting a basic param fires
   `onProfileSettingsChanged`; setting a non-basic settable param fires
@@ -296,8 +305,10 @@ detailed sequence in
 
 ## Per-parameter visualization dimensions
 
-For UI widgets, here are the natural ranges to expose. These are
-pre-clamp; the engine will silently clamp anything outside them:
+For UI widgets, here are the natural ranges to expose. These are the
+ranges to enforce **on the host side** before forwarding to the
+engine — the engine itself never clamps (see "Conventions / bounds"
+above):
 
 | Parameter group                               | UI control                                             | Range to expose                                                                        |
 | --------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
@@ -319,26 +330,102 @@ pre-clamp; the engine will silently clamp anything outside them:
 | `aobg[i]`                                     | `aonb` × `aocc` per-channel sliders (typically 20 × 2) | -30 to +30 dB (×16 → -480..480); see the `aobg` row for the channel-id-prefixed layout |
 | `aobf[i]`, `arbf[i]`, `gebf[i]`, `iebf[i]`    | Read-only labels                                       | The band centre frequencies                                                            |
 
-For the planned Advanced section in DolbyX, the rule of thumb is more
-nuanced than "settable=yes → editable, settable=no → diagnostic",
-because Java's `isParamSettable` is a UI whitelist and the engine's
-`_akSet` accepts writes to any declared parameter index. DolbyX
-classifies params into three buckets (see `docs/REARCHITECTURE_PLAN.md`
-Decision 3):
+## Engine vs Java settability
 
-- **Settable** — every param with `settable = yes` above. Engine
-  reads the slot → user writes take effect.
-- **ReadOnly** — engine fills the slot every audio block, or pure
-  static metadata: `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `vnnb`,
-  `vnbf`, `vnbg`, `vnbe`, `lcmf`, `lcvd`, `lcsz`, `lcpt`. Writes
-  have no effect.
-- **Experimental** — not exposed by original DDP, but the engine
-  treats the slot as a real DSP input: `preg`, `pstg`, `endp`, `mxou`,
-  `ocf`, `ven`, `vol`, `vcnb`, `vcbf`. DolbyX exposes them with an
-  "experimental" badge. (`vol` is the host volume hint the leveler
-  reads; `vcnb`/`vcbf` configure the custom-visualizer mode when
-  `ven` is `ON`. Evidence for the broader pattern: DolbyX's
-  `arm/ddp_processor.c` already writes `endp = 2` and `vcnb = 20`
-  via `setSingleSetting`; the libdseffect.so `preg` description
-  string says "this parameter should be set to reflect how much
-  gain has been applied".)
+The "settable" column above mirrors Java's `DsAkSettings.isParamSettable`
+whitelist (42 of the 64 names). That whitelist exists in the original
+DDP service for two reasons: (a) gating UI controls, and (b) deciding
+which params get a flat cache slot in DEFINE_SETTINGS. **It is not an
+engine-level constraint.**
+
+Empirically (see [tools/ddp_probe/](../../tools/ddp_probe/README.md)
+section 5b), if the host puts a "non-settable" param in
+DEFINE_SETTINGS and then issues a cmd 3 SET against it, the engine
+emits the same three log lines it emits for any settable write:
+
+```
+[EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE settingsCache[device:0 setting_index:N] updated with value V
+[EffectDs] ak_set(<param_idx>/<name>, 0) = V
+[EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE returned from ak_set()/ak_set_bulk()
+```
+
+This includes writes to `bver` (`ak_set(0/bver, 0) = 9999`), `bndl`,
+`ver` (`ak_set(37/ver, 0) = 4242`), `vcbg`, `vcbe`, `endp`
+(`ak_set(55/endp, 0) = 2`), `preg`, `pstg`, `mxou`, `ocf`, `vol`,
+`ven`, `vcnb`, `vnnb`, `lcsz`. The cache update + AK forward both
+fire.
+
+What differs across "non-settable" params is **whether the DSP uses
+the value afterwards**:
+
+| Bucket                                                                                                                                                                                                                             | DSP behaviour                                                                                                                                                 | Engine cache slot                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **Settable** (42 params)                                                                                                                                                                                                           | DSP reads the value and produces well-defined bounded behaviour                                                                                               | yes (Java includes them in DEFINE_SETTINGS) |
+| **ReadOnly-Dynamic** — `vcbg`, `vcbe` (directly observed via cmd 4); `vnnb`, `vnbf`, `vnbg`, `vnbe` (Dynamic classification inferred from naming symmetry — no host read path, so the per-block refresh isn't directly observable) | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered.                                                    | no in Java's setup; can be added by DolbyX  |
+| **ReadOnly-Static** — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`                                                                                                                                                        | Engine pre-populates the slot at DEFINE_SETTINGS time via internal `ak_get`; DSP doesn't subsequently read for processing. Only `ver` is reachable via cmd 6. | no in Java's setup                          |
+| **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`                                                                                                                                             | DSP reads them; behavior is well-defined. Original DDP UI hides them.                                                                                         | no in Java's setup; included by DolbyX v2   |
+
+The behavioral evidence that the DSP reads the raw int16 — even
+when out of range — is direct. The probe's section 7 sweeps `vmb`
+(declared range 0..240) over `{0, 120, 240, 480, -100}` with
+`vmon` on, producing peak/rms pairs `(1, 0.6)`, `(1, 0.7)`,
+`(16, 7.8)`, `(128, 89.6)`, `(21, 8.5)`. The in-range portion
+ramps as expected; `vmb=480` then jumps to ~10× the `vmb=240`
+output instead of clamping at the declared max, and `vmb=-100`
+produces a non-zero attenuated output instead of behaving like
+`vmb=0`. Both behaviours prove the engine reads the raw int16
+without internal clamping. A `dvla` sweep over
+`{0, 5, 10, 200, -100}` with the leveler enabled also varies the
+output, but the leveler's envelope-driven dynamics make the
+per-block measurement noisier — `vmb` is the cleaner evidence.
+(See [tools/ddp_probe/](../../tools/ddp_probe/README.md) section 7.)
+The forwarding behaviour proven in section 5b — every cmd 3 SET
+fires `ak_set(idx/name, offset) = V` regardless of bucket — means
+the same property applies to every Experimental param the host
+chooses to drive.
+
+### Cache pre-population at init
+
+A side benefit of including a param in DEFINE_SETTINGS is that the
+engine queries its own internal AK registry to seed the cache slot
+with the engine's startup value. The probe's `engine.log` shows
+one `ak_get(idx/name, offset)` line per slot. Collapsed by param
+(real log emits 5 separate lines for `bver`, etc.):
+
+```
+[EffectDs] ak_get(0/bver, 0..4)      ← 5 lines, one per offset
+[EffectDs] ak_get(1/bndl, 0..1)      ← 2 lines
+[EffectDs] ak_get(35/vcbg, 0..19)    ← initial visualizer gains, 20 lines
+[EffectDs] ak_get(36/vcbe, 0..19)    ← initial visualizer excitations, 20 lines
+[EffectDs] ak_get(37/ver, 0..3)      ← engine version, 4 lines
+[EffectDs] ak_get(55/endp, 0)        ← default endpoint, 1 line
+```
+
+These values then live in the cache. You can't read them back via
+cmd 3 GET (that command is unimplemented; see
+[03-binary-protocol.md](03-binary-protocol.md#cmd-3-get-unimplemented)),
+but they are there.
+
+## Recommendation for DolbyX v2
+
+The rearchitecture plan's Decision 3 takes the empirical evidence
+above and turns it into the same four-bucket classification:
+
+- **Settable** — every param with `settable = yes` above. Daemon
+  validates against metadata; engine accepts the forwarded write
+  into both the settings cache and AK registry.
+- **ReadOnly-Dynamic** — `vcbg`, `vcbe` (directly observed);
+  `vnnb`, `vnbf`, `vnbg`, `vnbe` (Dynamic classification inferred
+  from naming symmetry — no host read path). Writes have no
+  useful effect (DSP overwrites the slot every audio block for
+  the directly observed pair; the `vnb*` family follows by
+  inference). `vcbg`/`vcbe` are readable via cmd 4.
+- **ReadOnly-Static** — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+  `lcsz`, `lcpt`. Pre-populated at init. Only `ver` is reachable
+  (via cmd 6).
+- **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`,
+  `vol`, `vcnb`, `vcbf`. DSP reads them. Settable behind a UI badge.
+
+For v2, **the daemon should DEFINE_SETTINGS all 64 params** (costs
+~2 KB of cache) so every AK param has a slot and the cache
+pre-population side effect fires for everything.

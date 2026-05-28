@@ -3,8 +3,8 @@
 This document compares the current DolbyX implementation against the
 original DDP service, calls out every meaningful divergence, and
 proposes the minimal set of code changes to bring DolbyX to faithful
-parity. It also marks places where DolbyX should *intentionally
-diverge* (because the desktop context is different from Android), so
+parity. It also marks places where DolbyX should _intentionally
+diverge_ (because the desktop context is different from Android), so
 that "fix it" doesn't mean "blindly copy Android".
 
 The goal stated up front:
@@ -57,16 +57,33 @@ if (cmd == DDP_CMD_GET_VIS) {
 `{"type":"vis","bands":[…]}`. The UI's `visualizer.js:updateVisBars`
 quantizes them to grid cells and draws bars from them.
 
+### Engine-level evidence
+
+`ds1_get_array` issues a cmd 3 GET. The engine's
+`Effect_getParameter()` dispatcher has no case for cmd 3 — it falls
+through to the catch-all:
+
+```
+[EffectDs] Effect_getParameter() Invalid command 3. Returning -EINVAL(-22)
+```
+
+`ds1_get_array` checks `r == 0 && ep->status == 0` and returns -1
+when either fails (which is always, for cmd 3 GET). But the caller
+in `handle_command` for `DDP_CMD_GET_VIS` ignores the return code
+and ships the calloc'd zero buffer to the daemon. See
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) section 3 for
+the engine log evidence.
+
 ### Impact
 
-The "spectrum bars" the user sees in DolbyX are actually showing the
-**EQ curve** with no audio energy component. The bars don't react to
+The "spectrum bars" the user sees in DolbyX are showing **zeros**,
+not the EQ curve and not the audio energy. The bars don't react to
 music. There is no excitation data anywhere in the pipeline.
 
-The EQ curve is also redundantly transmitted: `setEqFromGains` already
-draws the EQ curve from the explicit `state.geq` array stored in
-`ProfileState`, so the `vis` channel would be more useful as the
-excitation source.
+The EQ curve is separately drawn from `state.geq` stored in
+`ProfileState`, so the curve overlay works correctly; only the
+spectrum-bar layer is broken. The fix below uses cmd 4 instead,
+which **is** implemented by the engine.
 
 ### Recommended fix
 
@@ -144,8 +161,7 @@ Update `ui/src/app.js` to wire `excitations` to the bars and `gains`
 to the EQ curve:
 
 ```js
-if (msg.type === 'vis' && msg.excitations)
-  updateVisBars(msg.excitations);   // was msg.bands
+if (msg.type === 'vis' && msg.excitations) updateVisBars(msg.excitations) // was msg.bands
 ```
 
 (Then `state.geq` from set_geq round-trips drives the EQ curve, and
@@ -158,22 +174,32 @@ curve is a UI-driven artifact — or used for verification.)
 
 ### What the original does
 
-Both `vcbg` and `vcbe` are registered in the parameter table and have
-flat-index slots in DEFINE_SETTINGS, so they can be queried via
-either command 3 or command 4.
+Both `vcbg` and `vcbe` are registered in the parameter table.
+Neither is in Java's `isParamSettable` whitelist, so neither has a
+flat-index slot in DEFINE_SETTINGS in the standard build. The
+original service reads them via **command 4** (`DS_PARAM_VISUALIZER_DATA`),
+which returns `vcbg||vcbe` as 40 int16s in one call without needing
+DEFINE_SETTINGS slots.
+
+### Engine-level evidence
+
+Cmd 3 GET is unimplemented in the engine — see the previous issue.
+The only working read paths are cmd 4 (visualizer) and cmd 6
+(version). So vcbe could never have been read via cmd 3 anyway; the
+old "either command 3 or command 4" framing was wrong.
 
 ### What DolbyX does today
 
 `arm/ddp_processor.c:g_param_names[]` contains `vcbg` at index 23 but
-**not** `vcbe`. So even if you fixed the visualizer pump to use command
-4 (which doesn't need DEFINE_SETTINGS slots — it's a separate
-addressed read path), you still couldn't fall back to `getDsApParam("vcbe")`
-because `vcbe` isn't in the list.
+**not** `vcbe`. The dictionary is incomplete but irrelevant for the
+visualizer pump — that needs to use cmd 4 (which doesn't reference
+the parameter dictionary at all).
 
 ### Impact
 
-Minor — command 4 doesn't need the DEFINE_SETTINGS slot. But it's a
-correctness issue that makes the parameter dictionary incomplete.
+Minor — command 4 doesn't need the DEFINE_SETTINGS slot or even a
+DEFINE_PARAMS entry. But the missing `vcbe` is a correctness issue
+for any future code that wants to use cmd 4's full 40-int16 return.
 
 ### Recommended fix
 
@@ -349,22 +375,63 @@ for (int i = 0; i < np; i++) {
 One entry per parameter, all at offset 0. So `gebg` gets 1 flat slot
 even though it has 20 elements.
 
+### Engine-level evidence
+
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) directly
+demonstrates the underlying primitive: a cmd 3 SET with
+`begin_setting_index=43, count=20` against `gebf` (which has 20
+allocated slots in the harness's all-64 DEFINE_SETTINGS) yields:
+
+```
+[EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE device:8 setting_index:43 length:20
+[EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE settingsCache[device:0 setting_index:43-62] updated with new values
+```
+
+The engine writes `count` sequential cache slots starting at
+`begin_setting_index`, with one validation only: `begin + count <=
+num_settings`. It has no concept of "param boundary". Section 8
+confirms the boundary check: a SET addressing `flat=767` against a
+667-slot cache returns `-22` with engine log `setting_index 767 is
+invalid (number of settings defined is 667)`.
+
+In the DolbyX v1 compressed layout each multi-element parameter
+occupies a single flat slot, so `num_settings = 24` and `gebg` sits
+at flat index 21. A `count=20` SET against `gebg` therefore
+addresses slots 21..40 — which extends past the 24-slot cache.
+
+Probe section 8's boundary test resolves which side of the cache
+bound the engine actually enforces: a `SET flat=662 count=20`
+against a 667-slot cache returns **reply=0**. The engine validates
+`begin` against the cache total but does **not** enforce
+`begin + count <= cache_total`. So v1's `gebg`-with-count=20 SET
+is accepted; band 0 lands in `gebg`'s only slot correctly, and
+bands 1..19 spill into the cache slots of whichever parameters
+happen to follow `gebg` (in v1: `vcnb`, `vcbg`) plus three slots
+of adjacent memory past the cache buffer.
+
 ### Impact
 
-* SET command 3 with `count=20` works because the engine appears to
-  honour the count parameter and write into a 20-element block
-  starting at the indicated flat index. The `gebg` and `iebt` updates
-  do go through.
-* GET command 3 with `count=20` is unreliable — the engine has only
-  allocated one slot in its flat array, so reading 20 elements may
-  return uninitialized memory, partial results, or nothing.
-* `getDsApParam("vcbg")` for the visualizer (the legacy code path)
-  hits this and might return zeros.
+This is the most insidious bug in DolbyX v1's init handshake:
 
-This is the most insidious bug in the current init handshake. It's
-been masked because:
-* The visualizer uses command 4 path which bypasses DEFINE_SETTINGS, OR
-* The processor reads back via the same hacky path it writes.
+- **SET command 3 with `count=20` against `gebg` writes the first
+  band into the `gebg` slot correctly, but bands 1..19 spill into
+  the cache slots belonging to the parameters that follow `gebg` in
+  DolbyX's compressed DEFINE_SETTINGS list** (and past the cache
+  boundary into adjacent memory), silently overwriting them. The
+  IEQ-preset apply appears to work — the user hears _something_ —
+  but the resulting state is a corrupted mash of several params at
+  once.
+- **GET command 3 doesn't fail because of slot-allocation; it fails
+  because cmd 3 GET is unimplemented in the engine entirely.** See
+  the visualizer issue above. The two bugs are independent.
+
+The DEFINE_SETTINGS bug has been masked because:
+
+- The visualizer is broken for a different reason (cmd 3 GET not
+  implemented), so the bug shows up as zero visualizer bars rather
+  than corrupted ones.
+- Some of the corrupted slots belong to no-op params or to params
+  whose default value coincidentally matches the bleed value.
 
 ### Recommended fix
 
@@ -429,10 +496,10 @@ DolbyX init flow to faithful parity with the original.
 Before DEFINE_SETTINGS, the engine receives values for the four
 "constant" parameters that determine array lengths:
 
-* `genb = 20` (GEQ band count)
-* `ienb = 20` (IEQ band count)
-* `aonb = 20` (Audio Optimizer / Audio Regulator band count)
-* `gebf = [43, 129, ..., 18777]` (GEQ band frequencies)
+- `genb = 20` (GEQ band count)
+- `ienb = 20` (IEQ band count)
+- `aonb = 20` (Audio Optimizer / Audio Regulator band count)
+- `gebf = [43, 129, ..., 18777]` (GEQ band frequencies)
 
 These come from `<constant>` in `ds1-default.xml`, parsed and pushed
 by `DsAkSettings.setConstantAkParam`. The static `akParams_` table is
@@ -502,11 +569,11 @@ them.
 `g_param_names[]` has 24 entries, hard-coded by index. Adding a new
 param means adding it to:
 
-* `g_param_names[]`
-* `DDP_PARAM_*` enum in `ddp_protocol.h`
-* The 6 entries in `g_profiles[][DDP_PARAM_COUNT]`
-* The TOML save / load code in `daemon/http.c`
-* The Web UI control row markup
+- `g_param_names[]`
+- `DDP_PARAM_*` enum in `ddp_protocol.h`
+- The 6 entries in `g_profiles[][DDP_PARAM_COUNT]`
+- The TOML save / load code in `daemon/http.c`
+- The Web UI control row markup
 
 That's a five-place edit per new parameter. The Advanced section goal
 (every settable param in the UI) becomes a 40+ × 5-place chore.
@@ -527,7 +594,13 @@ typedef enum {
     DDP_PARAM_KIND_DB,       /* 1/16 dB — UI: dB slider */
     DDP_PARAM_KIND_HZ,       /* int Hz — UI: log slider */
     DDP_PARAM_KIND_ARRAY,    /* multi-element — UI: per-band sliders */
-    DDP_PARAM_KIND_READONLY, /* not settable */
+    DDP_PARAM_KIND_READONLY, /* UI presentation: not exposed for edit.
+                              * NB: this is a UI classification only —
+                              * the engine accepts writes to any
+                              * declared param; whether the DSP reads
+                              * the new value depends on the param's
+                              * role. See ddp/02 "Engine vs Java
+                              * settability". */
 } ddp_param_kind_t;
 
 typedef struct {
@@ -554,11 +627,11 @@ For the Web UI, the daemon can serve the parameter metadata at
 without knowing which parameters exist:
 
 ```js
-const meta = await (await fetch('/params.json')).json();
+const meta = await (await fetch('/params.json')).json()
 for (const p of meta.params) {
-    if (p.category.startsWith('advanced.')) {
-        renderAdvancedControl(p, state.params[p.name]);
-    }
+  if (p.category.startsWith('advanced.')) {
+    renderAdvancedControl(p, state.params[p.name])
+  }
 }
 ```
 
@@ -634,6 +707,7 @@ Internally the service diffs against the cached version and pushes
 only the changed bits via command 3.
 
 This pattern matters for two reasons:
+
 1. The engine sees one bulk update for all 5 toggles, not 5 independent
    ones, when a profile is loaded.
 2. The service can fire `onProfileSettingsChanged(profile)` (event 3)
@@ -662,9 +736,16 @@ reconstruct the digest themselves, which is more code.
 Add a `set_profile_settings` WS command:
 
 ```js
-ws.send({ cmd: 'set_profile_settings', settings: {
-    geon: false, deon: true, dvle: true, vdhe: true, vspe: false
-}})
+ws.send({
+  cmd: 'set_profile_settings',
+  settings: {
+    geon: false,
+    deon: true,
+    dvle: true,
+    vdhe: true,
+    vspe: false,
+  },
+})
 ```
 
 The daemon translates the 5 booleans into the 5 corresponding
@@ -676,8 +757,8 @@ Then `FragSwitches`-equivalent UI code becomes:
 
 ```js
 function flipSwitch(name) {
-    const newSettings = { ...currentDigest, [name]: !currentDigest[name] };
-    send({ cmd: 'set_profile_settings', settings: newSettings });
+  const newSettings = { ...currentDigest, [name]: !currentDigest[name] }
+  send({ cmd: 'set_profile_settings', settings: newSettings })
 }
 ```
 
@@ -694,14 +775,42 @@ worth fixing alongside the digest.
 
 ## Issue: power-off handling
 
-(DolbyX zeroes parameters via an OFF profile; the original DDP bypasses the effect.)
-
+(DolbyX zeroes parameters via an OFF profile; the original DDP issues
+EFFECT_CMD_DISABLE.)
 
 ### What the original does
 
 `DsClient.setDsOn(false)` calls `AudioEffect.setEnabled(false)` which
-makes the framework copy input → output unchanged. The engine's
-parameters are unaffected. Power-on flips the same flag back.
+sends `EFFECT_CMD_DISABLE` to the engine. The engine performs a
+**graceful disable crossfade of exactly 5512 samples** (~125 ms at
+44.1 kHz), then starts returning `-ENODATA` from `process()`; the
+framework then treats subsequent blocks as bypass. (Re-ENABLE
+crossfades over 7560 samples / ~171 ms, asymmetrically.) Calls are
+**idempotent** — a second DISABLE while already disabled returns
+reply 0 with engine log `EFFECT_CMD_DISABLE - Already disabled,
+ignoring.`. **Parameter state survives the cycle** — neither the
+settings cache nor the AK registry is touched.
+
+Source: `Ds.java:24` hard-codes `useOffProfileForDsOff = false`. See
+[05-profiles-and-persistence.md → "What 'OFF' means"](05-profiles-and-persistence.md#what-off-means-in-the-original-ddp)
+for the full empirical picture.
+
+### Engine-level evidence
+
+From [tools/ddp_probe/](../../tools/ddp_probe/README.md) section 6:
+
+```
+[EffectDs] EFFECT_CMD_DISABLE Starting graceful disable over 5512 samples
+... (process() returns 0 for crossfade, then -ENODATA) ...
+[EffectDs] Effect_process() Graceful disable finished. Returning -ENODATA
+[EffectDs] EFFECT_CMD_DISABLE - Already disabled, ignoring.
+[EffectDs] EFFECT_CMD_ENABLE Starting graceful enable over 7560 samples
+[EffectDs] EFFECT_CMD_ENABLE - Already enabled, ignoring.
+```
+
+The same probe verifies parameter persistence: `set dvla=7; DISABLE;
+ENABLE; set dvla=3` returns reply 0 on both writes, and a subsequent
+process() block produces output consistent with the new value.
 
 ### What DolbyX does today
 
@@ -822,10 +931,11 @@ re-renders the same state).
 ### Impact
 
 Low for current single-UI deployment. Medium if you ever add:
-* A system tray icon
-* A CLI control utility
-* A mobile companion app
-* A Stream Deck profile
+
+- A system tray icon
+- A CLI control utility
+- A mobile companion app
+- A Stream Deck profile
 
 In those scenarios the echo causes spurious re-renders on the
 originator and complicates deduplication.
@@ -919,8 +1029,12 @@ engine is currently applying) AND the audio energy (`vcbe`). The UI
 draws the curve overlay from the engine-reported `vcbg`, not from a
 local-only state.
 
-This means the curve always reflects what the engine actually has,
-including any clamping the engine applied.
+This means the curve reflects whatever the engine wrote into its
+internal `vcbg` state for the most recent audio block. (The engine
+itself does no clamping — see
+[03-binary-protocol.md → Engine validation behavior](03-binary-protocol.md#engine-validation-behavior).
+Any clamping that happened did so at the Java layer before the value
+even reached the engine.)
 
 ### What DolbyX does today
 
@@ -966,9 +1080,9 @@ The Web UI works in raw `int16` units in the range `-500..+500`
 
 ### Impact
 
-* Cosmetic: the user has no idea how much gain they've added in dB
+- Cosmetic: the user has no idea how much gain they've added in dB
   terms.
-* Compatibility: the values are not directly comparable to the
+- Compatibility: the values are not directly comparable to the
   factory-default GEQ curves (which are also in 1/16 dB).
 
 ### Recommended fix
@@ -979,22 +1093,22 @@ convert at the WS boundary:
 ```js
 // In visualizer.js
 function gainToY(gain_db) {
-    return svgH * (1 - (gain_db + 36) / 72);
+  return svgH * (1 - (gain_db + 36) / 72)
 }
 function yToGain(y) {
-    return Math.round((1 - y / svgH) * 720) / 10;  // 0.1 dB resolution
+  return Math.round((1 - y / svgH) * 720) / 10 // 0.1 dB resolution
 }
 
 // In sendDrag — convert to int16 1/16 dB before sending
-const bands20_q4 = bands20.map(db => Math.round(db * 16));
-send({ cmd: 'set_geq', bands: bands20_q4 });
+const bands20_q4 = bands20.map((db) => Math.round(db * 16))
+send({ cmd: 'set_geq', bands: bands20_q4 })
 ```
 
 And on receive:
 
 ```js
 // In setEqFromGains
-const bands_db = state.geq.map(q4 => q4 / 16);
+const bands_db = state.geq.map((q4) => q4 / 16)
 ```
 
 Optional: add a tooltip showing `"-2.5 dB"` next to each band thumb
@@ -1072,18 +1186,18 @@ After applying the high-impact fixes, the structural target is:
 To minimize disruption, apply fixes in this order. Each step is
 mostly independent and can ship as a separate PR.
 
-| Step | Issue | Risk | Notes |
-|------|-------|------|-------|
-| 1 | Init handshake fixes (constants + DEFINE_SETTINGS offsets) | Low | Pure correctness; default behaviour shouldn't change but becomes robust to engine variations |
-| 2 | Visualizer returns gains+excitations | Low | New 80-byte format — single coordinated change to processor + daemon + UI |
-| 3 | Explicit visualizer enable | Low | One extra command at startup |
-| 4 | Power on/off via EFFECT_CMD_ENABLE | Low | Cleaner audio behaviour |
-| 5 | Suspended-state detection | Low | Tiny CPU saving; new WS event type |
-| 6 | 6 × 4 × 20 GEQ storage | Medium | Schema change in TOML; migration code needed |
-| 7 | Parameter metadata table + name-based IPC | Medium | Larger refactor; foundation for Advanced section |
-| 8 | 5-bool digest API | Low | Optional; nice for future multi-client |
-| 9 | Originator-aware broadcast | Low | Optional; nice for future multi-client |
-| 10 | Bulk profile push (command 2) | Low | Optional; cleaner profile transitions |
+| Step | Issue                                                      | Risk   | Notes                                                                                        |
+| ---- | ---------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------- |
+| 1    | Init handshake fixes (constants + DEFINE_SETTINGS offsets) | Low    | Pure correctness; default behaviour shouldn't change but becomes robust to engine variations |
+| 2    | Visualizer returns gains+excitations                       | Low    | New 80-byte format — single coordinated change to processor + daemon + UI                    |
+| 3    | Explicit visualizer enable                                 | Low    | One extra command at startup                                                                 |
+| 4    | Power on/off via EFFECT_CMD_ENABLE                         | Low    | Cleaner audio behaviour                                                                      |
+| 5    | Suspended-state detection                                  | Low    | Tiny CPU saving; new WS event type                                                           |
+| 6    | 6 × 4 × 20 GEQ storage                                     | Medium | Schema change in TOML; migration code needed                                                 |
+| 7    | Parameter metadata table + name-based IPC                  | Medium | Larger refactor; foundation for Advanced section                                             |
+| 8    | 5-bool digest API                                          | Low    | Optional; nice for future multi-client                                                       |
+| 9    | Originator-aware broadcast                                 | Low    | Optional; nice for future multi-client                                                       |
+| 10   | Bulk profile push (command 2)                              | Low    | Optional; cleaner profile transitions                                                        |
 
 After steps 1-7, DolbyX should reproduce every observable behavior of
 the original DDP UI on Android, plus expose the foundation for the
@@ -1103,8 +1217,12 @@ A reasonable smoke-test sequence after each change:
    characteristics (bass-heavy on Movie, balanced on Music, fast
    transients on Game, dialogue-forward on Voice).
 4. **Power toggle**: toggle DolbyX power off and on — audio should
-   instantly switch to bypass-quality and back without audible
-   parameter ramping.
+   crossfade smoothly to bypass (~125 ms) and back to processed
+   (~171 ms) at 44.1 kHz (the engine's built-in graceful
+   disable/enable). Parameter state must survive the toggle:
+   re-enabling should resume processing with the same profile
+   settings, no perceptible parameter discontinuity. See
+   [05-profiles-and-persistence.md → "What 'OFF' means"](05-profiles-and-persistence.md#what-off-means-in-the-original-ddp).
 5. **Persistence**: customize a few things, kill the daemon, restart
    it, verify the customization is restored.
 
@@ -1114,20 +1232,20 @@ The metadata-driven parameter table opens the door to the Advanced
 section. Some parameter groups that DDP shipped but the original UI
 never exposed:
 
-* **Volume Leveler tuning** (`dvli`, `dvlo`, `dvmc`, `dvme`) — the
+- **Volume Leveler tuning** (`dvli`, `dvlo`, `dvmc`, `dvme`) — the
   reference loudness levels, the modeler enable. Lets users tune the
   leveler for their playback context (-20 LKFS for movies, -14 LKFS
   for music, etc.).
-* **Headphone reverb gain** (`dhrg`) — controls the wet/dry mix of
+- **Headphone reverb gain** (`dhrg`) — controls the wet/dry mix of
   the simulated room reverb. Some users prefer a "dryer" Dolby
   Headphone sound.
-* **Speaker angle** (`dssa`) — for users who actually use desktop
+- **Speaker angle** (`dssa`) — for users who actually use desktop
   speakers and want to tune the virtualizer for their setup.
-* **Audio Regulator thresholds** (`arbl`, `arbh`, `arbi`, `arod`,
+- **Audio Regulator thresholds** (`arbl`, `arbh`, `arbi`, `arod`,
   `artp`) — exposes the multi-band compressor's per-band settings.
   This is the "audiophile" knob that lets users customize the
   compressor's behaviour per frequency band.
-* **Audio Optimizer band gains** (`aobg`) — the per-device EQ that
+- **Audio Optimizer band gains** (`aobg`) — the per-device EQ that
   the engine uses for speaker compensation. On a desktop speaker
   setup, exposing this as a 20-band per-channel EQ gives users the
   same "calibrate for my speakers" capability that Android has for

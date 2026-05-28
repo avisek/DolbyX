@@ -1,5 +1,6 @@
 # Build artifacts
 arm/build/
+tools/ddp_probe/build/
 *.o
 *.core
 

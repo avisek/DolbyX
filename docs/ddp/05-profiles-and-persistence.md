@@ -8,14 +8,14 @@ disk.
 
 There are exactly 6 profiles, indexed 0..5:
 
-| Index | XML id | Display name | Category |
-|-------|--------|--------------|----------|
-| 0 | `movie` | Movie | MOVIE |
-| 1 | `music` | Music | MUSIC |
-| 2 | `game` | Game | GAME |
-| 3 | `voice` | Voice | VOICE |
-| 4 | `user1` | Custom 1 | CUSTOMIZED |
-| 5 | `user2` | Custom 2 | CUSTOMIZED |
+| Index | XML id  | Display name | Category   |
+| ----- | ------- | ------------ | ---------- |
+| 0     | `movie` | Movie        | MOVIE      |
+| 1     | `music` | Music        | MUSIC      |
+| 2     | `game`  | Game         | GAME       |
+| 3     | `voice` | Voice        | VOICE      |
+| 4     | `user1` | Custom 1     | CUSTOMIZED |
+| 5     | `user2` | Custom 2     | CUSTOMIZED |
 
 Plus a logical 7th, `off`, which exists in `ds1-default.xml` but **is
 not in the user-facing profile list**. It is reserved for the future
@@ -28,12 +28,12 @@ which bypasses the effect entirely.
 
 Each profile has 4 IEQ-preset slots, indexed 0..3:
 
-| Index | Engine `ieon` | UI label |
-|-------|---------------|----------|
-| 0 | `ieon=0` | "Off" — IEQ disabled, GEQ may still be active |
-| 1 | `ieon=1`, `iebt=ieq_open` | "Open" — airy, bright |
-| 2 | `ieon=1`, `iebt=ieq_rich` | "Rich" — warm, full (default) |
-| 3 | `ieon=1`, `iebt=ieq_focused` | "Focused" — vocal-forward |
+| Index | Engine `ieon`                | UI label                                      |
+| ----- | ---------------------------- | --------------------------------------------- |
+| 0     | `ieon=0`                     | "Off" — IEQ disabled, GEQ may still be active |
+| 1     | `ieon=1`, `iebt=ieq_open`    | "Open" — airy, bright                         |
+| 2     | `ieon=1`, `iebt=ieq_rich`    | "Rich" — warm, full (default)                 |
+| 3     | `ieon=1`, `iebt=ieq_focused` | "Focused" — vocal-forward                     |
 
 The UI's "Custom" 4th cell (in mobile layout) is **not** an IEQ preset —
 it is a UI-layer convention meaning "use preset 0 (Off) and let the user
@@ -101,13 +101,13 @@ instead of `onDsApParamChange`. This is a minor implementation detail.)
 
 The translation rules for the 5 booleans:
 
-| `DsClientSettings` field | AK param | "Off" value | "On" value |
-|--------------------------|----------|-------------|------------|
-| `isGeqOn` | `geon` | 0 | **1** |
-| `isDialogEnhancerOn` | `deon` | 0 | **1** |
-| `isVolumeLevellerOn` | `dvle` | 0 | **1** |
-| `isHeadphoneVirtualizerOn` | `vdhe` | 0 | **2** (auto) |
-| `isSpeakerVirtualizerOn` | `vspe` | 0 | **2** (auto) |
+| `DsClientSettings` field   | AK param | "Off" value | "On" value   |
+| -------------------------- | -------- | ----------- | ------------ |
+| `isGeqOn`                  | `geon`   | 0           | **1**        |
+| `isDialogEnhancerOn`       | `deon`   | 0           | **1**        |
+| `isVolumeLevellerOn`       | `dvle`   | 0           | **1**        |
+| `isHeadphoneVirtualizerOn` | `vdhe`   | 0           | **2** (auto) |
+| `isSpeakerVirtualizerOn`   | `vspe`   | 0           | **2** (auto) |
 
 The use of `2` instead of `1` for the headphone/speaker virtualizers is
 critical and easy to miss. Setting `vdhe=1` means "always on regardless
@@ -127,6 +127,7 @@ Below is each profile's full settings as parsed from `ds1-default.xml`.
 Defaults are shared between profiles unless explicitly overridden.
 
 ### Movie
+
 ```
 deon  = 1     vdhe  = 2     dssb  = 96     plmd  = 4
 dea   = 3     vspe  = 0     dssf  = 200    aoon  = 2
@@ -138,6 +139,7 @@ include preset = ieq_rich
 ```
 
 ### Music
+
 ```
 deon  = 1     vdhe  = 2     dssb  = 0      plmd  = 4
 dea   = 2     vspe  = 0     dssf  = 200    aoon  = 2
@@ -149,6 +151,7 @@ include preset = ieq_rich
 ```
 
 ### Game
+
 ```
 deon  = 0     vdhe  = 2     dssb  = 0      plmd  = 4
 dea   = 7     vspe  = 2     dssf  = 200    aoon  = 2
@@ -160,6 +163,7 @@ include preset = ieq_open
 ```
 
 ### Voice
+
 ```
 deon  = 1     vdhe  = 0     dssb  = 0      plmd  = 4
 dea   = 10    vspe  = 0     dssf  = 200    aoon  = 2
@@ -171,6 +175,7 @@ include preset = ieq_rich
 ```
 
 ### Custom 1, Custom 2 (identical defaults)
+
 ```
 deon  = 0     vdhe  = 0     dssb  = 48     plmd  = 4
 dea   = 7     vspe  = 0     dssf  = 200    aoon  = 2
@@ -182,6 +187,7 @@ include preset = ieq_rich
 ```
 
 ### Off (reserved, not user-facing)
+
 ```
 all "amount" and "boost" parameters = 0
 all enables = 0
@@ -231,13 +237,13 @@ directory (`/data/data/com.dolby.ds1/files/` typically):
 Shipped in the magisk module under `/system/etc/`. Never written. Loaded
 once by `DsConfigParser` at service startup. Defines:
 
-* The 3 IEQ presets (`ieq_open`, `ieq_rich`, `ieq_focused`)
-* The 7 profiles (6 user-facing + 1 reserved "off")
-* The constant params (`genb`, `ienb`, `aonb`, `gebf`, `iebf`, `dvli`,
+- The 3 IEQ presets (`ieq_open`, `ieq_rich`, `ieq_focused`)
+- The 7 profiles (6 user-facing + 1 reserved "off")
+- The constant params (`genb`, `ienb`, `aonb`, `gebf`, `iebf`, `dvli`,
   `dvlo`, `dvmc`, `aocc`)
-* The default tuning for SPEAKER endpoint (`aobf`, `aobg`, `arbf`,
+- The default tuning for SPEAKER endpoint (`aobf`, `aobg`, `arbf`,
   `arbi`, `arbl`, `arbh`, `arod`, `artp`, `dssa`)
-* The `<authorized_technologies>` SKU gate
+- The `<authorized_technologies>` SKU gate
 
 ### 2. `ds1-current.xml` (read-write, user customizations)
 
@@ -277,14 +283,14 @@ Format mirrors `ds1-default.xml`:
 
 Key things to notice:
 
-* The GEQ band gains are stored as 4 separate `<preset>` blocks per
+- The GEQ band gains are stored as 4 separate `<preset>` blocks per
   profile, one per IEQ preset, with id `geq_<profile>_<preset_name>`.
   This is the on-disk representation of the `geqBandGains_[6][4][20]`
   matrix.
-* The `<include preset="...">` inside each profile records which IEQ
+- The `<include preset="...">` inside each profile records which IEQ
   preset is currently active for that profile.
-* Renamed custom profiles store their new name in the `name=` attribute.
-* Only **settable** AK parameters are written. Read-only / constant
+- Renamed custom profiles store their new name in the `name=` attribute.
+- Only **settable** AK parameters are written. Read-only / constant
   ones are not persisted.
 
 ### 3. `ds1-state.xml` (read-write, master state)
@@ -427,30 +433,68 @@ DsClient.setDsOn(false)
         → dsEffect_.setEnabled(false)   // calls AudioEffect.setEnabled(false)
 ```
 
-`AudioEffect.setEnabled(false)` causes the framework to bypass the
-`process()` call entirely — input is copied to output unchanged. The
-parameters are still set; the engine simply isn't run.
+`Ds.java:24` hard-codes `useOffProfileForDsOff = false`. The path is
+strictly: UI button → AIDL → engine `EFFECT_CMD_DISABLE`. No
+parameters are touched. `Ds.setDsOn` is at `Ds.java:149-160`.
 
-The DolbyX project introduces a separate `DDP_PROFILE_OFF` that zeros
-out every parameter and switches to it on power-off. This works
-functionally (the result is silence-of-effect: a flat EQ with no
-boosts), but it is **architecturally different** from the original.
-A user who toggles power off and on at the same volume will hear a
-brief discontinuity in DolbyX (because the parameters were zeroed and
-must be reloaded) that they would not hear in the original DDP (where
-the engine is just bypassed).
+### What the engine actually does (probe evidence)
 
-This isn't a bug — it's a design choice. The project's choice was
-probably driven by the fact that the daemon doesn't have a clean
-"bypass" toggle. But for full faithfulness, the right thing would be:
+The engine doesn't immediately bypass — it crossfades. From the
+`libdseffect.so` binary string table plus the live engine log
+captured by [tools/ddp_probe/](../../tools/ddp_probe/README.md):
 
 ```
-DolbyX power on:   apply current profile's parameters as before
-DolbyX power off:  zero pre_gain (or skip the process() call,
-                   or apply EFFECT_CMD_DISABLE — the cleanest)
+[EffectDs] EFFECT_CMD_DISABLE Starting graceful disable over 5512 samples
+... (the engine continues to call process(); audio fades to silence) ...
+[EffectDs] Effect_process() Graceful disable finished. Returning -ENODATA
+... (subsequent process() calls return -ENODATA; the AudioEffect
+     framework treats the block as bypass and copies input→output) ...
 ```
 
-See [06-gap-analysis.md](06-gap-analysis.md#issue-power-off-handling).
+- **5512 samples ≈ 125 ms at 44100 Hz** for DISABLE — measured exactly
+  that value across multiple probe runs. The probe runs only at
+  44.1 kHz; whether the engine's crossfade is a fixed sample count
+  or scales with `process()`'s sample rate is unmeasured.
+- During the crossfade the engine runs `process()` normally but
+  attenuates the wet signal. The host should keep feeding audio; the
+  engine writes a decaying tail into the output buffer.
+- Once the fade completes the engine starts returning `-ENODATA`,
+  which the AOSP `AudioEffect` framework interprets as "no audio
+  produced this block; treat as bypass".
+
+Re-enabling has an **asymmetric** crossfade — ENABLE is longer:
+
+```
+[EffectDs] EFFECT_CMD_ENABLE Starting graceful enable over 7560 samples
+... (engine ramps back to full processing over ~171 ms @ 44.1 kHz) ...
+```
+
+### Idempotency
+
+Both commands are idempotent. A second call to ENABLE/DISABLE while
+already in that state logs `Already enabled/disabled, ignoring` and
+returns reply 0 without doing work. The host doesn't have to
+track the engine's enabled state separately.
+
+### Parameter state survives the cycle
+
+The settings cache and the AK registry are **not touched** by
+ENABLE/DISABLE. The probe verifies this directly: `set dvla=7;
+DISABLE; ENABLE; set dvla=3` returns reply 0 on both writes, and a
+subsequent `process()` produces output consistent with `dvla=3`.
+
+### DolbyX v1 divergence
+
+The DolbyX v1 daemon takes a different (less faithful) approach: it
+introduces a `DDP_PROFILE_OFF` that zeros every parameter on
+power-off and re-applies the saved profile on power-on. The user
+hears a brief discontinuity at each toggle (compressor envelopes,
+leveler integrator, etc. are reset) that the original DDP doesn't
+have because the engine state is preserved across the
+ENABLE/DISABLE cycle.
+
+See [06-gap-analysis.md](06-gap-analysis.md#issue-power-off-handling)
+for the v2 fix.
 
 ## Resetting a profile to defaults
 
@@ -482,17 +526,17 @@ map, not the per-profile map.
 
 In the v8.1 build the only tuning is `endpoint="SPEAKER"` (= the
 loudspeaker tuning), and as the comment in the XML notes:
-*"<tuning> with endpoint other than SPEAKER do not use the band gain,
-UNLESS aoon is set 1 (from 2) and plmd is set to 2 (not 4)."*
+_"<tuning> with endpoint other than SPEAKER do not use the band gain,
+UNLESS aoon is set 1 (from 2) and plmd is set to 2 (not 4)."_
 
 For DolbyX, where the output is always a desktop endpoint that doesn't
 match Android's device taxonomy, you can:
 
-* Hard-code `DEVICE_WIRED_HEADPHONE` (matching the original
+- Hard-code `DEVICE_WIRED_HEADPHONE` (matching the original
   `DsEndpoint.GENERIC` mapping), and
-* Either ignore the `<tuning>` block (since `aoon` defaults to `2`
+- Either ignore the `<tuning>` block (since `aoon` defaults to `2`
   which is "auto, only on speakers"), or
-* Load the speaker tuning into a virtual device for users who want to
+- Load the speaker tuning into a virtual device for users who want to
   experiment with the per-band Audio Optimizer EQ.
 
 The Advanced section can expose `aobg[40]` as 20 paired sliders if you
@@ -504,15 +548,15 @@ is a speaker — which it never will, because of how the
 
 ## Summary of state per `Ds` instance
 
-| State | Storage | Persisted to | Size |
-|-------|---------|--------------|------|
-| Master on/off | `Ds.isDsOn_` | `ds1-state.xml` | 1 bit |
-| Selected profile | `Ds.selectedProfile_` | `ds1-state.xml` | 1 byte |
-| Per-profile AK settings | `currentProfiles_[6].allSettings_[HEADPHONE].values_[N]` | `ds1-current.xml` | ~ 6 × N × 2 bytes (N depends on band counts) |
-| Per-profile name | `currentProfiles_[6].displayName_` | `ds1-current.xml` | ~ 6 × 24 chars |
-| Per-profile current IEQ preset | `currentProfiles_[6].currentIeqPreset_` | `ds1-current.xml` (in `<include preset="...">`) | 6 × 1 byte |
-| Per-profile per-preset GEQ | `currentProfiles_[6].geqBandGains_[4][20]` | `ds1-current.xml` (4 `<preset>` blocks per profile) | 6 × 4 × 20 × 2 = 960 bytes |
-| Static IEQ band targets | `DsProfileSettings.ieqBandTargets_[3][20]` (static) | NOT persisted; read fresh from `ds1-default.xml` each boot | 3 × 20 × 2 = 120 bytes |
+| State                          | Storage                                                  | Persisted to                                               | Size                                         |
+| ------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------- |
+| Master on/off                  | `Ds.isDsOn_`                                             | `ds1-state.xml`                                            | 1 bit                                        |
+| Selected profile               | `Ds.selectedProfile_`                                    | `ds1-state.xml`                                            | 1 byte                                       |
+| Per-profile AK settings        | `currentProfiles_[6].allSettings_[HEADPHONE].values_[N]` | `ds1-current.xml`                                          | ~ 6 × N × 2 bytes (N depends on band counts) |
+| Per-profile name               | `currentProfiles_[6].displayName_`                       | `ds1-current.xml`                                          | ~ 6 × 24 chars                               |
+| Per-profile current IEQ preset | `currentProfiles_[6].currentIeqPreset_`                  | `ds1-current.xml` (in `<include preset="...">`)            | 6 × 1 byte                                   |
+| Per-profile per-preset GEQ     | `currentProfiles_[6].geqBandGains_[4][20]`               | `ds1-current.xml` (4 `<preset>` blocks per profile)        | 6 × 4 × 20 × 2 = 960 bytes                   |
+| Static IEQ band targets        | `DsProfileSettings.ieqBandTargets_[3][20]` (static)      | NOT persisted; read fresh from `ds1-default.xml` each boot | 3 × 20 × 2 = 120 bytes                       |
 
 The 6 × 4 × 20 GEQ matrix is the single biggest chunk of mutable state,
 and the most distinctive thing about the data model. The DolbyX project
