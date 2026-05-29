@@ -47,7 +47,7 @@ build a cleaner foundation that:
    as alternative backends without touching the rest of the code.
 8. Single-process daemon hosting: HTTP/WebSocket server, audio plugin IPC,
    and engine all in one binary.
-9. Rust for the daemon, React with TypeScript for the Web UI.
+9. Rust for the daemon, Solid.js with TypeScript for the Web UI.
 10. Top-notch code quality: strict linting, mandatory doc comments,
     unit + integration tests, CI gates.
 
@@ -67,19 +67,19 @@ build a cleaner foundation that:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  Web UI (React-powered Vite-built SPA, separate dev workflow)             │
-│  - Auto-generated Advanced section from /api/parameters                   │
+│  Web UI (Solid-powered Vite-built SPA, separate dev workflow)             │
+│  - Auto-generated Advanced section from injected bootstrap                │
 │  - int16 1/16-dB on the wire; UI converts ↔ dB for display only           │
 │  - Auto-reconnecting WebSocket                                            │
 └────────────────────────┬──────────────────────────────────────────────────┘
                          │ JSON over WebSocket
-                         │ HTTP for static + /api/parameters
+                         │ HTTP for / (index.html with injected bootstrap)
                          │
 ┌────────────────────────▼──────────────────────────────────────────────────┐
 │  dolbyx-daemon  (Rust, single process)                                    │
 │  ┌───────────────────────────────────┐                                    │
-│  │ HTTP server (axum/hyper)          │   serves /api, /ws, and the built  │
-│  │  + WebSocket handler              │   UI at / in production            │
+│  │ HTTP server (axum/hyper)          │   serves / + /ws — no /api routes  │
+│  │  + WebSocket handler              │   / templated with bootstrap HTML  │
 │  └────────────────┬──────────────────┘                                    │
 │  ┌────────────────▼──────────────────┐                                    │
 │  │ State (Arc<RwLock<…>>):           │                                    │
@@ -299,7 +299,7 @@ pub enum ParamCategory {
 
 **Decibel kind.** `Decibel { lkfs, divisor }` keeps `divisor` as
 metadata so the UI never hardcodes the 1/16 conversion factor —
-each widget reads `def.divisor` from `/api/parameters` and divides.
+each widget reads `def.divisor` from the injected bootstrap metadata and divides.
 Every dB-coded AK param uses `divisor = 16` today (the binary
 documents "scaled by 16 ie. 16 = 1 dB"); the metadata table stays
 the canonical source. `lkfs: bool` switches the unit label from
@@ -383,7 +383,8 @@ behind a toggle (see Decision 2).
 Wire and storage are name-based (4-CC string). Saved configs are
 stable under reordering the table. Adding a new parameter to the
 Advanced section is a one-line edit: append to the table; the UI
-auto-discovers it on next fetch of `/api/parameters`.
+auto-discovers it on next page load (the daemon re-serializes the
+metadata into `window.__BOOTSTRAP__` on every `GET /`).
 
 **Advanced-panel layout.** A CSS Grid with
 `grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))` and
@@ -513,16 +514,14 @@ DEFINE_SETTINGS-time pre-population values. Experimental params
 `vcbf`) update through the regular state-snapshot path since the
 daemon owns the write side.
 
-The daemon also serves one static HTTP endpoint fetched once at UI
-startup:
-
-```
-GET /api/parameters       → ParameterDef[]   (the metadata table)
-```
-
-There is no `/api/factory_defaults` endpoint — the daemon owns reset
-logic via `reset_profile` / `reset_eq_preset` commands, so the UI
-never needs raw defaults.
+The daemon serves no `/api/*` endpoints. Parameter metadata and the
+initial state snapshot are injected into the served `index.html` as
+`window.__BOOTSTRAP__` — see Decision 6 ("Bootstrap injection") for
+the mechanism. The UI reads that synchronously at module init, so
+the page paints fully populated on the first frame without any
+pre-paint network round-trip. There is no `/api/factory_defaults`
+analogue either: the daemon owns reset logic via `reset_profile` /
+`reset_eq_preset` commands.
 
 #### Daemon ↔ engine subprocess (binary, length-prefixed)
 
@@ -602,39 +601,118 @@ Code quality bar:
 - Integration tests that spin up the daemon with a mock engine and drive it
   through the WebSocket protocol.
 
-### Decision 6 — Web UI in React with TypeScript, separate dev workflow
+### Decision 6 — Web UI in Solid.js with TypeScript, separate dev workflow
 
 The UI lives in its own directory (`ui/`) and is developed independently
 with full hot-reload via Vite.
 
 Stack:
 
-- **React 19 + TypeScript** with `strict: true`, `noUncheckedIndexedAccess`,
-  `exactOptionalPropertyTypes`.
-- **Vite** for dev server and production build.
+- **Solid.js + TypeScript** (`solid-js`, `solid-js/web`) with
+  `strict: true`, `noUncheckedIndexedAccess`,
+  `exactOptionalPropertyTypes`. Solid's fine-grained reactivity matches
+  the UI shape — high-frequency reactive updates (visualizer levels,
+  GEQ knob drag) without VDOM diff overhead. ~7 KB runtime vs
+  React+ReactDOM ~45 KB.
+- **Vite** for dev server and production build, with
+  `vite-plugin-solid` (JSX/TSX transform) and `vite-plugin-singlefile`
+  (production: inlines all CSS+JS into one `index.html`).
 - **Plain CSS with BEM** naming. No utility framework. Theming via CSS
   custom properties in a `theme.css` (DDP-styled defaults: dark navy
   background, Dolby cyan accent), so future skins can swap styles
   without code changes. The SVG visualizer (Decision 10) plays well
   with CSS-driven theming.
-- **Zustand** for state management — small, low ceremony, no provider hell.
-- **Vitest** for unit tests with a mocked WebSocket. **Playwright**
-  for E2E against a real daemon driving the real engine
-  (`QemuBackend` + `libdseffect.so`), so the binary
-  protocol, init handshake, and `DEFINE_PARAMS` / `DEFINE_SETTINGS`
-  dance are covered too. `StubBackend` stays in `ddp-engine` for
-  Rust unit/integration tests of daemon command dispatch — see
-  Code quality standards. CI runs `apt-get install qemu-user-static`
-  on the Linux image; `libdseffect.so` is bundled in the repo (see
-  Decision 11).
-- **ESLint** with `@typescript-eslint/strict-type-checked`, **Prettier**.
+- **`solid-js/store`** for state management — built-in `createStore`,
+  no third-party state library needed.
+- **Vitest** for unit tests with `@solidjs/testing-library` and a
+  mocked WebSocket. **Playwright** for E2E against a real daemon
+  driving the real engine (`QemuBackend` + `libdseffect.so`), so the
+  binary protocol, init handshake, and `DEFINE_PARAMS` /
+  `DEFINE_SETTINGS` dance are covered too. `StubBackend` stays in
+  `ddp-engine` for Rust unit/integration tests of daemon command
+  dispatch — see Code quality standards. CI runs `apt-get install
+qemu-user-static` on the Linux image; `libdseffect.so` is bundled in
+  the repo (see Decision 11).
+- **ESLint** with `@typescript-eslint/strict-type-checked` and
+  `eslint-plugin-solid`, **Prettier**.
+
+**Bootstrap injection.** The daemon templates `index.html` at request
+time and injects parameter metadata + the initial state snapshot as a
+single `window.__BOOTSTRAP__` global:
+
+```ts
+window.__BOOTSTRAP__: {
+  params: ParameterDef[],   // full metadata table — no /api/parameters
+  state: StateSnapshot,     // identical shape to the WebSocket "state" event
+}
+```
+
+The `state` payload includes static ReadOnly params (`bver`, `bndl`,
+`ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`) — the WebSocket `state` event no
+longer needs to ship them as a one-shot at connect. The UI reads
+`window.__BOOTSTRAP__` synchronously at module init, hydrates the Solid
+store, and paints the full UI on the first frame. The WebSocket then
+connects in the background; its `state` event reconciles any drift
+between HTML render time and WS connect time (and handles reconnects).
+
+There is intentionally no `/api/*` endpoint in dev or prod. Bootstrap
+injection is the only mechanism.
 
 Development workflow. The repo root carries a single `Justfile`
 (`cargo install just` once). `just dev` runs both `cargo watch -x 'run
 -p ddp-daemon'` and `pnpm --prefix ui dev` concurrently with
 prefixed/coloured output. Rust changes restart the daemon; TS and CSS
-changes hot-reload via Vite. Vite proxies `/api` and `/ws` to
-`localhost:9876`.
+changes hot-reload via Vite.
+
+The daemon is the single front door for both dev and prod: the browser
+visits `localhost:9876`. In dev mode the daemon's `GET /` returns a
+hardcoded HTML literal that injects `window.__BOOTSTRAP__` and
+references the Vite dev server's module entry directly:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>DolbyX</title>
+    <script>
+      window.__BOOTSTRAP__ = {
+        /* daemon-serialized JSON */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="http://localhost:5173/@vite/client"></script>
+    <script type="module" src="http://localhost:5173/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+`vite.config.ts` is configured for backend integration so HMR works
+through the daemon's origin:
+
+```ts
+server: {
+  cors: true,
+  origin: 'http://localhost:5173',
+  hmr: { host: 'localhost', port: 5173, protocol: 'ws' },
+}
+```
+
+The HMR client connects directly to `ws://localhost:5173/`, independent
+of the page's `:9876` origin. No Vite `/api` proxy (no endpoints
+exist); no Vite `/ws` proxy (the page is same-origin with the
+WebSocket).
+
+`main.tsx` includes a 2-line guard for devs who accidentally visit
+`localhost:5173` directly:
+
+```ts
+if (!window.__BOOTSTRAP__) {
+  location.replace('http://localhost:9876' + location.pathname)
+  throw new Error('Bootstrap missing — redirecting to daemon')
+}
+```
 
 ```bash
 just dev      # daemon + UI together (recommended)
@@ -653,14 +731,18 @@ Production build:
 
 ```bash
 just build-release
-# → ui/dist/ built by Vite
-# → cargo build --release --features embedded-ui embeds ui/dist via rust-embed
+# → ui/dist/index.html built by Vite + vite-plugin-singlefile
+#   (CSS/JS inlined; <!--BOOTSTRAP--> placeholder left unreplaced)
+# → cargo build --release --features embedded-ui embeds
+#   ui/dist/index.html via rust-embed
 ```
 
-With `embedded-ui` enabled, the daemon serves the UI at `/`. Without
-it (the dev default), the daemon returns a landing page pointing to
-the Vite dev server. This keeps production a single self-contained
-binary while allowing UI iteration without Rust rebuilds.
+With `embedded-ui` enabled, the daemon's `GET /` reads the embedded
+single-file `index.html` bytes and string-replaces `<!--BOOTSTRAP-->`
+with the serialized bootstrap JSON before sending. Without the feature
+(dev default), the daemon serves the hardcoded dev-mode HTML described
+above. The `embedded-ui` Cargo feature is the toggle between the two
+HTML producers in `http_server`.
 
 UI component tree:
 
@@ -669,7 +751,7 @@ src/
 ├── main.tsx
 ├── App.tsx
 ├── store/
-│   ├── state.ts           # Zustand store — mirrors daemon state shape
+│   ├── state.ts           # Solid store — mirrors daemon state shape; hydrated from window.__BOOTSTRAP__
 │   └── ws.ts              # WebSocket client + auto-reconnect
 ├── styles/
 │   ├── theme.css          # CSS custom properties (colours, spacing, radii)
@@ -684,7 +766,7 @@ src/
 │   ├── EqCurve.tsx
 │   └── ConnectionBadge.tsx
 ├── advanced/
-│   ├── AdvancedPanel.tsx  # auto-generated from /api/parameters
+│   ├── AdvancedPanel.tsx  # auto-generated from window.__BOOTSTRAP__.params
 │   ├── widgets/
 │   │   ├── ToggleWidget.tsx
 │   │   ├── TristateWidget.tsx
@@ -698,7 +780,7 @@ src/
 │   └── WidgetFactory.tsx  # ParamKind + ParamAccess → widget
 └── lib/
     ├── ws.ts              # WebSocket types and auto-reconnect logic
-    ├── parameters.ts      # types for /api/parameters
+    ├── parameters.ts      # types for the injected ParameterDef[]
     └── units.ts           # int16 ↔ dB helpers
 ```
 
@@ -1053,12 +1135,12 @@ DolbyX/
 │       ├── src/lib.rs               #   cdylib
 │       ├── dolbyx.ttl
 │       └── Cargo.toml
-├── ui/                              # React app — independent pnpm project
+├── ui/                              # Solid app — independent pnpm project
 │   ├── package.json
 │   ├── pnpm-lock.yaml
-│   ├── vite.config.ts               # proxies /api + /ws to localhost:9876
+│   ├── vite.config.ts               # backend-integration mode; HMR via :5173
 │   ├── tsconfig.json
-│   ├── index.html
+│   ├── index.html                   # has <!--BOOTSTRAP--> placeholder for prod
 │   └── src/                         # (see Decision 6 for component tree)
 ├── vendored/
 │   └── libdseffect.so               # v8.1 build, bundled
@@ -1085,8 +1167,10 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
   recipes.
 - CI scaffolding: GitHub Actions running `cargo check`, `cargo test`,
   `cargo clippy`, `cargo fmt --check` on Linux + Windows.
-- React + Vite UI scaffolding with TypeScript, ESLint, Prettier. No
-  Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
+- Solid + Vite UI scaffolding with TypeScript, ESLint, Prettier;
+  `vite-plugin-solid`, `vite-plugin-singlefile`, `@solidjs/testing-library`,
+  and `eslint-plugin-solid` pinned. No Tailwind — plain CSS with BEM +
+  `theme.css` of CSS variables.
 - `defaults.toml` created with factory profiles and EQ presets
   transcribed from `ds1-default.xml`.
 - AK parameter metadata table (`parameters.toml` + codegen) populated
@@ -1149,15 +1233,21 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 
 - `ddp-daemon` integrates state, engine supervisor, and the HTTP + WebSocket
   server.
-- All UI ↔ daemon commands implemented and tested (verify with `curl` +
-  `websocat`; no UI yet).
+- `GET /` serves `index.html` with `window.__BOOTSTRAP__` injected
+  (params + initial state). Dev mode produces a hardcoded HTML literal
+  pointing to Vite's module entry at `:5173`; prod mode (with the
+  `embedded-ui` Cargo feature) reads the rust-embed asset and
+  string-replaces `<!--BOOTSTRAP-->`. No `/api/*` routes exist —
+  see Decision 6.
+- All UI ↔ daemon WebSocket commands implemented and tested (verify
+  with `curl` and `websocat`; no UI yet).
 - Originator-aware broadcast pattern.
 - Visualizer pump at the named-constant 50 ms cadence with suspended-state
   detection.
 - Plugin server accepts Windows named-pipe and AF_UNIX connections, allocates
   sessions, multiplexes audio.
 
-### Phase 4 — React UI (≈ 2–3 weeks)
+### Phase 4 — Solid UI (≈ 2–3 weeks)
 
 Look-and-feel target is the original DDPlus Android UI — captured in
 [`docs/ui-reference/`](ui-reference/) (profile picker, per-profile
@@ -1171,13 +1261,13 @@ overlay).
   excitations, EQ curve overlay (Catmull-Rom spline), draggable
   handles with `GAIN_SMOOTHER` kernel.
 - Profile and EQ-preset management: add, delete, rename.
-- Advanced panel auto-generated from `/api/parameters` metadata,
-  rendered as a CSS-grid of compact cards. Widget dispatch collapses
-  `ReadOnlyDynamic` and `ReadOnlyStatic` onto the same read-only
-  display kind (the Static-vs-Dynamic distinction is informational
-  metadata for the daemon's update logic, not a UI mode); editable
-  widgets light up for `Settable`; `Experimental` gets the editable
-  widget plus an "experimental" badge (Decision 3).
+- Advanced panel auto-generated from `window.__BOOTSTRAP__.params`
+  metadata, rendered as a CSS-grid of compact cards. Widget dispatch
+  collapses `ReadOnlyDynamic` and `ReadOnlyStatic` onto the same
+  read-only display kind (the Static-vs-Dynamic distinction is
+  informational metadata for the daemon's update logic, not a UI
+  mode); editable widgets light up for `Settable`; `Experimental`
+  gets the editable widget plus an "experimental" badge (Decision 3).
 - BEM CSS + CSS variables for theming; SVG visualizer; no Tailwind.
 - WebSocket auto-reconnect, dev/prod build flows.
 - Tests: Vitest for components with a mocked WebSocket; Playwright
@@ -1240,11 +1330,12 @@ feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU
 
 **TypeScript**: `strict: true`, `noUncheckedIndexedAccess: true`,
 `exactOptionalPropertyTypes: true`. ESLint with
-`@typescript-eslint/strict-type-checked`. Prettier. Components have
-unit tests in Vitest with a mocked WebSocket; user flows have E2E
-tests in Playwright against a real daemon driving the real engine
-(`QemuBackend` + `libdseffect.so`). Mocking the daemon's WebSocket
-would duplicate the daemon's logic in test fixtures and
+`@typescript-eslint/strict-type-checked` and `eslint-plugin-solid`.
+Prettier. Components have unit tests in Vitest with
+`@solidjs/testing-library` and a mocked WebSocket; user flows have
+E2E tests in Playwright against a real daemon driving the real
+engine (`QemuBackend` + `libdseffect.so`). Mocking the daemon's
+WebSocket would duplicate the daemon's logic in test fixtures and
 drift over time; mocking the engine would skip the binary protocol,
 init handshake, and `DEFINE_PARAMS` / `DEFINE_SETTINGS` dance —
 where the integration risk actually lives. `StubBackend` is still
@@ -1264,23 +1355,23 @@ for both end users and contributors.
 
 ## What this changes vs v1
 
-| Aspect                    | v1                                                   | v2                                                                                                                                                        |
-| ------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon language           | C                                                    | Rust                                                                                                                                                      |
-| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                              |
-| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                              |
-| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                               |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                            |
-| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                        |
-| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET-only; cmd 4 for visualizer, cmd 6 for version, daemon caches everything else |
-| Param coverage            | 24 of 64 AK params                                   | All 64 in DEFINE_PARAMS and DEFINE_SETTINGS; Settable / ReadOnly-Dynamic / ReadOnly-Static / Experimental classification per docs/ddp/02                  |
-| Web UI                    | Vanilla JS embedded in daemon                        | React + TypeScript + Vite; plain CSS + BEM; separate dev workflow; embedded at release build                                                              |
-| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce         |
-| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                    |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                       |
-| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                   |
-| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                          |
-| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                |
+| Aspect                    | v1                                                   | v2                                                                                                                                                                        |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon language           | C                                                    | Rust                                                                                                                                                                      |
+| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                              |
+| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                              |
+| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                               |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                            |
+| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                        |
+| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET-only; cmd 4 for visualizer, cmd 6 for version, daemon caches everything else                 |
+| Param coverage            | 24 of 64 AK params                                   | All 64 in DEFINE_PARAMS and DEFINE_SETTINGS; Settable / ReadOnly-Dynamic / ReadOnly-Static / Experimental classification per docs/ddp/02                                  |
+| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state) into `index.html`; embedded at release build |
+| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                         |
+| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                    |
+| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                       |
+| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                   |
+| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                          |
+| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                |
 
 ## Deferred technical questions
 
@@ -1288,7 +1379,7 @@ These don't block the plan and can be decided during implementation:
 
 - Whether to use `serde` untagged or tagged enums for the WebSocket protocol —
   a small ergonomics question.
-- Whether the React UI's Zustand store mirrors the daemon's TOML schema 1:1 or
+- Whether the Solid store mirrors the daemon's TOML schema 1:1 or
   uses a flatter shape better suited to component rendering.
 - How aggressively to debounce parameter writes during a slider drag — the
   original DDP does 60 ms; we may match or go faster on desktop where network
@@ -1296,9 +1387,10 @@ These don't block the plan and can be decided during implementation:
 
 ## What this plan does not change
 
-- The current `arm/` and `daemon/` C code stays in `main` during the
-  rearchitecture. It is the v1 reference implementation. Once Phase 5
-  completes, it is removed in one commit.
+- The current `arm/`, `daemon/`, and `ui/` (v1 vanilla-JS scaffold)
+  code stays in `main` during the rearchitecture. It is the v1
+  reference implementation. Once Phase 5 completes, all three are
+  removed in one commit.
 - The existing [docs/ddp/](ddp/README.md) reference is unaffected — it
   documents `libdseffect.so` and the original DDP behaviour, which doesn't
   change.

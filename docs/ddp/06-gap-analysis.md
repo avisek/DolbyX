@@ -639,6 +639,13 @@ This is the foundation for the planned "every parameter is exposable"
 goal. It also means adding a new parameter is a one-place edit
 (`g_ddp_params` table) and the UI auto-discovers it.
 
+> **Superseded by v2 plan.** [`docs/REARCHITECTURE_PLAN.md`](../REARCHITECTURE_PLAN.md)
+> Decisions 4 and 6 supersede the `/params.json` proposal above: the v2 daemon
+> injects parameter metadata (and the initial state snapshot) into the served
+> `index.html` as `window.__BOOTSTRAP__`, eliminating the pre-paint HTTP
+> round-trip. The single-source-of-truth and auto-discovery properties are
+> preserved; only the delivery mechanism changes.
+
 ---
 
 ## Issue: parameters indexed by position, breaking backwards compat
@@ -1134,6 +1141,12 @@ See that issue.
 ---
 
 ## Architectural target diagram
+
+> **Note.** The diagram below is the gap-analysis-era target. The actual v2
+> design in [`docs/REARCHITECTURE_PLAN.md`](../REARCHITECTURE_PLAN.md)
+> supersedes the `/params.json` delivery shown here — metadata and initial
+> state are injected into `index.html` as `window.__BOOTSTRAP__` (Decisions 4
+> and 6).
 
 After applying the high-impact fixes, the structural target is:
 
