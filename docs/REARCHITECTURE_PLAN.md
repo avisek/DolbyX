@@ -995,6 +995,16 @@ UI rendering — a single `<svg>` with layered groups matching the original DDP:
   with the `GAIN_SMOOTHER` kernel matching the original DDP's feel (see
   [docs/ddp/04-ui-data-flow.md](ddp/04-ui-data-flow.md#example-2--moving-an-eq-slider)).
 
+**Reference source — match the original look and feel.** The original DDP
+V/E lives under `decompiled/DsUI.apk/sources/com/dolby/ds1appUI/`; study it
+when implementing to keep the v2 feel faithful:
+
+- `GraphicVisualiser.java` — SurfaceView host + paint thread
+- `GraphicVisualiserPainter.java` — spectrum bricks
+- `GraphicEqualizerPainter.java` — touch queue, smoother, inverse-smoother, curve, slider thumbs
+- `FragGraphicVisualizer.java` — fragment wiring, IEQ preset grid + custom + reset
+- `EqualizerAdapter.java` — IEQ preset cells
+
 ### Decision 11 — Bundle `libdseffect.so` with releases
 
 The binary is shipped alongside the daemon executable. The release
