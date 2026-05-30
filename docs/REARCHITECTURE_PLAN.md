@@ -1284,7 +1284,7 @@ keep I/O concerns out of the state model.
 
 Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 
-### Phase 0 — Workspace bootstrap (≈ 1 week)
+### Phase 0 — Workspace bootstrap
 
 - New Cargo workspace with the crate skeleton above.
 - Top-level `Justfile` with `dev`, `build-release`, `lint`, `test`
@@ -1307,7 +1307,7 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
   share the same fate: no public read path.)
 - No functional behaviour yet; CI is green on a skeleton.
 
-### Phase 1 — State + persistence (≈ 1 week)
+### Phase 1 — State + persistence
 
 - `ddp-state` crate: full data model, factory loading, all mutation
   operations as specified in Decision 2. `is_factory` derived from
@@ -1319,7 +1319,7 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
   bidirectional `f32 dB ↔ i16` 1/16-dB conversion via `proptest`.
 - No engine, no server yet; verify with unit tests only.
 
-### Phase 2 — Engine integration (≈ 2 weeks)
+### Phase 2 — Engine integration
 
 - `ddp-engine-arm` binary: cross-compiled to ARMv7, runs under
   `qemu-arm-static`, loads `libdseffect.so`, implements the binary protocol
@@ -1357,7 +1357,7 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
   (cmd 3 GET unimplemented, no value-range clamp, asymmetric
   enable/disable crossfade — 7560 / 5512 samples at 44.1 kHz, etc.).
 
-### Phase 3 — Daemon server (≈ 1.5 weeks)
+### Phase 3 — Daemon server
 
 - `ddp-daemon` integrates state, engine supervisor, and the HTTP + WebSocket
   server.
@@ -1375,7 +1375,7 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - Plugin server accepts Windows named-pipe and AF_UNIX connections, allocates
   sessions, multiplexes audio.
 
-### Phase 4 — Solid UI (≈ 2–3 weeks)
+### Phase 4 — Solid UI
 
 Look-and-feel target is the original DDPlus Android UI — captured in
 [`docs/ui-reference/`](ui-reference/) (profile picker, per-profile
@@ -1403,7 +1403,7 @@ overlay).
   E2E against a real daemon driving the real engine (QemuBackend +
   `libdseffect.so`).
 
-### Phase 5 — Plugins (≈ 1.5 weeks)
+### Phase 5 — Plugins
 
 - Windows VST2 plugin (`ddp-vst-windows`): opens named pipe, ferries audio,
   launches the UI at `http://localhost:9876` via `ShellExecuteW` when
