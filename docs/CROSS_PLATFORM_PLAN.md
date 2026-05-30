@@ -161,7 +161,7 @@ The visualizer is a single `<svg>` with layered `<g>` groups:
    ~30fps from WebSocket visualizer data
 3. `spectrum-highlight` — identical rects at full brightness, clipped by
    `above-curve` so only the portion above the EQ curve is bright
-4. `eq-curve` — single `<path>` drawn as Catmull-Rom spline through control points
+4. `eq-curve` — single `<path>` drawn as a polyline with rounded joins (one vertex per engine band)
 5. `handles` — `<circle>` per EQ band with pointer events for dragging
 
 Bar heights quantized to grid cell height for a discrete "big pixel" appearance.
@@ -405,7 +405,7 @@ DolbyX/
 - SVG-based visualizer with layered rendering:
   - Background gradient + grid pattern
   - Spectrum bars (quantized to grid, dim + highlight layers)
-  - EQ curve (Catmull-Rom spline `<path>`)
+  - EQ curve (polyline `<path>` with rounded joins, one vertex per engine band)
   - Draggable handles (`<circle>` with pointer events)
   - `<clipPath>` intersection highlight
 - Configurable n-band EQ (user chooses band count)

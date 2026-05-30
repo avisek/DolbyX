@@ -952,64 +952,160 @@ in the profiles with their user-chosen name.
 This eliminates a UI affordance the user would have to make a decision about
 with no functional consequence.
 
-### Decision 10 — Visualizer pump rate and rendering
+### Decision 10 — Visualizer/Equalizer rendering and feel
 
-The pump runs at a fixed 50 ms cadence, matching the original DDP.
-Hardcoded as a named constant, easy to modify, not a user-facing
-setting:
+The V/E is the single most visible piece of DDP; it must feel identical
+to the original. Reference is the mobile DDPlus Android UI
+(`docs/ui-reference/original-ui-visualizer-eq-overlay.png`): 5 cyan
+circular thumbs riding a soft-glow cyan polyline over 20×48 spectrum
+bricks. All constants and rules below are transcribed from
+`decompiled/DsUI.apk/sources/com/dolby/ds1appUI/`.
+
+**Pump.** Fixed 50 ms cadence, matching DDP's `DsService` loop:
 
 ```rust
 // crates/ddp-daemon/src/visualizer_pump.rs
 pub const VISUALIZER_PUMP_INTERVAL: Duration = Duration::from_millis(50);
-pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // 10 ticks ≈ 500 ms hysteresis
+pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // matches
+                                                    // DsService.COUNTER_THRESHOLD; ≈500 ms
 ```
 
-The pump always reads from the **oldest session** (the first entry in
-the session list), regardless of suspended state — see Decision 4.
+The pump reads from the **oldest session** (Decision 4) via cmd 4
+(`DS_PARAM_VISUALIZER_DATA`) which returns `vcbg ‖ vcbe` as 40 int16s
+in one round-trip; the Engine trait wraps it as
+`VisualizerData { gains[20], excitations[20] }` (or `None` on empty).
+Suspend/resume is symmetric (matches `DsService.visualizerUpdate`):
+the threshold counter resets whenever the cmd 4 reply length
+changes, so 10 consecutive empty reads enter suspended and 10
+consecutive non-empty reads leave it. Entering broadcasts
+`{ "type": "vis_suspended", "suspended": true }` and suppresses
+`vis` events; leaving broadcasts `{ ..., "suspended": false }` and
+resumes them. While not suspended the pump broadcasts
+`{ "type": "vis", "gains": [...], "excitations": [...] }` with raw
+int16 1/16-dB values. There is no cmd 3 GET path and no
+separate ReadOnly channel — `vcbg`/`vcbe` are the only ReadOnly
+params in the metadata table and they already ride this event.
 
-Each tick:
+**SVG layer stack** (z-order, top of stack = drawn last):
 
-1. Call `engine.get_visualizer_data(session)`, which under the hood
-   issues a single engine cmd 4 (`DS_PARAM_VISUALIZER_DATA`) returning
-   `vcbg ‖ vcbe` as 40 int16s. The Engine trait wraps that as a
-   `VisualizerData { gains[20], excitations[20] }` (or `None` when
-   the engine has no fresh audio data — inferred from Java's
-   `DsService.visualizerUpdate` counter that increments on empty
-   cmd 4 reads; not directly exercised by the probe). No cmd 3 GET
-   is involved; cmd 3 GET doesn't exist in the engine.
-2. Suspended-state detection matches original DDP
-   (`DsService.visualizerUpdate`): a returned length of 0 (None) for
-   `VISUALIZER_SUSPENDED_THRESHOLD` consecutive ticks transitions into
-   suspended; a non-zero return for the same threshold transitions
-   back out. While suspended, the daemon broadcasts a single
-   `vis_suspended: true` and suppresses `vis` events until activity
-   resumes.
-3. Otherwise broadcast
-   `{ type: "vis", gains: [...], excitations: [...] }` with raw int16
-   1/16-dB values (UI converts on display). No separate ReadOnly
-   params channel ships with the event — `vcbg`/`vcbe` are the only
-   ReadOnly params in the metadata table and they already are
-   `gains`/`excitations`.
+1. Background — radial gradient (dark navy → near-black) via a
+   CSS variable theme.
+2. Grid — 1-px black `<line>`s between every column and row.
+3. Spectrum bricks — 20 cols × 48 rows. Brick `(c, r)` is filled iff
+   `excitation_idx(c) ≥ 47 - r`; colour: `r < 12` red, `12 ≤ r < 18`
+   yellow, `r ≥ 18` blue (`ROWS_RED = 12`, `ROWS_YELLOW = 6` in
+   `GraphicVisualiserPainter.java`). Empty rows render as the dark
+   "off" tile.
+4. Level pip — one brighter cyan brick per column at the row for
+   current `gains[c]` (the per-column EQ-curve indicator; sources
+   from `vcbg`, same as the curve).
+5. EQ overlay group — track + thumbs + curve glow + curve sharp,
+   wrapped in an `<g>` with a CSS `opacity` transition for fade.
 
-UI rendering — a single `<svg>` with layered groups matching the original DDP:
+**dB mapping.** `dB ∈ [-12, +36]` mapped to 48 rows of 1 dB each.
+Range is **asymmetric** — matches engine, not ±12. Overlay reserves
+`thumbHeight / 4` padding top **and** bottom; usable track is
+`H − 2·pad`.
 
-- Background: radial gradient (dark navy → near-black).
-- Spectrum bars: 20 columns × 48 rows driven by `gains`, quantized to
-  grid cells. Colour bands: red rows 0–11, yellow 12–17, blue 18–47.
-- EQ curve: Catmull-Rom spline through the profile's stored `geq` values (not
-  the `vcbg` read-back from the engine — the stored `geq` is the source of
-  truth, giving low-latency drag rendering).
-- Draggable knob handles for GEQ editing. Touch editing uses an event queue
-  with the `GAIN_SMOOTHER` kernel matching the original DDP's feel (see
-  [docs/ddp/04-ui-data-flow.md](ddp/04-ui-data-flow.md#example-2--moving-an-eq-slider)).
+**EQ curve.** Cyan `#75D2FF`, two-pass:
 
-**Reference source — match the original look and feel.** The original DDP
-V/E lives under `decompiled/DsUI.apk/sources/com/dolby/ds1appUI/`; study it
-when implementing to keep the v2 feel faithful:
+- Glow: stroke 10·scale, α 0x80 (50 %), SVG
+  `<filter><feGaussianBlur stdDeviation="4·scale"/></filter>`, ROUND
+  caps.
+- Sharp: stroke 3·scale, α 0xD0 (≈82 %), `stroke-linejoin="round"`
+  (default `BUTT` cap — the glow's rounded ends swallow the sharp
+  ends visually).
+
+The curve is a **polyline** with one vertex per engine band (=
+`genb`), **not** a Catmull-Rom spline. Linear segments + rounded
+joins reproduce the original mobile look (the original uses
+`CornerPathEffect(10·scale)` instead of `linejoin=round`; visually
+close enough at these stroke widths). Fractional thumb indices
+(when visible thumb count < band count) linearly interpolate Y
+between the two adjacent integer band gains
+(`GraphicEqualizerPainter.translateGaindBToY`).
+
+**Curve source.** The polyline reads from the latest `vis` event's
+`gains` array (= `vcbg`, cmd 4) during steady state, and falls back
+to the locally smoothed user buffer while `vis_suspended == true`.
+`vcbg ≠ gebg`: `gebg` is the user's GEQ input parameter, while
+`vcbg` is the composed EQ curve the engine is actually applying
+(`gebg` blended with `iebt` per `ieon`). The overlay must reflect
+what the engine produces, so `vcbg` is the only correct source —
+rendering from stored `gebg` would hide the IEQ contribution. A
+~50 ms drag lag is the structural consequence of the 50 ms vis pump
+round-trip; the original DDP wears the same lag for the same reason
+(`GraphicEqualizerPainter.onDraw` line 349 sources from `mGainsUi`,
+the vcbg buffer).
+
+**Thumbs.** Drawn at visible thumb positions only. During drag the
+actively-dragged band uses the `eq_thumb_touch_state` variant;
+every other thumb renders the default `eq_thumb` drawable. (The
+original's `Bright1/2/3` cascade exists in code but
+`Bright1 = Bright2 = eq_thumb`, so only distance 0 is visually
+distinct — replicate that, not a 3-step gradient.) Overlay fades in
+over **250 ms** on mousedown; **5000 ms** after last input it fades
+out (`SHOW_HIDE_ANIMATION_DURATION`, `IDLE_HIDE_DELAY`).
+
+**UI preferences** (persisted in browser `localStorage`, **not** in
+`config.toml` — they are display prefs, not state):
+
+| Pref                | Allowed values                           | Default  | Notes                                                                                                                                                                                                                             |
+| ------------------- | ---------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Visible thumb count | `N ∈ [2, genb]`; step = `(genb-1)/(N-1)` | `5`      | `N=5` → step 4.75 (matches reference screenshot, original mobile); `N=genb` → step 1 (original tablet, one thumb per band); other values (e.g. `N=10`) extend it. Capped at `genb` because the engine has no finer EQ resolution. |
+| Smoother kernel     | `Mobile` / `Soft` / `Direct`             | `Mobile` | See kernels below                                                                                                                                                                                                                 |
+
+Smoothing is **UI-only**. The wire and engine always carry the
+smoothed, clamped 20-band `gebg` regardless of UI prefs.
+
+**Touch/mouse pipeline.** A drag enqueues `(band, dB)` events into a
+per-instance ring buffer (cap 20); consecutive events for the same
+band overwrite. A `rAF`-throttled recalc loop drains the queue every
+**60 ms** (30 ms while `vis_suspended`):
+
+1. **handleNewTouchEvents** — for each event, compute
+   `newUserGain = touchGain - (uiGain[b] - smooth[b])` (when not
+   suspended; raw `touchGain` when suspended), then splat into
+   the inclusive (2L+1)-cell window `temp[b ..= b+2L]` (every cell
+   gets the same value — the "thick-brush" feel).
+2. **smoothenCurve** — for each `temp` cell _outside_ `[minEditGain,
+maxEditGain]`, decay toward the violated clamp with
+   `α = 0.5^(Δt / 0.3s)`; in-range cells are untouched. Then
+   convolve: `smooth[b] = Σ kernel[i] · temp[b + i]`. Skip-write
+   threshold `|new - old| > 0.02 dB`.
+3. Throttled `set_param gebg` — at most one per 60 ms; carries the
+   smoothed, clamped 20-band int16 1/16-dB array to the daemon.
+
+**Smoother kernels.**
+
+```ts
+const KERNELS = {
+  Mobile: { L: 2, k: [0.1, 0.25, 0.3, 0.25, 0.1] }, // original mobile
+  Soft: { L: 1, k: [0.25, 0.5, 0.25] }, // original tablet
+  Direct: { L: 0, k: [1.0] }, // no smoothing
+}
+```
+
+`τ = 0.3 s` exponential time-decay across all kernels.
+
+**Inverse smoother.** On EQ-preset change (or any daemon `state`
+broadcast that updates the active `gebg`), recompute `temp` from the
+new `gebg` via the selected kernel's 20×20 pseudoinverse so the next
+touch stays continuous. Precomputed
+`GAIN_SMOOTHER_INV_MOBILE` / `_SOFT` ship as TS constants — values
+come from `GraphicEqualizerPainter.java` lines 70–71 (`_TABLET` →
+`_SOFT`, `_MOBILE` → `_MOBILE`). `Direct`'s inverse is the identity.
+
+**Frequency labels.** Sourced at render time from the bootstrap
+metadata's `gebf` entry — no hardcoded labels — so a future engine
+with different band edges adapts automatically.
+
+**Reference source — match the original look and feel.** Study these
+when implementing:
 
 - `GraphicVisualiser.java` — SurfaceView host + paint thread
-- `GraphicVisualiserPainter.java` — spectrum bricks
-- `GraphicEqualizerPainter.java` — touch queue, smoother, inverse-smoother, curve, slider thumbs
+- `GraphicVisualiserPainter.java` — spectrum bricks, `convertValue` mapping
+- `GraphicEqualizerPainter.java` — kernels, inverse matrices, touch queue, glow paint setup, show/hide
 - `FragGraphicVisualizer.java` — fragment wiring, IEQ preset grid + custom + reset
 - `EqualizerAdapter.java` — IEQ preset cells
 
@@ -1290,8 +1386,8 @@ overlay).
   sliders (Volume Leveller / Dialog Enhancer / Surround Virtualizer),
   EQ preset picker, EQ preset reset, profile-level reset.
 - SVG visualizer matching the original DDP look: spectrum bars from
-  excitations, EQ curve overlay (Catmull-Rom spline), draggable
-  handles with `GAIN_SMOOTHER` kernel.
+  excitations, EQ curve overlay (polyline with rounded joins — see
+  Decision 10), draggable handles with `GAIN_SMOOTHER` kernel.
 - Profile and EQ-preset management: add, delete, rename.
 - Advanced panel auto-generated from `window.__BOOTSTRAP__.params`
   metadata, rendered as a CSS-grid of compact cards. Widget dispatch
