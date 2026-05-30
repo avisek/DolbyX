@@ -38,10 +38,13 @@ build a cleaner foundation that:
 5. Custom IEQ presets can be added, edited, renamed, and removed. IEQ
    presets are global — a change to a preset reflects across every profile
    that has it currently selected.
-6. Every one of `libdseffect.so`'s 64 AK parameters is exposed in the
-   Advanced UI section, driven by metadata — including non-settable
-   ones (for live monitoring) and engine-internal ones (DolbyX is also
-   a research vehicle for `libdseffect.so`).
+6. Every AK parameter that the engine surfaces (53 of `libdseffect.so`'s 64) is exposed in the Advanced UI section, driven by metadata — including
+   ReadOnly ones (for live monitoring) and Experimental ones (engine-internal
+   slots the original DDP UI hid; DolbyX is also a research vehicle for
+   `libdseffect.so`). The remaining 11 — 7 build-version / license slots
+   plus 4 native-visualizer slots (`vnnb`, `vnbf`, `vnbg`, `vnbe`) — have
+   no public read path and are dropped entirely; the engine version
+   surfaces via cmd 6.
 7. Backend-agnostic engine layer: the QEMU subprocess approach is the
    default for v2.0; Unicorn Engine and Static Binary Translation slot in
    as alternative backends without touching the rest of the code.
@@ -240,9 +243,14 @@ Visualizer/Equalizer, behind a toggle).
 
 ### Decision 3 — Parameter metadata as the single source of truth
 
-All 64 AK parameters are declared once in a static metadata table.
-Everything else — wire protocol, engine init, persistence, UI
-generation, range validation — derives from this table.
+53 of `libdseffect.so`'s 64 AK parameters are declared once in a static
+metadata table. (The other 11 — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+`lcsz`, `lcpt` (engine-internal build-version / license slots) plus
+`vnnb`, `vnbf`, `vnbg`, `vnbe` (native-visualizer slots) — have no public
+read path and are omitted; the engine version string is surfaced via cmd 6
+→ bootstrap `engine.version` instead.) Everything else — wire protocol,
+engine init, persistence, UI generation, range validation — derives from
+this table.
 
 ```rust
 pub struct ParameterDef {
@@ -252,7 +260,7 @@ pub struct ParameterDef {
     pub default: ParamDefault,          // scalar or per-band array
     pub kind: ParamKind,                // drives UI widget choice
     pub category: ParamCategory,        // for UI grouping
-    pub access: ParamAccess,            // Settable / ReadOnlyDynamic / ReadOnlyStatic / Experimental
+    pub access: ParamAccess,            // Settable / ReadOnly / Experimental
     pub label: &'static str,            // human-readable display name
     pub help: &'static str,             // tooltip text
     pub basic: bool,                    // member of the 5-bool digest
@@ -283,8 +291,7 @@ pub enum ParamKind {
 
 pub enum ParamAccess {
     Settable,                   // engine reads slot → write takes effect (42 Java-whitelisted)
-    ReadOnlyDynamic,            // DSP overwrites slot every audio block (vcbg, vcbe, vnb*)
-    ReadOnlyStatic,             // engine pre-populates at init, never re-reads (bver, ver, license)
+    ReadOnly,                   // DSP overwrites slot every audio block (vcbg, vcbe)
     Experimental,               // engine reads slot but original DDP UI hid it
 }
 
@@ -293,7 +300,7 @@ pub enum ParamCategory {
     VolumeLeveller, DialogEnhancer,
     HeadphoneVirtualizer, SpeakerVirtualizer, NextGenSurround,
     AudioRegulator, AudioOptimizer, VolumeMaximizer, PeakLimiter,
-    Visualizer, EndpointVolume, BuildVersion, License,
+    Visualizer, EndpointVolume,
 }
 ```
 
@@ -305,38 +312,37 @@ documents "scaled by 16 ie. 16 = 1 dB"); the metadata table stays
 the canonical source. `lkfs: bool` switches the unit label from
 `dB` to `LKFS` for `dvli`/`dvlo`.
 
-**Four-bucket settability classification.** This is a deliberate
+**Three-bucket settability classification.** This is a deliberate
 deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
 binary. Empirically, the engine accepts cmd 3 SET against any
 declared param and forwards the write to `ak_set` regardless of
 Java's `isParamSettable` whitelist (direct evidence in
 [tools/ddp_probe/](../tools/ddp_probe/README.md) section 5b). The
-four buckets are about **DSP semantics + UI presentation**, not
+three buckets are about **DSP semantics + UI presentation**, not
 engine-level acceptance:
 
 - **Settable** — every param in Java's `isParamSettable` whitelist
   (42 params). DSP reads the value and produces well-defined
   bounded behaviour. Editable widgets in the Advanced panel.
-- **ReadOnly-Dynamic** — `vcbg`, `vcbe` (directly observed via
-  cmd 4 — the DSP refreshes both slots every audio block);
-  `vnnb`, `vnbf`, `vnbg`, `vnbe` (Dynamic classification inferred
-  from naming symmetry with the `vcb*` family — there's no host
-  read path so we can't verify the refresh rate directly).
-  Any host write is clobbered on the next block for the directly
-  observed pair; the `vnb*` family follows by inference. Read via
-  cmd 4 only (cmd 4 returns `vcbg ‖ vcbe` as 40 int16s; the
-  `vnb*` family is engine-internal and unreadable from outside).
-  Live-updated read-only displays in the UI ride the visualizer
-  pump (see Decision 4 and Decision 10).
-- **ReadOnly-Static** — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-  `lcsz`, `lcpt`. The engine pre-populates these cache slots from
-  its internal AK registry at DEFINE_SETTINGS time (engine log
-  `ak_get(0/bver, 0..4)`, etc.) and never reads them again at
-  runtime. The bundle/build constants (`bver`/`bndl`/`ver`) and the
-  license blob (`lcmf`/`lcsz`/`lcpt`) and auth result (`lcvd`) are
-  stable for the lifetime of the engine instance. Only `ver` is
-  reachable from outside, via cmd 6. Ship the rest once in the
-  state snapshot if at all.
+- **ReadOnly** — `vcbg`, `vcbe` only. Directly observed via cmd 4:
+  the DSP refreshes both slots every audio block, so any host write
+  is clobbered on the next block. Cmd 4 returns `vcbg ‖ vcbe` as
+  40 int16s in one round-trip; live-updated read-only displays in
+  the UI ride the visualizer pump (see Decision 4 and Decision 10).
+  Two families of slots that would naturally fit "ReadOnly" by DSP
+  semantics are excluded from the metadata table entirely because
+  they have no public read path: (a) engine-internal build-version
+  / license slots (`bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`,
+  `lcpt`) — the engine pre-populates them at DEFINE_SETTINGS time
+  from its internal AK registry but cmd 3 GET is unimplemented and
+  cmd 4 returns only `vcbg`/`vcbe`; (b) the native-visualizer family
+  (`vnnb`, `vnbf`, `vnbg`, `vnbe`) — same fate, no cmd 4 path,
+  inferred-Dynamic from naming symmetry with `vcb*` but unverifiable
+  from outside. Both groups would only ever surface static
+  pre-populated values, so DolbyX drops them. The engine version
+  string, which the original DDP UI does display, is exposed via
+  the bootstrap `engine.version` field (sourced from cmd 6) instead
+  of as an AK parameter — see Decision 6.
 - **Experimental** — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`. Editable behind an
@@ -392,10 +398,10 @@ metadata into `window.__BOOTSTRAP__` on every `GET /`).
 4-CC code, the human label, the current value(s), and either an input
 (Settable / Experimental) or a read-only display (ReadOnly).
 Experimental cards get a small "experimental" badge. Long arrays
-(`aobg` ≤ 329, `lcpt` 168, `arbi`/`arbl`/`arbh`/`aobf`/`arbf` 40)
-render in a wide card with `grid-column: 1 / -1`, collapsed behind a
-toggle by default. Tiny scalars pack densely; bulky arrays stay out
-of the way. Category headers introduce visual groupings.
+(`aobg` ≤ 329, `arbi`/`arbl`/`arbh`/`aobf`/`arbf` 40) render in a wide
+card with `grid-column: 1 / -1`, collapsed behind a toggle by default.
+Tiny scalars pack densely; bulky arrays stay out of the way. Category
+headers introduce visual groupings.
 
 ### Decision 4 — Wire protocol: name-based, originator-aware
 
@@ -454,9 +460,9 @@ Events (daemon → client):
 The full `state` snapshot is also sent on `get_state`, on connect, and any
 time the daemon's internal state mutates from a non-WS source (e.g. config
 file edit reload). At DolbyX's state scale (hundreds of bytes) full
-snapshots are preferable to partial diffs. Static ReadOnly params (`bver`,
-`bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`) are included in this
-snapshot once and never re-broadcast — they don't change at runtime.
+snapshots are preferable to partial diffs. The snapshot carries user-state
+only; engine metadata (version, backend) is delivered once via the bootstrap
+`engine` field on page load — see Decision 6.
 
 **Validation: two layers, asymmetric responsibilities.**
 
@@ -500,19 +506,14 @@ that session ends, at which point the next-oldest becomes the source.
 This keeps the visualiser predictable and avoids flicker between
 sources.
 
-**Dynamic ReadOnly param updates.** Dynamic ReadOnly params (`vcbg`,
-`vcbe`) are read from the engine via **cmd 4
-(`DS_PARAM_VISUALIZER_DATA`) only** — the engine has no cmd 3 GET
-path, so there's no fallback. Cmd 4 returns `vcbg ‖ vcbe` as 40
-int16s in one round-trip; the visualizer pump polls at 50 ms
-(Decision 10) and embeds the result in the `vis` event. `vnnb`,
-`vnbf`, `vnbg`, `vnbe` are engine-internal native-visualizer state
-with no read path at all — DolbyX exposes them as ReadOnly in the
-metadata table for completeness but they will only ever show their
-DEFINE_SETTINGS-time pre-population values. Experimental params
-(`preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`,
-`vcbf`) update through the regular state-snapshot path since the
-daemon owns the write side.
+**ReadOnly param updates.** The ReadOnly bucket has exactly two members,
+`vcbg` and `vcbe`, both read from the engine via **cmd 4
+(`DS_PARAM_VISUALIZER_DATA`) only** — the engine has no cmd 3 GET path, so
+there's no fallback. Cmd 4 returns `vcbg ‖ vcbe` as 40 int16s in one
+round-trip; the visualizer pump polls at 50 ms (Decision 10) and embeds the
+result in the `vis` event. Experimental params (`preg`, `pstg`, `endp`,
+`mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`) update through the regular
+state-snapshot path since the daemon owns the write side.
 
 The daemon serves no `/api/*` endpoints. Parameter metadata and the
 initial state snapshot are injected into the served `index.html` as
@@ -637,23 +638,31 @@ qemu-user-static` on the Linux image; `libdseffect.so` is bundled in
   `eslint-plugin-solid`, **Prettier**.
 
 **Bootstrap injection.** The daemon templates `index.html` at request
-time and injects parameter metadata + the initial state snapshot as a
-single `window.__BOOTSTRAP__` global:
+time and injects parameter metadata, the initial state snapshot, and
+runtime engine info as a single `window.__BOOTSTRAP__` global:
 
 ```ts
 window.__BOOTSTRAP__: {
-  params: ParameterDef[],   // full metadata table — no /api/parameters
-  state: StateSnapshot,     // identical shape to the WebSocket "state" event
+  params: ParameterDef[],            // full metadata table — no /api/parameters
+  state: StateSnapshot,              // user-state — mirrors the WebSocket "state" event
+  engine: {                          // engine-info — bootstrap-only, immutable for session
+    version: string,                 // cmd 6 result, e.g. "APPv1 version 2.0.4.0"
+    backend: "qemu" | "unicorn" | "sbt",
+  },
 }
 ```
 
-The `state` payload includes static ReadOnly params (`bver`, `bndl`,
-`ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`) — the WebSocket `state` event no
-longer needs to ship them as a one-shot at connect. The UI reads
+The bootstrap shape is intentionally wider than the WS `state` event:
+`engine` is sent once on page load and never re-broadcast (cmd 6 returns
+the same string for the lifetime of the engine subprocess). The daemon
+reads `state` from the shared state lock and `engine` from
+`EngineSupervisor::info()` when serializing the bootstrap. The UI reads
 `window.__BOOTSTRAP__` synchronously at module init, hydrates the Solid
-store, and paints the full UI on the first frame. The WebSocket then
-connects in the background; its `state` event reconciles any drift
-between HTML render time and WS connect time (and handles reconnects).
+store, and paints the full UI — including any "About" / footer display
+of `engine.version` — on the first frame. The WebSocket then connects in
+the background; its `state` event reconciles any drift between HTML
+render time and WS connect time (and handles reconnects) without needing
+to re-deliver `engine`.
 
 There is intentionally no `/api/*` endpoint in dev or prod. Bootstrap
 injection is the only mechanism.
@@ -979,9 +988,8 @@ Each tick:
    `{ type: "vis", gains: [...], excitations: [...] }` with raw int16
    1/16-dB values (UI converts on display). No separate ReadOnly
    params channel ships with the event — `vcbg`/`vcbe` are the only
-   ReadOnlyDynamic params with a real read path and they already are
-   `gains`/`excitations`; the `vnb*` family is engine-internal and
-   unreadable.
+   ReadOnly params in the metadata table and they already are
+   `gains`/`excitations`.
 
 UI rendering — a single `<svg>` with layered groups matching the original DDP:
 
@@ -1070,6 +1078,16 @@ pub struct EqPreset {
     pub is_geq_on: bool,
     pub geq_band_gains: [i16; 20],
 }
+
+// Runtime engine facts — not part of persistent State.
+// Owned by EngineSupervisor; populated once at engine init from
+// `Engine::version()` (cmd 6) plus the configured backend name.
+// Surfaced to the UI via the bootstrap `engine` field (Decision 6);
+// never broadcast over the WebSocket.
+pub struct EngineInfo {
+    pub version: String,
+    pub backend: &'static str, // "qemu" | "unicorn" | "sbt"
+}
 ```
 
 `is_factory` is derived at load time, not stored: any id present in
@@ -1109,7 +1127,7 @@ DolbyX/
 │   │   ├── src/profile.rs
 │   │   ├── src/preset.rs
 │   │   ├── src/state.rs             #   State aggregate + all mutations
-│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 64 entries)
+│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 53 entries)
 │   │   └── src/conversion.rs        #   int16 ↔ dB helpers (used by UI tests too)
 │   ├── ddp-persistence/             # TOML load/save — separate from state logic
 │   │   ├── src/lib.rs
@@ -1184,10 +1202,13 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - `defaults.toml` created with factory profiles and EQ presets
   transcribed from `ds1-default.xml`.
 - AK parameter metadata table (`parameters.toml` + codegen) populated
-  with all 64 entries from
+  with all 53 surfaced entries from
   [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md), with the
-  four-bucket Settable / ReadOnlyDynamic / ReadOnlyStatic / Experimental
-  classification from Decision 3.
+  three-bucket Settable / ReadOnly / Experimental classification from
+  Decision 3. (The 11 omitted entries — 7 engine-internal build-version
+  / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`
+  plus the 4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` —
+  share the same fate: no public read path.)
 - No functional behaviour yet; CI is green on a skeleton.
 
 ### Phase 1 — State + persistence (≈ 1 week)
@@ -1207,17 +1228,18 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - `ddp-engine-arm` binary: cross-compiled to ARMv7, runs under
   `qemu-arm-static`, loads `libdseffect.so`, implements the binary protocol
   with correct init handshake:
-  - `DEFINE_PARAMS` with all 64 canonical 4-CC names.
-  - **`DEFINE_SETTINGS` with all 64 params** expanded into their full
-    `(param_idx, offset)` ranges per element (667 cache slots =
-    1334 bytes per device; init payload ~2 KB). The host must know
+  - `DEFINE_PARAMS` with all 53 surfaced 4-CC names (omits the 11
+    build-version / license / native-visualizer slots — no public read
+    path; engine version flows via cmd 6 → bootstrap `engine.version`).
+  - **`DEFINE_SETTINGS` with all 53 params** expanded into their full
+    `(param_idx, offset)` ranges per element (~422 cache slots =
+    ~844 bytes per device; init payload ~0.8 KB). The host must know
     the intended `genb`/`ienb`/`aonb` values when building this
     payload so the dependent multi-element params (`gebg`, `aobg`,
     `vcbg`, etc.) get the right slot count. This includes the
-    "ReadOnly" and "Experimental" buckets so every AK param has a
-    cache slot — the engine pre-populates them from its own AK
-    registry via internal `ak_get` calls, and cmd 3 SET against any
-    of them propagates through to `ak_set` (proven by
+    "ReadOnly" and "Experimental" buckets so every surfaced AK param
+    has a cache slot; cmd 3 SET against any of them propagates
+    through to `ak_set` (proven by
     [tools/ddp_probe/](../tools/ddp_probe/README.md)).
   - Constant-params dance: after DEFINE_SETTINGS, write `genb=20`,
     `ienb=20`, `aonb=20`, `gebf=[…]` (and `iebf`, `aobf`, `arbf` if
@@ -1244,8 +1266,8 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - `ddp-daemon` integrates state, engine supervisor, and the HTTP + WebSocket
   server.
 - `GET /` serves `index.html` with `window.__BOOTSTRAP__` injected
-  (params + initial state). Dev mode produces a hardcoded HTML literal
-  pointing to Vite's module entry at `:5173`; prod mode (with the
+  (params + initial state + `engine` info). Dev mode produces a hardcoded
+  HTML literal pointing to Vite's module entry at `:5173`; prod mode (with the
   `embedded-ui` Cargo feature) reads the rust-embed asset and
   string-replaces `<!--BOOTSTRAP-->`. No `/api/*` routes exist —
   see Decision 6.
@@ -1273,11 +1295,12 @@ overlay).
 - Profile and EQ-preset management: add, delete, rename.
 - Advanced panel auto-generated from `window.__BOOTSTRAP__.params`
   metadata, rendered as a CSS-grid of compact cards. Widget dispatch
-  collapses `ReadOnlyDynamic` and `ReadOnlyStatic` onto the same
-  read-only display kind (the Static-vs-Dynamic distinction is
-  informational metadata for the daemon's update logic, not a UI
-  mode); editable widgets light up for `Settable`; `Experimental`
-  gets the editable widget plus an "experimental" badge (Decision 3).
+  maps `ReadOnly` to a live-updated read-only display; `Settable` and
+  `Experimental` get editable widgets; `Experimental` adds a small
+  "experimental" badge (Decision 3).
+- "About" / footer surface rendering `window.__BOOTSTRAP__.engine`:
+  `Engine: QEMU · libdseffect.so 2.0.4.0` (or analogous strings as
+  backends evolve). Diagnostic, not a control.
 - BEM CSS + CSS variables for theming; SVG visualizer; no Tailwind.
 - WebSocket auto-reconnect, dev/prod build flows.
 - Tests: Vitest for components with a mocked WebSocket; Playwright
@@ -1365,23 +1388,23 @@ for both end users and contributors.
 
 ## What this changes vs v1
 
-| Aspect                    | v1                                                   | v2                                                                                                                                                                        |
-| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon language           | C                                                    | Rust                                                                                                                                                                      |
-| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                              |
-| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                              |
-| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                               |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                            |
-| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                        |
-| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET-only; cmd 4 for visualizer, cmd 6 for version, daemon caches everything else                 |
-| Param coverage            | 24 of 64 AK params                                   | All 64 in DEFINE_PARAMS and DEFINE_SETTINGS; Settable / ReadOnly-Dynamic / ReadOnly-Static / Experimental classification per docs/ddp/02                                  |
-| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state) into `index.html`; embedded at release build |
-| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                         |
-| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                    |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                       |
-| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                   |
-| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                          |
-| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                |
+| Aspect                    | v1                                                   | v2                                                                                                                                                                                      |
+| ------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon language           | C                                                    | Rust                                                                                                                                                                                    |
+| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                                            |
+| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                                            |
+| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                                             |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                                          |
+| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                      |
+| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET-only; cmd 4 for visualizer, cmd 6 for version, daemon caches everything else                               |
+| Param coverage            | 24 of 64 AK params                                   | All 53 surfaced AK params in DEFINE_PARAMS/SETTINGS; Settable / ReadOnly / Experimental per docs/ddp/02; 11 unreadable slots omitted (7 license/build, 4 vnb\*)                         |
+| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build |
+| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                                       |
+| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                                  |
+| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                                     |
+| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                 |
+| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                        |
+| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                              |
 
 ## Deferred technical questions
 

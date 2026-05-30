@@ -117,9 +117,11 @@ no-op when referenced later — `ak_set` against it will log
 > only sends those 24, and so the engine assigns them indices 0..23. But
 > this means parameters NOT in that list cannot be referenced by index.
 >
-> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with all 64
-> canonical AK names from [02-ak-parameters.md](02-ak-parameters.md).
-> Storage cost is 258 bytes; the gain is symmetry with the metadata
+> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with the 53
+> surfaced AK names from [02-ak-parameters.md](02-ak-parameters.md)
+> (drops 11 unreadable engine-internal slots: `bver`, `bndl`, `ver`,
+> `lcmf`, `lcvd`, `lcsz`, `lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`).
+> Storage cost is ~210 bytes; the gain is symmetry with the metadata
 > table and access to the "Experimental" bucket (`endp`, `preg`,
 > `pstg`, `mxou`, etc.) that the original UI hides.
 
@@ -172,11 +174,13 @@ The exact total depends on `aonb` (which sets `aobf` to length 40 and
 > [Cmd 3 GET](#cmd-3-get-unimplemented) below), not slot-allocation.
 
 > **Recommendation for DolbyX v2**: emit one entry per `(param_idx,
-offset)` for every offset in every settable param's value array,
-> matching the original DDP layout. Better yet, include all 64 params
-> in DEFINE_SETTINGS so every AK param has a cache slot — the cost is
-> ~2 KB of cache, the gain is access to "Experimental" writes plus the
-> [pre-population side effect](#settings-cache-lifecycle).
+> offset)` for every offset in every surfaced param's value array,
+> matching the original DDP layout. DolbyX v2 includes all 53 surfaced
+> AK params (drops the 11 unreadable slots — see DEFINE_PARAMS
+> recommendation above and the "DEFINE_SETTINGS scope" subsection
+> below) so every surfaced param has a cache slot — the cost is
+> ~0.8 KB of cache, the gain is access to "Experimental" writes plus
+> the [pre-population side effect](#settings-cache-lifecycle).
 
 ## Steady-state SET commands
 
@@ -436,22 +440,29 @@ After step 10 the engine actually starts processing audio when
 
 The original DDP service restricts DEFINE_SETTINGS to the 42 params
 in Java's `DsAkSettings.isParamSettable` whitelist. DolbyX v2's
-research-vehicle goal is better served by **including all 64 params**:
+research-vehicle goal is better served by **including the 53 surfaced
+params** (everything from
+[02-ak-parameters.md](02-ak-parameters.md) except the 11 unreadable
+engine-internal slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`,
+`lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`):
 
-- Cache cost is ~2 KB (`667` slots × 2 bytes) — negligible.
-- Every param gets cache pre-population from the engine's internal
-  AK state at DEFINE_SETTINGS time (see
+- Cache cost is ~0.8 KB (`~422` slots × 2 bytes) — negligible.
+- Every surfaced param gets cache pre-population from the engine's
+  internal AK state at DEFINE_SETTINGS time (see
   [Settings cache lifecycle](#settings-cache-lifecycle)).
 - The "Experimental" bucket (`endp`, `mxou`, `preg`, `pstg`, `vol`,
   `ven`, `vcnb`, `vcbf`, `ocf`) becomes addressable via cmd 3 SET.
-- The "ReadOnly" buckets get cache slots too, which doesn't hurt
-  anything (the DSP either overwrites them every block or doesn't
-  read them at runtime).
+- The "ReadOnly" bucket (`vcbg`, `vcbe`) gets cache slots too, which
+  doesn't hurt anything (the DSP overwrites them every block; the
+  host reads them out-of-band via cmd 4).
+- The 11 excluded slots are skipped because they have no host read
+  path — the engine version surfaces via cmd 6 → bootstrap
+  `engine.version`, and the rest carry no DolbyX-visible state.
 
-The empirical evidence that this works is in
+The empirical evidence that the all-cache variant works is in
 [tools/ddp_probe/](../../tools/ddp_probe/README.md) — the harness
 runs with all-64 DEFINE_SETTINGS and the engine emits `reply=0` for
-every write.
+every write; subsetting to 53 is purely a host-side choice.
 
 ### What the original service does
 
@@ -606,20 +617,33 @@ during DEFINE_SETTINGS show three things:
    cache isn't a "stage and apply" buffer; writes propagate
    immediately into the engine's internal DSP-input state.
 
-What the DSP does with that state then depends on the param:
+What the DSP does with that state then depends on the param. DolbyX v2
+surfaces three buckets, each derived from observed DSP behaviour:
 
 - **Settable params** — DSP reads each block.
-- **ReadOnly-Dynamic** (`vcbg`, `vcbe`, `vnnb`, `vnb*`) — DSP
-  overwrites the cache+AK slot every block with its own computed
-  value. Writes are clobbered.
-- **ReadOnly-Static** (`bver`, `bndl`, `ver`) — DSP doesn't read the
-  cache for these at runtime; they're internal identity constants.
-  Writes succeed at the protocol level but have no observable effect.
+- **ReadOnly** (`vcbg`, `vcbe`) — DSP overwrites the cache+AK slot
+  every block with its own computed value. Writes are clobbered.
+  The host reads them via cmd 4.
 - **Experimental** (`endp`, `mxou`, `preg`, etc.) — DSP reads them
   on the same audio block. The probe's section 7 directly demonstrates
   the raw-int16-reading property for the Settable bucket (`dvla`,
   `vmb`); the universal ak_set forwarding in section 5b means the
   same property applies to every Experimental param.
+
+A fourth group of 11 AK slots is **excluded** from DolbyX v2's
+surfaces (DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because
+they share one trait — no host read path:
+
+- Engine-internal identity / license slots: `bver`, `bndl`, `ver`,
+  `lcmf`, `lcvd`, `lcsz`, `lcpt`. DSP doesn't read them at runtime;
+  the engine pre-populates them from its internal AK registry at
+  DEFINE_SETTINGS time. Writes succeed at the protocol level but
+  have no observable effect. The engine version string (`ver`) is
+  reachable via cmd 6 and surfaces as `engine.version` on the
+  bootstrap rather than as an AK parameter.
+- Native-visualizer slots: `vnnb`, `vnbf`, `vnbg`, `vnbe`. Same
+  fate; naming symmetry with `vcb*` suggests they're Dynamic in the
+  DSP sense, but that's unverifiable from outside (no cmd 4 path).
 
 The bucket classification lives in
 [02-ak-parameters.md](02-ak-parameters.md#engine-vs-java-settability).

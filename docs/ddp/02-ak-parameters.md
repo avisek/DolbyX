@@ -59,6 +59,11 @@ or 3, not by 4-CC. (See [03-binary-protocol.md](03-binary-protocol.md).)
 
 ### Build / version (read-only)
 
+These slots have no host read path (cmd 3 GET is unimplemented). DolbyX v2
+drops all three from the metadata table — `ver` is reachable via cmd 6 and
+is surfaced as `engine.version` on the bootstrap instead. See
+"Recommendation for DolbyX v2" below.
+
 |   # | 4-CC   | len | bounds      | settable | Description                                                            |
 | --: | ------ | --: | ----------- | -------- | ---------------------------------------------------------------------- |
 |   0 | `bver` |   5 | int16 range | no       | Build version (5 int16s, opaque)                                       |
@@ -199,7 +204,9 @@ grid (1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rend
 
 These look identical in shape to the `vc*` family and exist alongside
 them. They are not used by the standard UI and exist for the engine's
-own internal monitoring. None of them are read by `DsClient`.
+own internal monitoring. None of them are read by `DsClient`. DolbyX v2
+drops the `vnb*` family entirely (no cmd 4 path, no cmd 3 GET) — see the
+"Recommendation for DolbyX v2" section below.
 
 |   # | 4-CC   | len | bounds | settable | Description                                                   |
 | --: | ------ | --: | ------ | -------- | ------------------------------------------------------------- |
@@ -220,7 +227,9 @@ own internal monitoring. None of them are read by `DsClient`.
 ### Licensing
 
 These exist to gate features behind an SKU. In the v8.1 build all features
-are enabled (`<authorized_technologies>` in `ds1-default.xml`).
+are enabled (`<authorized_technologies>` in `ds1-default.xml`). DolbyX v2
+drops all four from the metadata table — no host read path, opaque
+payloads.
 
 |   # | 4-CC   | len | bounds    | settable | Description                                    |
 | --: | ------ | --: | --------- | -------- | ---------------------------------------------- |
@@ -356,14 +365,26 @@ This includes writes to `bver` (`ak_set(0/bver, 0) = 9999`), `bndl`,
 fire.
 
 What differs across "non-settable" params is **whether the DSP uses
-the value afterwards**:
+the value afterwards** and, separately, **whether there is a host read
+path**. DolbyX v2 collapses this into three buckets, each of which is
+surfaced in the UI; engine-internal slots with no read path are dropped
+from the metadata table entirely (see "Recommendation for DolbyX v2"
+below for the exclusion list):
 
-| Bucket                                                                                                                                                                                                                             | DSP behaviour                                                                                                                                                 | Engine cache slot                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **Settable** (42 params)                                                                                                                                                                                                           | DSP reads the value and produces well-defined bounded behaviour                                                                                               | yes (Java includes them in DEFINE_SETTINGS) |
-| **ReadOnly-Dynamic** — `vcbg`, `vcbe` (directly observed via cmd 4); `vnnb`, `vnbf`, `vnbg`, `vnbe` (Dynamic classification inferred from naming symmetry — no host read path, so the per-block refresh isn't directly observable) | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered.                                                    | no in Java's setup; can be added by DolbyX  |
-| **ReadOnly-Static** — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`                                                                                                                                                        | Engine pre-populates the slot at DEFINE_SETTINGS time via internal `ak_get`; DSP doesn't subsequently read for processing. Only `ver` is reachable via cmd 6. | no in Java's setup                          |
-| **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`                                                                                                                                             | DSP reads them; behavior is well-defined. Original DDP UI hides them.                                                                                         | no in Java's setup; included by DolbyX v2   |
+| Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
+| **ReadOnly** — `vcbg`, `vcbe`                                                          | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
+| **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf` | DSP reads them; behavior is well-defined. Original DDP UI hides them.                                      | no in Java's setup; included by DolbyX v2                    |
+
+The remaining 11 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+`lcsz`, `lcpt` (engine-internal build-version / license; DSP doesn't
+read at runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`,
+`vnbf`, `vnbg`, `vnbe` (native-visualizer state; same DSP-overwrites
+inferred shape as `vcb*` but with no host read path) — share one trait:
+no public read path. Only `ver` is reachable from outside, via cmd 6,
+which DolbyX v2 surfaces as `engine.version` rather than as an AK
+parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and DEFINE_SETTINGS.
 
 The behavioral evidence that the DSP reads the raw int16 — even
 when out of range — is direct. The probe's section 7 sweeps `vmb`
@@ -408,24 +429,38 @@ but they are there.
 
 ## Recommendation for DolbyX v2
 
-The rearchitecture plan's Decision 3 takes the empirical evidence
-above and turns it into the same four-bucket classification:
+The rearchitecture plan's Decision 3 collapses the empirical evidence
+above into a three-bucket classification of the **53 params that get
+surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
 
-- **Settable** — every param with `settable = yes` above. Daemon
-  validates against metadata; engine accepts the forwarded write
-  into both the settings cache and AK registry.
-- **ReadOnly-Dynamic** — `vcbg`, `vcbe` (directly observed);
-  `vnnb`, `vnbf`, `vnbg`, `vnbe` (Dynamic classification inferred
-  from naming symmetry — no host read path). Writes have no
-  useful effect (DSP overwrites the slot every audio block for
-  the directly observed pair; the `vnb*` family follows by
-  inference). `vcbg`/`vcbe` are readable via cmd 4.
-- **ReadOnly-Static** — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-  `lcsz`, `lcpt`. Pre-populated at init. Only `ver` is reachable
-  (via cmd 6).
-- **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`,
-  `vol`, `vcnb`, `vcbf`. DSP reads them. Settable behind a UI badge.
+- **Settable** (42 params) — every param with `settable = yes` above.
+  Daemon validates against metadata; engine accepts the forwarded
+  write into both the settings cache and AK registry.
+- **ReadOnly** (2 params) — `vcbg`, `vcbe`. DSP overwrites both slots
+  every audio block, so writes are clobbered. Readable from outside
+  via cmd 4 (`DS_PARAM_VISUALIZER_DATA`), which returns
+  `vcbg ‖ vcbe` as 40 int16s. Rendered as live read-only displays
+  driven by the visualizer pump.
+- **Experimental** (9 params) — `preg`, `pstg`, `endp`, `mxou`, `ocf`,
+  `ven`, `vol`, `vcnb`, `vcbf`. DSP reads them. Settable behind a UI
+  badge.
 
-For v2, **the daemon should DEFINE_SETTINGS all 64 params** (costs
-~2 KB of cache) so every AK param has a slot and the cache
-pre-population side effect fires for everything.
+The remaining 11 AK slots are dropped entirely:
+
+- `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` —
+  engine-internal build-version / license slots. DSP doesn't read
+  them at runtime; the engine pre-populates them at DEFINE_SETTINGS
+  time via internal `ak_get` but there is no host read path. The
+  one externally-visible value, the engine version string, comes
+  out of cmd 6 and is surfaced as `engine.version` on the bootstrap
+  rather than as an AK parameter.
+- `vnnb`, `vnbf`, `vnbg`, `vnbe` — the native-visualizer family.
+  Same fate as the license slots from DolbyX's perspective: no cmd 4
+  path, no cmd 3 GET, would only ever show static
+  DEFINE_SETTINGS-time pre-population values. Naming symmetry with
+  `vcb*` suggests they're Dynamic in the DSP sense, but that's
+  unverifiable from outside.
+
+This brings DEFINE_SETTINGS to **~422 cache slots (~844 bytes,
+≈0.8 KB per device)**, a clean ~58 % reduction from the all-64 baseline
+without losing anything user-visible.
