@@ -5,6 +5,42 @@ in light of the comprehensive DDP reverse engineering captured under
 [docs/ddp/](ddp/README.md). It supersedes [docs/CROSS_PLATFORM_PLAN.md](CROSS_PLATFORM_PLAN.md)
 once implementation begins.
 
+Companion docs:
+
+- **[`CONTEXT.md`](../CONTEXT.md)** — domain glossary (terms only). The
+  plan uses these terms exactly; do not drift.
+- **[`docs/adr/`](adr/)** — hard-to-reverse decisions captured as
+  Architecture Decision Records. Each ADR is a short paragraph; the plan
+  links into them rather than re-stating rationale.
+
+## Progress
+
+Live progress across the 11 v2.0 slices. Per-behavior checklists live inside
+each slice section below; this table is the at-a-glance summary. Status
+values: `not started`, `in progress`, `done`, `blocked`.
+
+| Slice | Title                                         | Status        | Notes                                              |
+|-------|-----------------------------------------------|---------------|----------------------------------------------------|
+| 0     | Workspace bootstrap                           | not started   | scaffold-only, no TDD                              |
+| 1     | Power toggle, persisted end-to-end            | not started   | **tracer bullet** — first vertical slice           |
+| 2     | Factory profile selection applies AK overrides| not started   |                                                    |
+| 3     | Factory EQ presets apply IEQ curves           | not started   |                                                    |
+| 4     | Master controls (VL / DE / SV)                | not started   | the signature DDP main-screen controls             |
+| 5     | Visualizer pump + suspended-state detection   | not started   |                                                    |
+| 6     | GEQ editing with smoother + inverse           | not started   | HITL — golden snapshots                            |
+| 7     | Custom profiles & EQ presets (full CRUD)      | not started   |                                                    |
+| 8     | Advanced panel auto-generated                 | not started   |                                                    |
+| 9     | Real engine (`QemuBackend`) — swap & replay   | not started   | HITL — first QEMU green requires manual debug      |
+| 10    | Plugins ferry audio (VST2 + LV2)              | not started   | HITL — manual install for smoke-test               |
+| v2.1+ | Unicorn backend                               | not started   | replays Slices 1–8 under `--features unicorn`      |
+| v3.0  | macOS port                                    | not started   |                                                    |
+| opt   | Shared-memory ring buffers                    | not started   | latency optimization, no version pin               |
+
+Each slice below is implemented one at a time with the `/tdd` skill —
+vertical tracer bullets, never horizontal layer slices. Update the
+row above when a slice transitions, and tick the per-behavior boxes
+inside the slice section as RED → GREEN advances.
+
 ## Why a rearchitecture
 
 The current DolbyX codebase was built incrementally and proved the concept:
@@ -56,7 +92,7 @@ build a cleaner foundation that:
 
 **Non-goals (this phase):**
 
-- macOS support — its own milestone, after Phase 5.
+- macOS support — its own milestone, after v2.0.
 - Replacing QEMU as the ARM emulation backend — kept as a swap-in for a
   later phase.
 - Code signing and notarization.
@@ -124,6 +160,8 @@ build a cleaner foundation that:
 
 ### Decision 1 — Backend-agnostic engine, QEMU subprocess as v2.0 default
 
+> Persistent record: [ADR-0002 — Backend-agnostic engine, QEMU subprocess as v2.0 default](adr/0002-backend-agnostic-engine-qemu-default.md).
+
 The daemon talks to the engine through a `trait Engine` (Rust):
 
 ```rust
@@ -163,7 +201,7 @@ Three impls are anticipated, but only one ships in v2.0:
 | Backend               | Status           | Where it works                 | Notes                                                                                                                                                                                     |
 | --------------------- | ---------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `QemuBackend`         | **v2.0 default** | Linux native; Windows via WSL2 | One shared `qemu-arm-static` subprocess that holds `libdseffect.so` and multiplexes all sessions. Communicates with the daemon over stdin/stdout using a length-prefixed binary protocol. |
-| `UnicornBackend`      | Future (Phase 6) | Native on all platforms        | Custom ELF loader + Android stub library + Unicorn JIT, all inside the daemon process. Eliminates WSL on Windows. Identical Engine trait surface.                                         |
+| `UnicornBackend`      | Future (v2.1)    | Native on all platforms        | Custom ELF loader + Android stub library + Unicorn JIT, all inside the daemon process. Eliminates WSL on Windows. Identical Engine trait surface.                                         |
 | `StaticBinaryBackend` | Speculative      | Native on all platforms        | ARM → x86_64 binary translation at build time. Native speed, large engineering effort.                                                                                                    |
 
 The trait surface is intentionally narrow so any backend can implement it.
@@ -177,6 +215,8 @@ When the Unicorn or static-binary backend lands, the daemon configuration
 swaps the trait impl and nothing else changes.
 
 ### Decision 2 — IEQ presets are global, decoupled from profiles, generalized as EQ presets
+
+> Persistent record: [ADR-0003 — Global EQ presets, GEQ owned by preset](adr/0003-global-eq-presets-and-geq-per-preset.md).
 
 A clean simplification over the original DDP model.
 
@@ -242,6 +282,8 @@ DolbyX will support editing the `iebt` curve as well (through the same
 Visualizer/Equalizer, behind a toggle).
 
 ### Decision 3 — Parameter metadata as the single source of truth
+
+> Persistent record: [ADR-0004 — Parameter metadata as single source of truth](adr/0004-parameter-metadata-as-single-source-of-truth.md).
 
 53 of `libdseffect.so`'s 64 AK parameters are declared once in a static
 metadata table. (The other 11 — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
@@ -405,8 +447,10 @@ headers introduce visual groupings.
 
 ### Decision 4 — Wire protocol: name-based, originator-aware
 
-**Wire format.** The state snapshot, all `set_param`/`get_param`
-commands, and the binary engine protocol carry raw int16 1/16-dB
+> Persistent record: [ADR-0005 — Wire protocol: name-based, originator-aware, i16 1/16-dB throughout](adr/0005-wire-protocol-i16-name-based-originator-aware.md).
+
+**Wire format.** The state snapshot, all `set_param` commands,
+and the binary engine protocol carry raw int16 1/16-dB
 values end-to-end — no pre-conversion to dB. Only the UI does
 the int16 ↔ float dB conversion at the display/input boundary. JSON
 examples below show values exactly as they appear on the wire.
@@ -550,7 +594,7 @@ the only way to read live engine state. Version is served by the
 daemon from a cached cmd 6 result captured at init.
 
 The engine subprocess holds the session table and routes each command to the
-right `effect_handle_t`. For Phase 6 (Unicorn backend), this protocol is
+right `effect_handle_t`. For v2.1 (Unicorn backend), this protocol is
 implemented as direct in-process function calls, eliminating the pipe
 entirely with no changes to the `Engine` trait.
 
@@ -574,11 +618,13 @@ Audio frames stay in int16 stereo internally — matching what `libdseffect.so`
 expects. The plugin converts from float32 once at the host boundary;
 everything else is int16.
 
-A future optimisation (Phase 8) replaces byte-stream socket audio with a
+A future optimisation (Latency optimization, below) replaces byte-stream socket audio with a
 shared-memory ring buffer plus a socket for signalling, removing per-block
 kernel transitions. Defer until measured latency motivates the work.
 
 ### Decision 5 — Daemon in Rust
+
+> Persistent record: [ADR-0001 — Rust for the daemon](adr/0001-rust-daemon.md).
 
 Rust gives us:
 
@@ -603,6 +649,8 @@ Code quality bar:
   through the WebSocket protocol.
 
 ### Decision 6 — Web UI in Solid.js with TypeScript, separate dev workflow
+
+> Persistent record: [ADR-0006 — Solid.js UI with bootstrap injection, no `/api/*` routes](adr/0006-solid-ui-with-bootstrap-injection-no-api.md).
 
 The UI lives in its own directory (`ui/`) and is developed independently
 with full hot-reload via Vite.
@@ -795,6 +843,8 @@ src/
 
 ### Decision 7 — Persistence layout
 
+> Persistent record: [ADR-0007 — TOML overlay persistence with file watcher](adr/0007-toml-overlay-persistence-with-file-watcher.md).
+
 Two TOML files in distinct locations:
 
 - `config.toml` — user state, editable, in the platform-standard data dir.
@@ -954,6 +1004,8 @@ with no functional consequence.
 
 ### Decision 10 — Visualizer/Equalizer rendering and feel
 
+> Persistent record: [ADR-0008 — Visualizer / Equalizer rendering spec](adr/0008-visualizer-equalizer-rendering-spec.md).
+
 The V/E is the single most visible piece of DDP; it must feel identical
 to the original. Reference is the mobile DDPlus Android UI
 (`docs/ui-reference/original-ui-visualizer-eq-overlay.png`): 5 cyan
@@ -1110,6 +1162,8 @@ when implementing:
 - `EqualizerAdapter.java` — IEQ preset cells
 
 ### Decision 11 — Bundle `libdseffect.so` with releases
+
+> Persistent record: [ADR-0009 — Bundle `libdseffect.so` with releases](adr/0009-bundle-libdseffect-so.md).
 
 The binary is shipped alongside the daemon executable. The release
 artifact contains:
@@ -1280,11 +1334,64 @@ is intentionally I/O-free so it can be unit-tested in isolation, ported, or
 wrapped for FFI later. The `ddp-persistence` crate is a separate member to
 keep I/O concerns out of the state model.
 
+## Deep modules
+
+The architecture above factors into the deep modules below. The vocabulary
+follows [LANGUAGE.md](../.agents/skills/improve-codebase-architecture/LANGUAGE.md)
+(**module** · **interface** · **implementation** · **depth** · **seam** ·
+**adapter** · **leverage** · **locality**). Each module's **interface** is
+the full surface a caller must know — types, invariants, error modes,
+ordering — not just the type signature. The **deletion test** captures the
+locality argument: removing the module either concentrates complexity in
+one place (then the module was earning its keep — deep) or just moves
+complexity to N callers (then it was a pass-through — shallow). Every
+entry below passes the deletion test.
+
+| Module | Interface | What's hidden | Introduced in |
+|---|---|---|---|
+| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `get_visualizer_data(id) → VisualizerData{gains[20], excitations[20]}` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. No `get_param` by design (engine has no cmd 3 GET — daemon owns the state mirror). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing. Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
+| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `HandshakeFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, init handshake (DEFINE_PARAMS → DEFINE_SETTINGS → constant-params dance → VISUALIZER_ENABLE → EFFECT_CMD_ENABLE), `EngineInfo` caching from cmd 6. | Slice 1 |
+| **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Profile::selected_eq_preset` always exists; deleting a referenced EQ preset falls profiles back to `"off"`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
+| **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 53 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
+| **`Persistence`** (`ddp-persistence`) | `load(defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)`. Errors: `ParseError`, `MigrationFailed`. | `defaults.toml` + `config.toml` overlay, `notify` watcher, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
+| **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
+| **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
+| **`VisualizerPump`** (`ddp-daemon`) | `start(supervisor, broadcaster)` → `JoinHandle` · `stop()`. Constants: `VISUALIZER_PUMP_INTERVAL = 50 ms`, `VISUALIZER_SUSPENDED_THRESHOLD = 10` ticks. | 50 ms cadence loop, 10-tick `vis_suspended` hysteresis on empty cmd-4 reads, oldest-session source-of-truth rule, `vis` / `vis_suspended` event emission. | Slice 5 |
+| **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/tmp/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
+| **UI `GainSmoother`** (`ui/src/lib/gain_smoother.ts`) | `enqueue(band, dB)` · `tick() → Option<[i16; 20]>` (returns smoothed, clamped 20-band write, or `None` if nothing pending). | 5-cell thick-brush splat, τ=0.3 s exponential decay toward clamps, kernel convolution (`Mobile` / `Soft` / `Direct`), 60 ms drain throttle, 20×20 pseudoinverse on preset-change broadcasts for drag continuity. | Slice 6 |
+
+`is_factory`, the three-bucket settability classification, and the
+debounce-shared write semantics are not free-floating concepts — they
+live behind specific module interfaces above and are documented there.
+
 ## Implementation phases
 
-Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
+Phases are organised as **vertical tracer-bullet slices** per
+[to-issues](../.agents/skills/to-issues/SKILL.md) skill: each slice
+cuts through every layer it touches and ships something demoable on its
+own. Each TDD slice is then implemented with the
+[tdd](../.agents/skills/tdd/SKILL.md) skill — one test → one
+impl → repeat; never write all tests up front. Slices 0–10 constitute
+the v2.0 release. v2.1+ and v3.0 follow.
 
-### Phase 0 — Workspace bootstrap
+Each TDD slice carries six fields:
+
+- **Slice goal** — one sentence, demoable.
+- **Modules introduced** — references the *Deep modules* table.
+- **Behaviors to test** — the red → green worklist (checkboxes track
+  progress).
+- **Tracer bullet** — the very first test in the loop, picked so the
+  initial RED is a one-line assertion that proves the full path.
+- **Mock policy** — what stays Stub vs. real (per
+  [mocking.md](../.agents/skills/tdd/mocking.md), mock only at
+  system boundaries — the `Engine` trait is one).
+- **HITL/AFK** — whether the slice can complete unattended (AFK) or
+  needs a human in the loop (HITL).
+
+### Slice 0 — Workspace bootstrap (scaffold only, no TDD)
+
+Pure scaffolding — no user-visible behavior to test, so the `tdd` skill
+does not apply. Treat this slice as one-shot setup.
 
 - New Cargo workspace with the crate skeleton above.
 - Top-level `Justfile` with `dev`, `build-release`, `lint`, `test`
@@ -1292,150 +1399,508 @@ Phases 0–5 constitute the v2.0 release. Phase 6 is v2.1. Phase 7 is v3.0.
 - CI scaffolding: GitHub Actions running `cargo check`, `cargo test`,
   `cargo clippy`, `cargo fmt --check` on Linux + Windows.
 - Solid + Vite UI scaffolding with TypeScript, ESLint, Prettier;
-  `vite-plugin-solid`, `vite-plugin-singlefile`, `@solidjs/testing-library`,
-  and `eslint-plugin-solid` pinned. No Tailwind — plain CSS with BEM +
-  `theme.css` of CSS variables.
+  `vite-plugin-solid`, `vite-plugin-singlefile`,
+  `@solidjs/testing-library`, and `eslint-plugin-solid` pinned. No
+  Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
 - `defaults.toml` created with factory profiles and EQ presets
   transcribed from `ds1-default.xml`.
 - AK parameter metadata table (`parameters.toml` + codegen) populated
   with all 53 surfaced entries from
   [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md), with the
   three-bucket Settable / ReadOnly / Experimental classification from
-  Decision 3. (The 11 omitted entries — 7 engine-internal build-version
-  / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`
-  plus the 4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` —
-  share the same fate: no public read path.)
-- No functional behaviour yet; CI is green on a skeleton.
+  [ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md).
+  (The 11 omitted entries — 7 engine-internal build-version / license
+  slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` plus the
+  4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` — share the
+  same fate: no public read path.)
 
-### Phase 1 — State + persistence
+**Progress checklist:**
 
-- `ddp-state` crate: full data model, factory loading, all mutation
-  operations as specified in Decision 2. `is_factory` derived from
-  defaults.toml presence.
-- `ddp-persistence` crate: TOML load/save, defaults overlay, uniform
-  500 ms debounced writes.
-- Migration from v1 TOML schema.
-- Unit + property tests cover the state model fully, including
-  bidirectional `f32 dB ↔ i16` 1/16-dB conversion via `proptest`.
-- No engine, no server yet; verify with unit tests only.
+- [ ] Cargo workspace + crate skeleton compiled
+- [ ] Justfile recipes work end-to-end (`just dev`, `just lint`, `just test`)
+- [ ] GitHub Actions CI green on Linux + Windows runners
+- [ ] UI scaffold builds via `pnpm --prefix ui build`
+- [ ] `defaults.toml` round-trips through TOML parser
+- [ ] `parameters.toml` → codegen `parameters.rs` produces 53 entries
+- [ ] All linters / formatters / type-checkers clean
 
-### Phase 2 — Engine integration
+**HITL/AFK:** HITL — module layout warrants a human review pass before
+the first commit lands on `main`.
 
-- `ddp-engine-arm` binary: cross-compiled to ARMv7, runs under
-  `qemu-arm-static`, loads `libdseffect.so`, implements the binary protocol
-  with correct init handshake:
-  - `DEFINE_PARAMS` with all 53 surfaced 4-CC names (omits the 11
-    build-version / license / native-visualizer slots — no public read
-    path; engine version flows via cmd 6 → bootstrap `engine.version`).
-  - **`DEFINE_SETTINGS` with all 53 params** expanded into their full
-    `(param_idx, offset)` ranges per element (~422 cache slots =
-    ~844 bytes per device; init payload ~0.8 KB). The host must know
-    the intended `genb`/`ienb`/`aonb` values when building this
-    payload so the dependent multi-element params (`gebg`, `aobg`,
-    `vcbg`, etc.) get the right slot count. This includes the
-    "ReadOnly" and "Experimental" buckets so every surfaced AK param
-    has a cache slot; cmd 3 SET against any of them propagates
-    through to `ak_set` (proven by
-    [tools/ddp_probe/](../tools/ddp_probe/README.md)).
-  - Constant-params dance: after DEFINE_SETTINGS, write `genb=20`,
-    `ienb=20`, `aonb=20`, `gebf=[…]` (and `iebf`, `aobf`, `arbf` if
-    you intend to set those later) via cmd 3 to propagate the
-    constants into the engine's AK registry. cmd 3 addresses cache
-    flat indices and so must follow DEFINE_SETTINGS.
-  - Explicit `VISUALIZER_ENABLE` SET so the engine populates
-    `vcbg`/`vcbe` every audio block.
-  - Finish with `EFFECT_CMD_ENABLE` so subsequent `process()` calls
-    run the DSP chain.
-- `QemuBackend` in `ddp-engine`: spawns one shared subprocess, multiplexes
-  sessions, propagates errors.
-- End-to-end test: state mutation → engine round-trip → audio shape matches
-  expectations.
-- Regression harness: `tools/ddp_probe/` is the empirical
-  source-of-truth for engine behavior. Run it in CI under
-  `qemu-user-static` (e.g. on the Linux runner) to verify the v2.0
-  engine binary still matches the documented validation surface
-  (cmd 3 GET unimplemented, no value-range clamp, asymmetric
-  enable/disable crossfade — 7560 / 5512 samples at 44.1 kHz, etc.).
+---
 
-### Phase 3 — Daemon server
+### Slice 1 — Power toggle, persisted end-to-end (tracer bullet)
 
-- `ddp-daemon` integrates state, engine supervisor, and the HTTP + WebSocket
-  server.
-- `GET /` serves `index.html` with `window.__BOOTSTRAP__` injected
-  (params + initial state + `engine` info). Dev mode produces a hardcoded
-  HTML literal pointing to Vite's module entry at `:5173`; prod mode (with the
-  `embedded-ui` Cargo feature) reads the rust-embed asset and
-  string-replaces `<!--BOOTSTRAP-->`. No `/api/*` routes exist —
-  see Decision 6.
-- All UI ↔ daemon WebSocket commands implemented and tested (verify
-  with `curl` and `websocat`; no UI yet).
-- Originator-aware broadcast pattern.
-- Visualizer pump at the named-constant 50 ms cadence with suspended-state
-  detection.
-- Plugin server accepts Windows named-pipe and AF_UNIX connections, allocates
-  sessions, multiplexes audio.
+**Slice goal.** A user opening `http://localhost:9876` sees a Power
+toggle. Clicking it flips state, the `StubBackend` records the
+`set_enabled` call, and the change survives a daemon restart.
 
-### Phase 4 — Solid UI
+This is the **tracer bullet**: the smallest possible end-to-end path
+through every architectural layer (UI · WS · daemon · engine ·
+persistence). Once green, every later slice extends one axis.
 
-Look-and-feel target is the original DDPlus Android UI — captured in
-[`docs/ui-reference/`](ui-reference/) (profile picker, per-profile
-detail with Manual GEQ / Intelligent EQ modes, visualizer + EQ
-overlay).
+**Modules introduced.** `Engine` (Stub adapter only), `State` (just
+`power` and `selected_profile = "music"`), `Persistence`,
+`HttpServer`, `WsServer + WsCommands(get_state, set_power)`,
+`EngineSupervisor` (just enough to drive Stub). UI shell: the
+auto-reconnecting WebSocket client (`ws.ts`), `ConnectionBadge.tsx`,
+and an About/footer surface that renders `window.__BOOTSTRAP__.engine`.
 
-- Core controls: power, profile picker, the three master toggles with amount
-  sliders (Volume Leveller / Dialog Enhancer / Surround Virtualizer),
-  EQ preset picker, EQ preset reset, profile-level reset.
-- SVG visualizer matching the original DDP look: spectrum bars from
-  excitations, EQ curve overlay (polyline with rounded joins — see
-  Decision 10), draggable handles with `GAIN_SMOOTHER` kernel.
-- Profile and EQ-preset management: add, delete, rename.
-- Advanced panel auto-generated from `window.__BOOTSTRAP__.params`
-  metadata, rendered as a CSS-grid of compact cards. Widget dispatch
-  maps `ReadOnly` to a live-updated read-only display; `Settable` and
-  `Experimental` get editable widgets; `Experimental` adds a small
-  "experimental" badge (Decision 3).
-- "About" / footer surface rendering `window.__BOOTSTRAP__.engine`:
-  `Engine: QEMU · libdseffect.so 2.0.4.0` (or analogous strings as
-  backends evolve). Diagnostic, not a control.
-- BEM CSS + CSS variables for theming; SVG visualizer; no Tailwind.
-- WebSocket auto-reconnect, dev/prod build flows.
-- Tests: Vitest for components with a mocked WebSocket; Playwright
-  E2E against a real daemon driving the real engine (QemuBackend +
-  `libdseffect.so`).
+**Behaviors to test (red → green order):**
 
-### Phase 5 — Plugins
+1. [ ] Daemon binds `:9876`; `GET /` returns HTML carrying a valid
+       `window.__BOOTSTRAP__` JSON payload (params, state, engine).
+2. [ ] WS `/ws` connects; first frame is a `state` event matching the
+       current `State`.
+3. [ ] WS `set_power { on: false }` flips `State.power`; daemon
+       replies with an `ack` carrying the originator-matching
+       `request_id`.
+4. [ ] After `set_power`, the `StubBackend` recorded
+       `set_enabled(session, false)` exactly once.
+5. [ ] Two concurrent WS clients connect; one issues `set_power`;
+       only the *other* receives the broadcast `state` event
+       (originator echo suppression — see
+       [ADR-0005](adr/0005-wire-protocol-i16-name-based-originator-aware.md)).
+6. [ ] `power` change debounces 500 ms then writes to `config.toml`
+       (overlay semantics — see
+       [ADR-0007](adr/0007-toml-overlay-persistence-with-file-watcher.md)).
+7. [ ] Daemon restart reloads `power` from `config.toml`.
+8. [ ] Malformed JSON command returns
+       `{ type: "error", code: "INVALID_PARAM", … }` and does not
+       crash the session.
+9. [ ] The WebSocket client auto-reconnects after the daemon restarts
+       or the socket drops; on reconnect it re-issues `get_state` and
+       reconciles, and `ConnectionBadge` reflects connected /
+       reconnecting (Decision 6).
+10. [ ] The About/footer surface renders
+       `window.__BOOTSTRAP__.engine` — e.g. `Engine: STUB · stub
+       0.0.0` under the Stub backend; the real
+       `Engine: QEMU · libdseffect.so 2.0.4.0` string is verified in
+       Slice 9.
+11. [ ] Refactor pass — extract duplication revealed by 1–10 without
+       breaking any green test ([tdd](../.agents/skills/tdd/SKILL.md):
+       never refactor while RED).
 
-- Windows VST2 plugin (`ddp-vst-windows`): opens named pipe, ferries audio,
-  launches the UI at `http://localhost:9876` via `ShellExecuteW` when
-  "Open Panel" is clicked in EqualizerAPO.
-- Linux LV2 plugin (`ddp-lv2-linux`): opens `/tmp/dolbyx.sock`, ferries audio.
-- PipeWire `filter-chain` config example for system-wide routing.
-- Smoke-test: install the daemon, install the plugin, play music, verify the
-  visualizer responds and the EQ takes effect.
+**Tracer bullet test.** Integration test: start daemon with
+`StubBackend`, connect via WS, send `{ "cmd": "set_power", "on":
+false }`, assert `StubBackend` recorded
+`set_enabled(session, false)` exactly once. Real `axum` test client,
+real `tokio-tungstenite` against a bound port — no mocking past the
+`Engine` trait.
 
-**This completes v2.0.**
+**Mock policy.** `StubBackend` is the only stand-in. HTTP and WS run
+real; persistence runs against a real `tempdir`.
 
-### Phase 6 (v2.1) — Unicorn backend
+**HITL/AFK:** AFK after Slice 0 lands.
 
-- Custom ELF loader for `libdseffect.so` (parses sections, maps into Unicorn
-  memory).
-- Android stub library: implements `__android_log_print`, `String8::String8`,
-  `VectorImpl`, and other imports in native Rust.
-- `UnicornBackend` in `ddp-engine`, sharing the same `Engine` trait surface.
+---
+
+### Slice 2 — Factory profile selection applies AK overrides
+
+**Slice goal.** Switching the selected profile via the UI flushes that
+profile's AK parameter overrides to the engine; the change persists.
+
+**Modules introduced.** `State.profiles` (factory only — Movie, Music,
+Game, Voice), `WsCommands(set_profile, reset_profile)`, profile-picker
+UI component, factory-state bootstrap.
+
+**Behaviors to test:**
+
+1. [ ] `Defaults::load(defaults.toml)` produces all 4 factory profiles
+       with their declared AK overrides.
+2. [ ] `State::new_from_defaults` selects `"music"` (first-run UX,
+       Decision 8).
+3. [ ] WS `set_profile { id: "movie" }` updates `selected_profile`.
+4. [ ] On profile switch, *every* override in the new profile flushes
+       to the engine via `set_param`; values absent in the new
+       profile revert to their `ParameterDef.default`.
+5. [ ] `selected_profile` persists across daemon restart.
+6. [ ] `reset_profile { id: "music" }` clears `config.toml`'s
+       per-profile overrides; UI receives a fresh state snapshot.
+7. [ ] `set_profile { id: "nonexistent" }` returns
+       `INVALID_PARAM`, leaves state unchanged.
+
+**Tracer bullet test.** Start daemon, WS `set_profile {id:"movie"}`,
+assert `StubBackend` recorded the full set of Movie's AK overrides.
+
+**Mock policy.** Stub only.
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 3 — Factory EQ presets apply IEQ curves
+
+**Slice goal.** Selecting an EQ preset (Off / Open / Rich / Focused)
+writes the preset's `iebt[20]` and `ieon` to the engine; the active
+profile records the selected preset id.
+
+**Modules introduced.** `State.eq_presets`, `Profile.selected_eq_preset`,
+`WsCommands(set_eq_preset, reset_eq_preset)`, EQ-preset picker UI.
+
+**Behaviors to test:**
+
+1. [ ] Factory EQ presets load from `defaults.toml` per
+       [ADR-0003](adr/0003-global-eq-presets-and-geq-per-preset.md).
+2. [ ] On `set_eq_preset { id: "rich" }` the engine receives the
+       preset's `iebt[20]` and `ieon=1`; the preset id is stored on
+       the active profile.
+3. [ ] Switching to `"off"` writes `ieon=0` and zero `iebt`.
+4. [ ] Editing a preset's `iebt` via `edit_eq_preset` immediately
+       affects *every* profile currently selecting that preset
+       ([ADR-0003](adr/0003-global-eq-presets-and-geq-per-preset.md)).
+5. [ ] `selected_eq_preset` persists per-profile across restart.
+
+**Tracer bullet test.** WS `set_eq_preset { id: "rich" }`, assert
+`StubBackend` recorded `iebt = [67, 95, …, -235]` and `ieon = 1`.
+
+**Mock policy.** Stub only.
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 4 — Master controls (Volume Leveller / Dialog Enhancer / Surround Virtualizer)
+
+**Slice goal.** The main screen shows the three signature DDP
+controls — Volume Leveller, Dialog Enhancer, Surround Virtualizer —
+each a toggle plus an amount slider. Adjusting one writes the backing
+AK param(s) to the active profile, flushes to the engine, and persists.
+
+**Modules introduced.** `BasicSwitches.tsx` with bespoke toggle +
+amount-slider widgets for the `basic`-flagged digest params (`dvla`,
+`deon`/`dea`, `vdhe`, … — exact set per
+[docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md)); reuses
+`WsCommands(set_param)` against the active profile.
+
+**Behaviors to test:**
+
+1. [ ] The three master controls render from the `basic`-flagged
+       params in the bootstrap metadata, grouped by their
+       `ParameterDef.category` (Volume Leveller / Dialog Enhancer /
+       Surround Virtualizer).
+2. [ ] Toggling Volume Leveller writes its enable param to the active
+       profile and flushes to the engine via `set_param`.
+3. [ ] Dragging the Dialog Enhancer amount slider writes `dea` to
+       the active profile.
+4. [ ] The Surround Virtualizer toggle writes `vdhe` per its
+       `ParamKind::Tristate { on }` mapping (0 / 1 / 2).
+5. [ ] Master-control values are per-profile overrides — switching
+       profiles (Slice 2) shows that profile's values.
+6. [ ] Edits persist across daemon restart.
+7. [ ] A master-control edit broadcasts to other clients, originator
+       suppressed.
+
+**Tracer bullet test.** Start daemon with `StubBackend`, WS
+`set_param` for the Volume Leveller amount on Music, assert
+`StubBackend` recorded the write and `config.toml` persisted it.
+
+**Mock policy.** Stub. UI via `@solidjs/testing-library` with a mocked
+WebSocket ([ADR-0006](adr/0006-solid-ui-with-bootstrap-injection-no-api.md)).
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 5 — Visualizer pump + suspended-state detection
+
+**Slice goal.** With the daemon running, the UI shows a 20×48 SVG
+spectrum brick field driven by `vis` events at 50 ms. When audio
+stops, `vis_suspended: true` is broadcast and the spectrum freezes.
+
+**Modules introduced.** `VisualizerPump` (50 ms cadence, 10-tick
+hysteresis), `Visualizer.tsx` SVG component, `vis` event handling in
+`ws.ts`, StubBackend canned `vcbg`/`vcbe` data for tests.
+
+**Behaviors to test:**
+
+1. [ ] `VisualizerPump::start` polls `Engine::get_visualizer_data`
+       every 50 ms ± 5 ms.
+2. [ ] Each non-empty read broadcasts a `vis` event with both
+       `gains[20]` and `excitations[20]` as raw int16 1/16-dB.
+3. [ ] 10 consecutive empty reads latch `vis_suspended: true`; `vis`
+       emission stops.
+4. [ ] 10 consecutive non-empty reads latch `vis_suspended: false`;
+       `vis` emission resumes.
+5. [ ] Pump reads from the oldest session; when that session ends,
+       source switches to the next-oldest (Decision 4).
+6. [ ] SVG renders 20 columns × 48 rows; brick colour matches the
+       `r<12` / `12≤r<18` / `r≥18` rule from
+       [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
+7. [ ] dB mapping is asymmetric `[-12, +36]` per
+       [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
+
+**Tracer bullet test.** Start daemon with `StubBackend` programmed to
+return fixed canned `vcbg`/`vcbe`; subscribe via WS; assert ≥ 18 of
+the next 20 `vis` events arrive within 50 ms ± 10 ms of each other
+carrying the canned data verbatim.
+
+**Mock policy.** Stub canned data only. The real engine's cmd-4
+contract is verified independently in Slice 9.
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 6 — GEQ editing with smoother + inverse
+
+**Slice goal.** A user drags an EQ thumb; the daemon receives
+smoothed, clamped 20-band `gebg` writes throttled at ≤ 60 ms
+intervals. Switching EQ presets keeps the next drag continuous via
+the inverse-smoother matrix.
+
+**Modules introduced.** UI `GainSmoother` (thick-brush splat, kernel
+convolution, exponential decay, inverse-on-preset-change),
+`EqCurve.tsx`, `WsCommands(set_param)` for `gebg`, GEQ-thumb pointer
+pipeline.
+
+**Behaviors to test:**
+
+1. [ ] `enqueue(band, dB)` followed by `tick()` returns a smoothed
+       20-band int16 array within the engine's `gebg` clamp.
+2. [ ] Kernel selection (`Mobile` / `Soft` / `Direct`) changes the
+       output shape per the matrices in `GraphicEqualizerPainter.java`.
+3. [ ] Out-of-range values decay toward the violated clamp with
+       `α = 0.5^(Δt / 0.3s)`.
+4. [ ] `tick()` emits at most one write per 60 ms (30 ms while
+       `vis_suspended`).
+5. [ ] On `state` broadcast updating active `gebg`, the
+       inverse-smoother repopulates `temp` so the next touch stays
+       continuous.
+6. [ ] WS `set_param { name: "gebg", values: [...] }` forwards to
+       `StubBackend::set_param("gebg", _)` correctly.
+7. [ ] EQ curve renders as a polyline with rounded joins (not
+       Catmull-Rom) per
+       [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
+
+**Tracer bullet test.** Vitest unit test — feed a known drag trace
+into `GainSmoother`, assert the emitted 20-band write matches a
+golden snapshot generated from the Java reference.
+
+**Mock policy.** Stub. The `GainSmoother` is pure UI math —
+unit-testable in isolation per
+[interface-design.md](../.agents/skills/tdd/interface-design.md)
+("return results, don't produce side effects"). Drag-to-WS path tested via
+`@solidjs/testing-library` with a mocked WebSocket
+([ADR-0006](adr/0006-solid-ui-with-bootstrap-injection-no-api.md)).
+
+**HITL/AFK:** HITL — golden snapshots from the Java reference need
+manual visual verification once before locking in.
+
+---
+
+### Slice 7 — Custom profiles & EQ presets (full CRUD)
+
+**Slice goal.** Users can add, rename, edit, delete, and reset custom
+profiles and custom EQ presets. Deletes fall referencing items back
+to safe defaults.
+
+**Modules introduced.** `WsCommands(add_profile, rename_profile,
+remove_profile, add_eq_preset, rename_eq_preset, edit_eq_preset,
+remove_eq_preset)`, derived `is_factory`, CRUD UI affordances.
+
+**Behaviors to test:**
+
+1. [ ] `is_factory(id)` is derived from `Defaults` presence; not
+       stored on disk.
+2. [ ] `add_profile { from: "music", name: "Late Night" }` clones
+       Music's overrides under a freshly generated id
+       (`user_<hash>`).
+3. [ ] Renaming a custom profile updates `name`, not `id` (id stable;
+       persistence keys on id).
+4. [ ] Factory items cannot be deleted or renamed — daemon returns
+       `INVALID_PARAM`.
+5. [ ] Deleting a custom EQ preset that N profiles select falls all
+       of them back to `"off"`.
+6. [ ] Deleting a custom profile currently selected falls back to
+       `"music"`.
+7. [ ] `reset_profile` / `reset_eq_preset` clears `config.toml`
+       overrides for that id; factory rows in `defaults.toml` stay
+       untouched.
+8. [ ] All CRUD ops persist across restart.
+
+**Tracer bullet test.** Add a custom profile from Music, rename it,
+restart the daemon, assert it survived with the new name and same
+overrides.
+
+**Mock policy.** Stub.
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 8 — Advanced panel auto-generated for all 53 AK parameters
+
+**Slice goal.** Opening the Advanced section renders every surfaced
+AK parameter as a widget chosen by its `ParamKind` × `ParamAccess`.
+Settable / Experimental widgets write back through WS; ReadOnly cards
+live-update from `vis` events.
+
+**Modules introduced.** `WidgetFactory.tsx`, the nine widget
+components (`ToggleWidget`, `TristateWidget`, `IntegerWidget`,
+`DecibelWidget`, `FrequencyWidget`, `DegreesWidget`,
+`ArrayPerBandWidget`, `AobgWidget`, `ReadOnlyWidget`), category-grouped
+CSS-grid layout.
+
+**Behaviors to test:**
+
+1. [ ] Bootstrap delivers all 53 `ParameterDef` entries in stable
+       table order.
+2. [ ] `WidgetFactory` dispatches by `(ParamKind, ParamAccess)`;
+       every kind has a matching widget; unknown combos render an
+       opaque-int fallback with a console warn.
+3. [ ] Settable widgets emit `set_param` on commit (debounced 60 ms
+       for continuous controls).
+4. [ ] Experimental widgets render with a small "experimental" badge
+       ([ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md)).
+5. [ ] ReadOnly widgets (only `vcbg`, `vcbe`) live-update from `vis`
+       events.
+6. [ ] `aobg` widget renders the channel-id-prefixed layout
+       (Decision 3), not header + interleaved pairs.
+7. [ ] Long arrays (`aobg ≤ 329`, `arbi`/`arbl`/`arbh`/`aobf`/`arbf`
+       40) render in a wide card collapsed by default.
+8. [ ] Category headers introduce groupings; Basic params appear
+       first.
+
+**Tracer bullet test.** Render `AdvancedPanel` with a fixture of 53
+params, assert 53 widgets appear in a `data-testid`-matched grid;
+one Settable Toggle commit fires the expected WS message.
+
+**Mock policy.** Stub (engine side) + real `axum` (HTTP/WS). UI tests
+use `@solidjs/testing-library` with a mocked WS
+([ADR-0006](adr/0006-solid-ui-with-bootstrap-injection-no-api.md)).
+
+**HITL/AFK:** AFK.
+
+---
+
+### Slice 9 — Real engine (`QemuBackend`) — swap & replay
+
+**Slice goal.** Replace `StubBackend` with `QemuBackend` in the
+default daemon configuration; the integration test suite from Slices
+1–8 re-runs against the real engine and stays green.
+
+This is the **swap-and-replay** slice. Reusing the same integration
+tests against the real engine exercises exactly where the risk lives
+(binary protocol, init handshake, DEFINE_PARAMS / DEFINE_SETTINGS,
+constant-params dance) — [tests.md](../.agents/skills/tdd/tests.md)
+("integration tests survive refactors") makes this approach load-bearing.
+
+**Modules introduced.** `QemuBackend` (`ddp-engine`),
+`ddp-engine-arm` ARMv7 binary, shared `protocol.rs`.
+
+**Behaviors to test:**
+
+1. [ ] `ddp-engine-arm` cross-compiles for
+       `armv7-unknown-linux-gnueabihf`.
+2. [ ] `QemuBackend::start` spawns one `qemu-arm-static` subprocess
+       and completes the init handshake:
+       - `DEFINE_PARAMS` with the 53 surfaced 4-CC names (omits the
+         11 unreadable slots — engine version flows via cmd 6 →
+         bootstrap `engine.version`).
+       - `DEFINE_SETTINGS` with the full `(param_idx, offset)`
+         expansion (~422 cache slots, ~0.8 KB init payload).
+       - Constant-params writes (`genb=20`, `ienb=20`, `aonb=20`,
+         `gebf[…]`, …) via cmd 3.
+       - `VISUALIZER_ENABLE` SET.
+       - `EFFECT_CMD_ENABLE`.
+3. [ ] All Slices 1–8 integration tests pass under
+       `cargo test --features qemu`.
+4. [ ] `tools/ddp_probe/` regression harness runs in CI under
+       `qemu-user-static` and verifies the documented validation
+       surface (cmd 3 GET unimplemented, no value-range clamp,
+       7560 / 5512 sample crossfade).
+5. [ ] `EngineSupervisor` respawns the subprocess on crash; the
+       session map is reconstructed transparently.
+6. [ ] `QemuBackend::version()` returns `"APPv1 version 2.0.4.0"`
+       (cmd 6); the value reaches
+       `window.__BOOTSTRAP__.engine.version`.
+
+**Tracer bullet test.** `cargo test --features qemu -p ddp-daemon
+power_toggle_persists` — the Slice-1 tracer bullet test, now against
+the real engine.
+
+**Mock policy.** Real engine. `StubBackend` stays in the codebase for
+fast inner-loop tests; the `qemu` cargo feature toggles which backend
+the integration tests bind to.
+
+**HITL/AFK:** HITL — the first QEMU green run requires manual
+investigation of any init-handshake delta. The engine doesn't emit
+explicit errors for many things
+([ADR-0005](adr/0005-wire-protocol-i16-name-based-originator-aware.md)),
+so silent failures look like clean exits.
+
+---
+
+### Slice 10 — Plugins ferry audio (Win VST2 + Linux LV2)
+
+**Slice goal.** With the daemon running, loading the VST in
+EqualizerAPO (Windows) or `dolbyx.lv2` in PipeWire `filter-chain`
+(Linux) ferries playback audio through the shared engine subprocess;
+the visualizer responds; the EQ takes effect.
+
+**Modules introduced.** `AudioServer` (`ddp-daemon`),
+`ddp-vst-windows` cdylib, `ddp-lv2-linux` cdylib, plugin protocol
+(`Hello` / `HelloAck` / `Process` / `Processed` / `Goodbye`).
+
+**Behaviors to test:**
+
+1. [ ] Windows daemon binds `\\.\pipe\DolbyX`; Linux daemon binds
+       `/tmp/dolbyx.sock`.
+2. [ ] Plugin `Hello {sample_rate, max_frames}` is acked with a
+       fresh `session_id` from `EngineSupervisor::create_session`.
+3. [ ] `Process` frames round-trip through the shared engine
+       subprocess; processed PCM differs from input when the engine
+       is enabled (verifiable via the crossfade ramp from
+       `tools/ddp_probe/`).
+4. [ ] Two plugin instances multiplex correctly — each on its own
+       session, no audio crosstalk.
+5. [ ] `Goodbye` cleanly destroys the session.
+6. [ ] VST `effEditOpen` launches `http://localhost:9876` via
+       `ShellExecuteW`.
+7. [ ] PipeWire `filter-chain` config example loads successfully
+       (smoke-only).
+
+**Tracer bullet test.** A minimal "loopback" integration test —
+start the daemon, connect a synthetic plugin client over the
+platform socket, push silence frames, assert `Processed` returns the
+same frames (within engine-applied transient bounds).
+
+**Mock policy.** Real engine + real socket. Two adapters (named-pipe
++ AF_UNIX) ⇒ real seam, not hypothetical — per
+[DEEPENING.md](../.agents/skills/improve-codebase-architecture/DEEPENING.md)
+both must be tested.
+
+**HITL/AFK:** HITL — end-to-end smoke-test requires manual install
+of the plugin in EqualizerAPO / PipeWire.
+
+---
+
+**Slices 0–10 complete v2.0.**
+
+### v2.1 — Unicorn backend
+
+- Custom ELF loader for `libdseffect.so` (parses sections, maps into
+  Unicorn memory).
+- Android stub library: implements `__android_log_print`,
+  `String8::String8`, `VectorImpl`, and other imports in native Rust.
+- `UnicornBackend` in `ddp-engine`, sharing the same `Engine` trait
+  surface — replays Slices 1–8 tests under `--features unicorn`.
 - Switch the default backend on Windows from QEMU/WSL2 to Unicorn.
 - Enables macOS port.
 
-### Phase 7 (v3.0) — macOS port
+### v3.0 — macOS port
 
-- `ddp-driver-macos`: AudioServerPlugin virtual device (libASPL-based).
+- `ddp-driver-macos`: AudioServerPlugin virtual device
+  (libASPL-based).
 - nix-darwin module.
 - macOS-specific UI controls (output device selector).
 - Manual install docs.
 
-### Phase 8 (incremental) — Latency optimization
+### Latency optimization (incremental, no version pin)
 
-- Shared-memory ring buffers for the plugin ↔ daemon audio path; socket
-  retained for signalling.
+- Shared-memory ring buffers for the plugin ↔ daemon audio path;
+  socket retained for signalling.
 - End-to-end latency profiling; tighten where measurements warrant.
 
 ## Code quality standards
@@ -1518,7 +1983,7 @@ These don't block the plan and can be decided during implementation:
 
 - The current `arm/`, `daemon/`, and `ui/` (v1 vanilla-JS scaffold)
   code stays in `main` during the rearchitecture. It is the v1
-  reference implementation. Once Phase 5 completes, all three are
+  reference implementation. Once v2.0 completes, all three are
   removed in one commit.
 - The existing [docs/ddp/](ddp/README.md) reference is unaffected — it
   documents `libdseffect.so` and the original DDP behaviour, which doesn't

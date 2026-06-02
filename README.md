@@ -1,6 +1,6 @@
 # DolbyX
 
-Run the legendary **Dolby Digital Plus v8.1** audio effect from Android on your
+Run the legendary **Dolby Digital Plus** audio effect from Android on your
 PC — system-wide, on all audio. Uses the original ARM DSP binary via QEMU
 emulation with zero quality compromise.
 
