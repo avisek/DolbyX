@@ -29,8 +29,9 @@ version of that array with explanatory annotations.
   [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 110
   into `dvla` (range 0..10) produces an engine log line
   `settingsCache[...] updated with value 110` (verbatim, no clamp);
-  the DSP then reads the raw 110 and produces correspondingly
-  out-of-spec output. Clamping is exclusively a Java-side concern;
+  the DSP then reads the raw 110 (its own math bounds the result — see
+  [Engine vs Java settability](#engine-vs-java-settability)). Clamping
+  is exclusively a Java-side concern;
   any non-Java host that wants safety must validate before forwarding
   to the engine.
 - **dB scaling**: most dB-valued parameters are stored as
@@ -386,19 +387,16 @@ no public read path. Only `ver` is reachable from outside, via cmd 6,
 which DolbyX v2 surfaces as `engine.version` rather than as an AK
 parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and DEFINE_SETTINGS.
 
-The behavioral evidence that the DSP reads the raw int16 — even
-when out of range — is direct. The probe's section 7 sweeps `vmb`
-(declared range 0..240) over `{0, 120, 240, 480, -100}` with
-`vmon` on, producing peak/rms pairs `(1, 0.6)`, `(1, 0.7)`,
-`(16, 7.8)`, `(128, 89.6)`, `(21, 8.5)`. The in-range portion
-ramps as expected; `vmb=480` then jumps to ~10× the `vmb=240`
-output instead of clamping at the declared max, and `vmb=-100`
-produces a non-zero attenuated output instead of behaving like
-`vmb=0`. Both behaviours prove the engine reads the raw int16
-without internal clamping. A `dvla` sweep over
-`{0, 5, 10, 200, -100}` with the leveler enabled also varies the
-output, but the leveler's envelope-driven dynamics make the
-per-block measurement noisier — `vmb` is the cleaner evidence.
+The engine never clamps a written value (see
+[Engine validation behavior](03-binary-protocol.md#engine-validation-behavior)),
+but the DSP's math is bounded — out-of-range values saturate or clamp,
+they don't scale without limit. In probe section 7, a `vmb` sweep
+(declared 0..240) over a strong sine amplifies up to `vmb=120`, then
+rails the int16 output, so `vmb=240` and `vmb=480` come out
+bit-identical, and `vmb=-100` is bit-identical to `vmb=0` (negative
+clamps to 0). A `dvla` sweep confirms the raw read — `dvla=200` vs
+`dvla=10` differ by 2/512 samples — but the leveler saturates, so the
+out-of-range effect is negligible.
 (See [tools/ddp_probe/](../../tools/ddp_probe/README.md) section 7.)
 The forwarding behaviour proven in section 5b — every cmd 3 SET
 fires `ak_set(idx/name, offset) = V` regardless of bucket — means

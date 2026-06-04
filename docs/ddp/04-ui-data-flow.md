@@ -403,17 +403,27 @@ When the recalc tick runs:
 
 The IEQ preset grid has 4 cells: Open, Rich, Focused, Custom. The
 first three are real engine presets (preset id 1, 2, 3 in DDP's
-indexing where 0 = Off). "Custom" is just the UI-side state of "the
-user has been editing the EQ manually" — it's not a separate preset
-in the engine. When Custom is selected:
+indexing where 0 = Off). "Custom" is **not** a separate preset and
+**not** an editing mode — tapping it just calls `setIeqPreset(0)`,
+selecting the Off preset so only the manual GEQ applies
+(`FragGraphicVisualizer.chooseEqualizerSettinginUI`).
 
-- `ieon` is set to 0 (turning off the IEQ amount-applied-to-target
-  behaviour).
-- `geon` is set to 1 (turning on the GEQ).
-- The currently-displayed GEQ curve is whatever the user last drew.
+`ieon` and `geon` are independent, and GEQ editing works on **any**
+preset, not just Custom:
 
-When the user picks Open / Rich / Focused, the previous Custom curve
-for that profile is discarded — the engine reloads the stored
+- `ieon` is set by preset selection alone — Open / Rich / Focused → 1,
+  Off / Custom → 0 (`DsProfileSettings.setIeqPreset`); dragging the
+  curve never touches it.
+- `geon` follows the curve — it turns on as soon as any band leaves
+  zero, and is recomputed as "any band ≠ 0" on each preset switch
+  (`GraphicEqualizerPainter.updateEqUserGainsInEngine` /
+  `updateGeqOnInDs`).
+
+So drawing while Rich is selected gives `ieon=1, geon=1` — the
+intelligent target and the manual curve layer together; picking Custom
+(Off) first gives `ieon=0, geon=1` — manual-only.
+
+When the user picks Open / Rich / Focused, the engine reloads the stored
 `geqBandGains_[preset]` for the new preset, which may itself have been
 customized (e.g. user drew on the curve while Rich was active).
 

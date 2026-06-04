@@ -28,12 +28,18 @@
  *      after audio shape has changed — to show the DSP refreshes
  *      both slots block-to-block.
  *   5. cmd 6 VERSION returns the engine version.
- *   6. ENABLE/DISABLE crossfade + idempotency, plus a measured
- *      behavioral check that a parameter SET on either side of the
- *      cycle actually takes effect (cache + AK state survive).
- *   7. Behavioral sweep: dvla, dvle, vmb past their declared bounds
- *      with audio flowing — proves the DSP reads raw int16 (the
- *      output statistics differ at every probe value).
+ *   6. ENABLE/DISABLE crossfade + idempotency; a measured check that a
+ *      SET on either side of the cycle takes effect (cache + AK state
+ *      survive); Test A — process() runs in ACCUMULATE mode on a
+ *      disabled (-ENODATA) block (out = prior + input); Test B —
+ *      process() clobbers its own input buffer in both states (enabled
+ *      leaves that block's processed output, stable across blocks).
+ *   7. Behavioral sweep: dvla, vmb past their declared bounds with a
+ *      strong (amp-20000) sine streamed each block. The DSP reads raw
+ *      int16 but its math is bounded — out-of-range values saturate
+ *      (vmb hits the int16 rail; the leveler saturates) or clamp
+ *      (vmb<0 -> 0), proven per-sample (vmb=-100 == vmb=0; dvla=200
+ *      vs 10 differ by 2/512).
  *   8. Out-of-cache flat-index SET (proves the engine's only SET-side
  *      validation is index-range), the boundary case
  *      `begin + count > cache_total` (resolves whether the engine
@@ -218,9 +224,27 @@ static int define_settings_all(void) {
     return total;
 }
 
+/* Refill a fresh sine into an interleaved-stereo int16 buffer. A real
+ * audio host hands the engine a NEW PCM buffer every block, and
+ * process() clobbers its input (Test B), so any caller that measures an
+ * output — or warms the DSP toward a steady state — must refill first. */
+static void fill_sine(int16_t *pcm, int frames, double rate,
+                      double amp, double freq) {
+    for (int i = 0; i < frames; ++i) {
+        int s = (int)(amp * sin(2.0 * M_PI * freq * (i / rate)));
+        pcm[i*2] = (int16_t)s; pcm[i*2+1] = (int16_t)s;
+    }
+}
+
+/* Stream N blocks of a fresh 440 Hz / amp-20000 sine. Refilling each
+ * iteration is essential: process() clobbers its input (Test B), so
+ * without a refill the buffer decays to the noise floor within a few
+ * blocks and every downstream measurement reads silence. Output is
+ * zeroed per block (the engine ACCUMULATEs into it). */
 static void process_blocks(int16_t *in_pcm, int16_t *out_pcm, int frames,
                            int n) {
     for (int i = 0; i < n; ++i) {
+        fill_sine(in_pcm, frames, 44100.0, 20000.0, 440.0);
         audio_buffer_t in  = { .frameCount = (uint32_t)frames, .s16 = in_pcm };
         audio_buffer_t out = { .frameCount = (uint32_t)frames, .s16 = out_pcm };
         memset(out_pcm, 0, frames * 4);
@@ -228,16 +252,23 @@ static void process_blocks(int16_t *in_pcm, int16_t *out_pcm, int frames,
     }
 }
 
-static void measure(const char *label, int16_t *out_pcm, int frames) {
+/* Print peak + RMS of an interleaved int16 buffer (input or output). */
+static void measure(const char *label, const int16_t *buf, int frames) {
     int peak = 0; double ss = 0;
     for (int i = 0; i < frames * 2; ++i) {
-        int v = out_pcm[i];
+        int v = buf[i];
         int a = v < 0 ? -v : v;
         if (a > peak) peak = a;
         ss += (double)v * v;
     }
     double rms = sqrt(ss / (frames * 2));
     printf("    %-32s peak=%5d rms=%8.1f\n", label, peak, rms);
+}
+
+static int diff_count(const int16_t *a, const int16_t *b, int n) {
+    int d = 0;
+    for (int i = 0; i < n; ++i) if (a[i] != b[i]) ++d;
+    return d;
 }
 
 int main(int argc, char *argv[]) {
@@ -307,16 +338,13 @@ int main(int argc, char *argv[]) {
     printf("EFFECT_CMD_ENABLE -> reply=%d (engine log: 'Starting "
            "graceful enable over 7560 samples')\n", r);
 
-    /* Some quiet 440 Hz sine so the visualizer/DSP have material. */
+    /* A 440 Hz sine (amp 20000) so the visualizer/DSP have material. */
     int frames = 256;
     int16_t *pcm_in  = calloc(frames * 2, 2);
     int16_t *pcm_out = calloc(frames * 2, 2);
+    int16_t *in_ref  = calloc(frames * 2, 2);  /* saved input copy for Test A */
     double rate = 44100.0;
-    for (int i = 0; i < frames; ++i) {
-        double t = i / rate;
-        int s = (int)(20000.0 * sin(2.0 * M_PI * 440.0 * t));
-        pcm_in[i*2] = (int16_t)s; pcm_in[i*2+1] = (int16_t)s;
-    }
+    fill_sine(pcm_in, frames, rate, 20000.0, 440.0);
     /* Warm up past the 7560-sample enable crossfade (~30 blocks of 256). */
     process_blocks(pcm_in, pcm_out, frames, 35);
 
@@ -370,7 +398,7 @@ int main(int argc, char *argv[]) {
         uint8_t empty[80] = {0};
         int gs = cmd_get(DS_PARAM_VISUALIZER_DATA, empty, 80,
                          vis_snapshot_a, 80);
-        printf("    snapshot A (after warm-up, quiet 440 Hz sine)\n"
+        printf("    snapshot A (after warm-up, 440 Hz sine)\n"
                "    status=%d ; gains[0..4]=[%d,%d,%d,%d,%d] ; "
                "excitations[0..4]=[%d,%d,%d,%d,%d]\n",
                gs, vis_snapshot_a[0], vis_snapshot_a[1], vis_snapshot_a[2],
@@ -423,6 +451,51 @@ int main(int argc, char *argv[]) {
                "    non-zero (-ENODATA after crossfade completes)\n",
                e_nodata_count);
     }
+    /* Engine is in the post-crossfade (-ENODATA) DISABLED state here.
+     * With the output pre-ZEROED, a disabled block returns out == input
+     * (passthrough) and leaves the input buffer clobbered. Test A then
+     * pre-fills the output with garbage instead of zeroing it:
+     *   out == in        => OVERWRITE
+     *   out == prior + in => ACCUMULATE
+     * (the zeroed case above is just ACCUMULATE's 0 + in identity). */
+    {
+        fill_sine(pcm_in, frames, rate, 20000.0, 440.0);
+        measure("input ref (fresh sine)", pcm_in, frames);
+
+        audio_buffer_t in  = { .frameCount = frames, .s16 = pcm_in };
+        audio_buffer_t out = { .frameCount = frames, .s16 = pcm_out };
+        memset(pcm_out, 0, frames * 4);
+        int32_t pr = (*H)->process(H, &in, &out);
+        char tag[80];
+        snprintf(tag, sizeof tag, "disabled out, out pre-zeroed (process=%d)", pr);
+        measure(tag, pcm_out, frames);                     /* ==input => #2 */
+        measure("input after process()", pcm_in, frames);  /* <<input => #3 */
+
+        /* Test A — fill the output with garbage and DON'T zero it.
+         * garbage=8000 keeps garbage+peak (19999) inside int16 so the
+         * peak/rms stay readable; the per-sample match below is decisive. */
+        const int16_t garbage = 8000;
+        fill_sine(pcm_in, frames, rate, 20000.0, 440.0);
+        memcpy(in_ref, pcm_in, frames * 4);
+        for (int i = 0; i < frames * 2; ++i) pcm_out[i] = garbage;
+        measure("output prefilled w/ garbage", pcm_out, frames);
+        in.s16 = pcm_in;  in.frameCount = frames;
+        out.s16 = pcm_out; out.frameCount = frames;
+        pr = (*H)->process(H, &in, &out);                  /* deliberately NOT zeroed */
+        snprintf(tag, sizeof tag, "disabled out, prefill=%d (process=%d)",
+                 garbage, pr);
+        measure(tag, pcm_out, frames);
+        int over = 0, accum = 0;
+        for (int i = 0; i < frames * 2; ++i) {
+            if (pcm_out[i] == in_ref[i]) over++;
+            if (pcm_out[i] == (int16_t)(in_ref[i] + garbage)) accum++;
+        }
+        printf("    Test A: overwrite-match=%d/%d accumulate-match=%d/%d -> %s\n",
+               over, frames * 2, accum, frames * 2,
+               over  == frames * 2 ? "OVERWRITE (out = in; prior output discarded)" :
+               accum == frames * 2 ? "ACCUMULATE (out = prior_output + in)" :
+                                     "NEITHER — engine transforms/mixes");
+    }
     rs = 4; r = 0;
     (*H)->command(H, EFFECT_CMD_DISABLE, 0, NULL, &rs, &r);
     printf("    2nd DISABLE (idempotent) -> reply=%d (engine:\n"
@@ -435,6 +508,32 @@ int main(int argc, char *argv[]) {
     (*H)->command(H, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
     printf("    2nd ENABLE  (idempotent) -> reply=%d (engine:\n"
            "    'Already enabled, ignoring')\n", r);
+
+    /* Test B — does the ENABLED process() also clobber its input, and is
+     * the residue FIXED or PROGRESSIVE? Warm past the enable crossfade,
+     * load one fresh block, then run successive blocks WITHOUT refilling
+     * and watch the input: flat plateau => fixed in-place result;
+     * monotonic decay => progressive mutation. */
+    {
+        process_blocks(pcm_in, pcm_out, frames, 35);   /* warm, streamed */
+        fill_sine(pcm_in, frames, rate, 20000.0, 440.0);
+        printf("    Test B — enabled input mutation (fresh sine, then 6 "
+               "blocks, NO refill):\n");
+        measure("  input pre-block (fresh)", pcm_in, frames);
+        for (int b = 0; b < 6; ++b) {
+            audio_buffer_t in  = { .frameCount = frames, .s16 = pcm_in };
+            audio_buffer_t out = { .frameCount = frames, .s16 = pcm_out };
+            memset(pcm_out, 0, frames * 4);
+            int32_t pr = (*H)->process(H, &in, &out);
+            char tg[56];
+            if (b == 0) {
+                snprintf(tg, sizeof tg, "  out block 0 (process=%d)", pr);
+                measure(tg, pcm_out, frames);
+            }
+            snprintf(tg, sizeof tg, "  input after enabled block %d", b);
+            measure(tg, pcm_in, frames);
+        }
+    }
 
     /* Confirm a SET works on both sides of the cycle AND that the
      * post-cycle value actually takes effect at the DSP. Enable the
@@ -509,7 +608,42 @@ int main(int argc, char *argv[]) {
         char tag[40]; snprintf(tag, sizeof tag, "vmb=%-5d", v);
         measure(tag, pcm_out, frames);
     }
-    set_param("vmon", 0, &off, 1);
+
+    /* Per-sample proof (sharper than peak/rms) that out-of-range values
+     * SATURATE/CLAMP rather than producing distinct output: compare an
+     * out-of-range write against the in-range result byte-for-byte. */
+    {
+        int16_t *cmp = calloc(frames * 2, 2);
+        int16_t z = 0, neg = -100, big = 200, ten = 10;
+
+        /* vmb: negative vs zero, vmon still on from the sweep above. */
+        set_param("vmb", 0, &z, 1);
+        process_blocks(pcm_in, pcm_out, frames, 21);
+        memcpy(cmp, pcm_out, frames * 4);
+        set_param("vmb", 0, &neg, 1);
+        process_blocks(pcm_in, pcm_out, frames, 21);
+        int dv = diff_count(cmp, pcm_out, frames * 2);
+        printf("    vmb=-100 vs vmb=0:  %d/%d samples differ -> %s\n",
+               dv, frames * 2, dv == 0
+                 ? "IDENTICAL (negative clamps to 0; does NOT attenuate)"
+                 : "differ (genuinely distinct)");
+        set_param("vmon", 0, &off, 1);
+
+        /* dvla: out-of-range vs in-range max, leveler on, vmon off. */
+        set_param("dvle", 0, &on, 1);
+        set_param("dvla", 0, &ten, 1);
+        process_blocks(pcm_in, pcm_out, frames, 21);
+        memcpy(cmp, pcm_out, frames * 4);
+        set_param("dvla", 0, &big, 1);
+        process_blocks(pcm_in, pcm_out, frames, 21);
+        int dd = diff_count(cmp, pcm_out, frames * 2);
+        printf("    dvla=200 vs dvla=10: %d/%d samples differ -> %s\n",
+               dd, frames * 2, dd == 0
+                 ? "IDENTICAL (out-of-range saturates to the in-range effect)"
+                 : "differ (genuinely distinct)");
+        set_param("dvle", 0, &off, 1);
+        free(cmp);
+    }
 
     /* Second cmd 4 snapshot — output shape has changed
      * substantially since snapshot A (vmon cycled on/off, vmb swept
@@ -581,7 +715,7 @@ int main(int argc, char *argv[]) {
                "(engine accepts unknown 4-CCs silently)\n", rr);
     }
 
-    free(pcm_in); free(pcm_out);
+    free(pcm_in); free(pcm_out); free(in_ref);
     R(H); dlclose(lib);
     return 0;
 }

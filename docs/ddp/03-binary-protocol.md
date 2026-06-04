@@ -625,10 +625,10 @@ surfaces three buckets, each derived from observed DSP behaviour:
   every block with its own computed value. Writes are clobbered.
   The host reads them via cmd 4.
 - **Experimental** (`endp`, `mxou`, `preg`, etc.) — DSP reads them
-  on the same audio block. The probe's section 7 directly demonstrates
-  the raw-int16-reading property for the Settable bucket (`dvla`,
-  `vmb`); the universal ak_set forwarding in section 5b means the
-  same property applies to every Experimental param.
+  on the same audio block. Probe section 7 shows the Settable bucket
+  (`dvla`, `vmb`) is read raw (bounded by DSP saturation); the universal
+  ak_set forwarding in section 5b extends this to every Experimental
+  param.
 
 A fourth group of 11 AK slots is **excluded** from DolbyX v2's
 surfaces (DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because
@@ -653,6 +653,8 @@ The bucket classification lives in
 - The engine processes in **ACCUMULATE mode**: `process()` adds to the
   output buffer rather than overwriting it. Always `memset(out, 0,
 out_bytes)` before calling.
+- `process()` also **clobbers its own input buffer** (enabled or
+  disabled). Pass a scratch copy if you still need the original PCM.
 - The default sample rate is 44100 Hz. To run at 48000 Hz you have to
   use the `Ds1ap::New` hot-swap technique that DolbyX already
   implements (see `arm/ddp_processor.c`).

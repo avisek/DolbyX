@@ -269,8 +269,7 @@ User-visible consequences:
   (This is a deliberate simplification from the original, where GEQ was
   per-(profile, preset).)
 
-Factory EQ presets are `Off`, `Open`, `Rich`, `Focused`. `Off` has no
-`iebt`/`gebg` curve — selecting it disables the IEQ engine. Factory
+Factory EQ presets are `Off`, `Open`, `Rich`, `Focused`. Factory
 profiles are `Movie`, `Music`, `Game`, `Voice`. Factory items cannot
 be deleted; they can be reset to their bundled defaults.
 
@@ -592,6 +591,14 @@ the in-memory state mirror plus `config.toml` overlay.
 `GetVisualizer` (mapped to cmd 4 in the engine wire protocol) is
 the only way to read live engine state. Version is served by the
 daemon from a cached cmd 6 result captured at init.
+
+The `Process` opcode wraps `libdseffect.so`'s `process()`, which carries
+two contracts the daemon must honour (see
+[ddp_probe](ddp/03-binary-protocol.md#practical-reminders)): it
+**accumulates** into the output buffer (so the daemon zeroes it every
+block — including disabled blocks, which pass the input through and
+return `-ENODATA`), and it **clobbers its own input buffer** (so the
+daemon keeps a scratch copy when it needs the original PCM).
 
 The engine subprocess holds the session table and routes each command to the
 right `effect_handle_t`. For v2.1 (Unicorn backend), this protocol is
@@ -917,7 +924,7 @@ gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 [eq_preset.focused]
 name = "Focused"
-ieon = 0
+ieon = 1
 iebt = [-419, -112,  75, 116, 113, 160, 165,  80,  61,  79,
           98,  121,  64,  70,  44, -71, -33,-100,-238,-411]
 geon = 0
@@ -1966,27 +1973,3 @@ for both end users and contributors.
 | Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                 |
 | Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                        |
 | First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                              |
-
-## Deferred technical questions
-
-These don't block the plan and can be decided during implementation:
-
-- Whether to use `serde` untagged or tagged enums for the WebSocket protocol —
-  a small ergonomics question.
-- Whether the Solid store mirrors the daemon's TOML schema 1:1 or
-  uses a flatter shape better suited to component rendering.
-- How aggressively to debounce parameter writes during a slider drag — the
-  original DDP does 60 ms; we may match or go faster on desktop where network
-  isn't a constraint.
-
-## What this plan does not change
-
-- The current `arm/`, `daemon/`, and `ui/` (v1 vanilla-JS scaffold)
-  code stays in `main` during the rearchitecture. It is the v1
-  reference implementation. Once v2.0 completes, all three are
-  removed in one commit.
-- The existing [docs/ddp/](ddp/README.md) reference is unaffected — it
-  documents `libdseffect.so` and the original DDP behaviour, which doesn't
-  change.
-- The bundled `libdseffect.so` is the same v8.1 build the project has
-  always used.
