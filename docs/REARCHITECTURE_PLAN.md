@@ -170,6 +170,7 @@ pub trait Engine: Send + Sync {
     fn destroy_session(&self, id: SessionId) -> Result<()>;
     fn set_enabled(&self, id: SessionId, enabled: bool) -> Result<()>;
     fn set_param(&self, id: SessionId, name: &str, values: &[i16]) -> Result<()>;
+    fn set_params(&self, id: SessionId, params: &[(&str, &[i16])]) -> Result<()>;
     fn get_visualizer_data(&self, id: SessionId) -> Result<VisualizerData>;
     fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<()>;
     fn version(&self) -> Result<String>;
@@ -195,6 +196,21 @@ units. The trait is the canonical boundary where this format stays
 consistent end-to-end: persistence, state, wire protocol, and engine
 all carry i16s. Only the Web UI converts i16 ↔ float dB at display
 and input time.
+
+`set_param` writes one parameter (engine cmd 3); `set_params` writes a
+batch atomically in a single round-trip (engine cmd 2,
+`DS_PARAM_ALL_VALUES`). The daemon uses the batch path for profile and
+EQ-preset switches — the engine applies the whole change on one audio
+block, avoiding the mid-switch artifact of dribbling ~40 single writes
+through cmd 3. Single-control edits (slider, toggle, GEQ drag) use
+`set_param`.
+
+**Sample rate.** `libdseffect.so` runs at 44100 Hz by default. A
+`create_session` at any other rate (e.g. a 32000 or 48000 Hz host)
+needs the ARM side to apply the engine's `Ds1ap::New` hot-swap (see
+[docs/ddp/03](ddp/03-binary-protocol.md#practical-reminders)). This
+stays behind the trait — the backend handles it; the `Engine` surface
+is unchanged.
 
 Three impls are anticipated, but only one ships in v2.0:
 
@@ -579,6 +595,7 @@ Each message is `[u32 length][u32 opcode][payload]`. Replies are
 | 0x02 | `DestroySession` | `[u32 session_id]`                                    | empty                                    |
 | 0x03 | `SetEnabled`     | `[u32 session_id][u8 enabled]`                        | empty                                    |
 | 0x10 | `SetParam`       | `[u32 session_id][4-CC name][u16 count][i16 × count]` | empty                                    |
+| 0x11 | `SetParams`      | `[u32 session_id][u16 n]( [4-CC name][u16 count][i16 × count] × n )` | empty                      |
 | 0x20 | `GetVisualizer`  | `[u32 session_id]`                                    | `[i16 × 20 gains][i16 × 20 excitations]` |
 | 0x30 | `Process`        | `[u32 session_id][u32 frames][i16 × frames × 2 pcm]`  | `[i16 × frames × 2 pcm]`                 |
 | 0x40 | `Version`        | empty                                                 | `[u8 len][u8 × len utf-8]`               |
@@ -591,6 +608,9 @@ the in-memory state mirror plus `config.toml` overlay.
 `GetVisualizer` (mapped to cmd 4 in the engine wire protocol) is
 the only way to read live engine state. Version is served by the
 daemon from a cached cmd 6 result captured at init.
+
+`SetParams` maps to the engine's cmd 2 (`DS_PARAM_ALL_VALUES`) — see the
+batch-vs-single note under Decision 1.
 
 The `Process` opcode wraps `libdseffect.so`'s `process()`, which carries
 two contracts the daemon must honour (see
@@ -863,7 +883,10 @@ Two TOML files in distinct locations:
 `defaults.toml` declares all factory profiles and EQ presets with
 their full default values. `config.toml` stores **only deltas** —
 matching the overlay model the original DDP used with
-`ds1-default.xml` / `ds1-current.xml`. `defaults.toml` also drives
+`ds1-default.xml` / `ds1-current.xml`. The overlay is resolved at
+load, so each in-memory profile is complete — a profile switch then
+pushes it via Decision 4's `SetParams` (cmd 2), with no per-param
+fallback. `defaults.toml` also drives
 `reset_profile` and `reset_eq_preset` actions (reset = remove the
 user's overrides).
 
@@ -1341,6 +1364,11 @@ is intentionally I/O-free so it can be unit-tested in isolation, ported, or
 wrapped for FFI later. The `ddp-persistence` crate is a separate member to
 keep I/O concerns out of the state model.
 
+During the build-out the v1 `arm/` and `daemon/` trees stay alongside the new
+`crates/` as the reference implementation; the Solid `ui/` replaces the v1
+vanilla-JS `ui/` in place. All v1 remnants are removed in one commit once v2.0
+lands.
+
 ## Deep modules
 
 The architecture above factors into the deep modules below. The vocabulary
@@ -1356,8 +1384,8 @@ entry below passes the deletion test.
 
 | Module | Interface | What's hidden | Introduced in |
 |---|---|---|---|
-| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `get_visualizer_data(id) → VisualizerData{gains[20], excitations[20]}` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. No `get_param` by design (engine has no cmd 3 GET — daemon owns the state mirror). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing. Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
-| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `HandshakeFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, init handshake (DEFINE_PARAMS → DEFINE_SETTINGS → constant-params dance → VISUALIZER_ENABLE → EFFECT_CMD_ENABLE), `EngineInfo` caching from cmd 6. | Slice 1 |
+| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_visualizer_data(id) → VisualizerData{gains[20], excitations[20]}` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. No `get_param` by design (engine has no cmd 3 GET — daemon owns the state mirror). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing. Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
+| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `HandshakeFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, init handshake (DEFINE_PARAMS → DEFINE_SETTINGS → constant-params dance → VISUALIZER_ENABLE → EFFECT_CMD_ENABLE), `EngineInfo` caching from cmd 6. `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Profile::selected_eq_preset` always exists; deleting a referenced EQ preset falls profiles back to `"off"`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 53 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)`. Errors: `ParseError`, `MigrationFailed`. | `defaults.toml` + `config.toml` overlay, `notify` watcher, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
@@ -1518,9 +1546,8 @@ UI component, factory-state bootstrap.
 2. [ ] `State::new_from_defaults` selects `"music"` (first-run UX,
        Decision 8).
 3. [ ] WS `set_profile { id: "movie" }` updates `selected_profile`.
-4. [ ] On profile switch, *every* override in the new profile flushes
-       to the engine via `set_param`; values absent in the new
-       profile revert to their `ParameterDef.default`.
+4. [ ] On profile switch, the daemon pushes the selected profile's full
+       parameter set to the engine atomically via `set_params`.
 5. [ ] `selected_profile` persists across daemon restart.
 6. [ ] `reset_profile { id: "music" }` clears `config.toml`'s
        per-profile overrides; UI receives a fresh state snapshot.
@@ -1528,7 +1555,8 @@ UI component, factory-state bootstrap.
        `INVALID_PARAM`, leaves state unchanged.
 
 **Tracer bullet test.** Start daemon, WS `set_profile {id:"movie"}`,
-assert `StubBackend` recorded the full set of Movie's AK overrides.
+assert `StubBackend` recorded a single `set_params` call carrying
+Movie's full parameter set.
 
 **Mock policy.** Stub only.
 
@@ -1550,8 +1578,8 @@ profile records the selected preset id.
 1. [ ] Factory EQ presets load from `defaults.toml` per
        [ADR-0003](adr/0003-global-eq-presets-and-geq-per-preset.md).
 2. [ ] On `set_eq_preset { id: "rich" }` the engine receives the
-       preset's `iebt[20]` and `ieon=1`; the preset id is stored on
-       the active profile.
+       preset's `iebt[20]` and `ieon=1` in one atomic `set_params`; the
+       preset id is stored on the active profile.
 3. [ ] Switching to `"off"` writes `ieon=0` and zero `iebt`.
 4. [ ] Editing a preset's `iebt` via `edit_eq_preset` immediately
        affects *every* profile currently selecting that preset
@@ -1559,7 +1587,8 @@ profile records the selected preset id.
 5. [ ] `selected_eq_preset` persists per-profile across restart.
 
 **Tracer bullet test.** WS `set_eq_preset { id: "rich" }`, assert
-`StubBackend` recorded `iebt = [67, 95, …, -235]` and `ieon = 1`.
+`StubBackend` recorded one `set_params` carrying `iebt = [67, 95, …, -235]`
+and `ieon = 1`.
 
 **Mock policy.** Stub only.
 
@@ -1867,6 +1896,11 @@ the visualizer responds; the EQ takes effect.
        `ShellExecuteW`.
 7. [ ] PipeWire `filter-chain` config example loads successfully
        (smoke-only).
+8. [ ] A plugin `Hello` at 48000 Hz drives `create_session(48000)`; the
+       ARM engine applies the `Ds1ap::New` hot-swap so processed audio
+       keeps correct pitch (not resampled to 44.1).
+9. [ ] Toggling power fans `set_enabled` out to all live sessions; a
+       session created while power is off starts disabled.
 
 **Tracer bullet test.** A minimal "loopback" integration test —
 start the daemon, connect a synthetic plugin client over the
@@ -1956,20 +1990,20 @@ for both end users and contributors.
 
 ## What this changes vs v1
 
-| Aspect                    | v1                                                   | v2                                                                                                                                                                                      |
-| ------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon language           | C                                                    | Rust                                                                                                                                                                                    |
-| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                                            |
-| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                                            |
-| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                                             |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                                          |
-| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                      |
-| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET-only; cmd 4 for visualizer, cmd 6 for version, daemon caches everything else                               |
-| Param coverage            | 24 of 64 AK params                                   | All 53 surfaced AK params in DEFINE_PARAMS/SETTINGS; Settable / ReadOnly / Experimental per docs/ddp/02; 11 unreadable slots omitted (7 license/build, 4 vnb\*)                         |
-| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build |
-| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                                       |
-| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                                  |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                                     |
-| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                 |
-| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                        |
-| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                              |
+| Aspect                    | v1                                                   | v2                                                                                                                                                                                             |
+| ------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon language           | C                                                    | Rust                                                                                                                                                                                           |
+| Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                                                   |
+| Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                                                   |
+| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                                                    |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                                                 |
+| Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
+| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; cmd 3 SET (single edits) + cmd 2 (bulk profile/preset apply); cmd 4 visualizer, cmd 6 version; daemon caches everything else|
+| Param coverage            | 24 of 64 AK params                                   | All 53 surfaced AK params in DEFINE_PARAMS/SETTINGS; Settable / ReadOnly / Experimental per docs/ddp/02; 11 unreadable slots omitted (7 license/build, 4 vnb\*)                                |
+| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build        |
+| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                                              |
+| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                                         |
+| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                                            |
+| Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                        |
+| Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                               |
+| First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                                     |
