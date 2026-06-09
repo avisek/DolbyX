@@ -57,8 +57,11 @@ settings cache straight out of shared process memory (the probe
 `dlopen`s `libdseffect.so`, so the heap is ours). A **zero-count cmd 3
 SET** makes the engine create and seed the cache from its AK instance
 *without writing anything*, so every slot — the trigger's target
-included — stays at its default; the cache is then located by an
-engine-written signature (`bver`/`bndl`/`ver`) and read whole.
+included — stays at its default. The engine keeps the cache pointer at a
+fixed offset in the effect context (`H + 0xb0`, found by disassembling the
+cmd-3 cache-create path), so the probe just derefs it and reads the whole
+array — cross-checked byte-for-byte against a scan for the engine-seeded
+`bver`/`bndl`/`ver` signature.
 
 Headline finding: the engine boots a uniform **10-band / single-channel**
 config — `genb=ienb=aonb=arnb=10`, `aocc=1`, freq tables = the 10 ISO
