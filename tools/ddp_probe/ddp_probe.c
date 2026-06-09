@@ -54,6 +54,8 @@
 #include <string.h>
 #include <math.h>
 #include <dlfcn.h>
+#include <setjmp.h>
+#include <signal.h>
 #include "audio_effect_defs.h"
 
 #define DS_PARAM_DEFINE_SETTINGS     1
@@ -271,6 +273,98 @@ static int diff_count(const int16_t *a, const int16_t *b, int n) {
     return d;
 }
 
+/* ── Default-value dump (research aside, gated by $DUMP_DEFAULTS) ──────
+ * cmd 3 GET is unimplemented, so we don't read params from the engine at
+ * all — we read the engine's own settings cache out of shared process
+ * memory (the probe dlopen's libdseffect.so, so its heap is ours). On the
+ * first cmd 3 SET the engine mallocs the cache and seeds every slot from
+ * its AK instance's intrinsic power-on defaults — the 668 ak_get calls at
+ * the top of engine.log. We trigger that seed with a zero-count cmd 3 SET
+ * (creates + seeds the cache but writes no value), so EVERY slot stays at
+ * the engine's default, then locate the cache by an engine-written
+ * signature and read it whole. SIGSEGV-guarded so a bad candidate pointer
+ * can't take the process down. */
+static sigjmp_buf g_jb;
+static void on_fault(int s) { (void)s; siglongjmp(g_jb, 1); }
+
+/* Guarded read of pp[i] into *out; returns 0 on fault. */
+static int safe_rd(void **pp, int i, void **out) {
+    struct sigaction sa, o1, o2;
+    memset(&sa, 0, sizeof sa); sa.sa_handler = on_fault;
+    sigaction(SIGSEGV, &sa, &o1); sigaction(SIGBUS, &sa, &o2);
+    int ok = 1;
+    if (sigsetjmp(g_jb, 1) == 0) *out = pp[i]; else ok = 0;
+    sigaction(SIGSEGV, &o1, NULL); sigaction(SIGBUS, &o2, NULL);
+    return ok;
+}
+
+/* Guarded copy of up to max int16 from p into buf; returns count read. */
+static volatile int g_n;
+static int read_window(const int16_t *p, int max, int16_t *buf) {
+    struct sigaction sa, o1, o2;
+    memset(&sa, 0, sizeof sa); sa.sa_handler = on_fault;
+    sigaction(SIGSEGV, &sa, &o1); sigaction(SIGBUS, &sa, &o2);
+    if (sigsetjmp(g_jb, 1) == 0)
+        for (g_n = 0; g_n < max; g_n++) buf[g_n] = p[g_n];
+    int n = g_n;
+    sigaction(SIGSEGV, &o1, NULL); sigaction(SIGBUS, &o2, NULL);
+    return n;
+}
+
+/* The settings cache is a flat int16[cache_total] the engine seeds from
+ * the AK instance's per-param defaults on the first cmd 3 SET. cmd 3 GET
+ * is unimplemented, but the cache is plain memory reachable from the
+ * effect context. We locate it by an ENGINE-seeded signature — bver=[4,28,
+ * ..], bndl=[16708,80], ver=[2,0,4,..]: stable build constants the probe
+ * never writes — then read every slot and map it to (param, element) via
+ * settings_begin. Because the locator is the engine's own data, every
+ * slot we report is the untouched seed, EQ-structural params included. */
+static int cache_match(const int16_t *w) {
+    static int b = -1, n, v;
+    if (b < 0) { b = settings_begin[find_param("bver")];
+                 n = settings_begin[find_param("bndl")];
+                 v = settings_begin[find_param("ver")]; }
+    if (w[b] != 4 || w[b + 1] != 28) return 0;             /* bver build id  */
+    if (w[n] != 16708 || w[n + 1] != 80) return 0;         /* bndl bundle id */
+    if (w[v] != 2 || w[v + 1] != 0 || w[v + 2] != 4) return 0;  /* ver 2.0.4 */
+    return 1;
+}
+
+static const int16_t *find_cache(int cache_total) {
+    static int16_t win[1024];
+    void *cands[4096]; int nc = 0;
+    void **ctx = (void **)H;
+    for (int i = 0; i < 96 && nc < 4096; i++) { void *x; if (safe_rd(ctx, i, &x)) cands[nc++] = x; }
+    int base = nc;
+    for (int k = 0; k < base && nc < 4000; k++) {
+        void *pp = cands[k];
+        if ((uintptr_t)pp < 0x10000 || ((uintptr_t)pp & 3)) continue;
+        for (int i = 0; i < 96 && nc < 4000; i++) {
+            void *x; if (!safe_rd((void **)pp, i, &x)) break;
+            cands[nc++] = x;
+        }
+    }
+    for (int k = 0; k < nc; k++) {
+        if ((uintptr_t)cands[k] < 0x10000 || ((uintptr_t)cands[k] & 1)) continue;
+        int n = read_window((const int16_t *)cands[k], 1024, win);
+        for (int w = 0; w + cache_total <= n && w <= 80; w++)
+            if (cache_match(win + w)) return (const int16_t *)cands[k] + w;
+    }
+    return NULL;
+}
+
+static void dump_ak_defaults(int cache_total) {
+    printf("\n=== ENGINE DEFAULT VALUES (settings cache, seeded from AK instance) ===\n");
+    const int16_t *c = find_cache(cache_total);
+    if (!c) { printf("  cache not located via signature\n"); return; }
+    printf("  cache @ %p, %d slots\n\n", (const void *)c, cache_total);
+    for (int i = 0; i < NPARAM; i++) {
+        printf("%-4s =", G[i].name);
+        for (int e = 0; e < G[i].len; e++) printf(" %d", c[settings_begin[i] + e]);
+        printf("\n");
+    }
+}
+
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
@@ -302,6 +396,18 @@ int main(int argc, char *argv[]) {
     printf("\n=== 1. INIT HANDSHAKE ===\n");
     define_params();
     int cache_total = define_settings_all();
+
+    /* Default capture: a zero-count cmd 3 SET makes the engine create and
+     * seed the cache (from the AK instance) without writing any value, so
+     * every slot — the EQ-structural params below included — stays at its
+     * power-on default. Then dump the whole cache. */
+    if (getenv("DUMP_DEFAULTS")) {
+        int16_t none = 0;
+        int tr = set_flat(0, &none, 0);   /* count=0: seed only, write nothing */
+        printf("seed trigger (cmd 3, count=0) -> reply=%d\n", tr);
+        dump_ak_defaults(cache_total);
+        return 0;
+    }
 
     int16_t v20 = 20;
     set_param("genb", 0, &v20, 1);

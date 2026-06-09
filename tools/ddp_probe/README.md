@@ -35,19 +35,38 @@ gated by any specific experiment in the probe — it always fires.
 
 ## Note on init order
 
-The probe sends DEFINE*PARAMS → DEFINE_SETTINGS → cmd 3 SET for
+The probe sends DEFINE_PARAMS → DEFINE_SETTINGS → cmd 3 SET for
 `genb`/`ienb`/`aonb`/`gebf`. cmd 3 addresses cache flat indices,
 so it can only follow DEFINE_SETTINGS — the engine doesn't allow
 schema-defining SETs ahead of cache allocation. The probe's
-hard-coded element lengths in `G[]` (e.g. `aobg=42`) match the
-engine's static `akParams*` defaults (`genb=ienb=aonb=20`,
-`aocc=2`), so the cache layout is self-consistent before the
-constants are echoed back. This mirrors the Java
-`DsAkSettings.defineSettings` flow, which also builds the
-DEFINE_SETTINGS payload using host-side knowledge of the
-constants and then issues the cmd 3 SETs afterwards. See
+hard-coded `G[]` lengths (e.g. `aobg=42`) match the standard
+**20-band stereo** config (`genb=ienb=aonb=20`, `aocc=2`) — which is
+*host-established, not an engine default*. The engine actually powers
+on **10-band / `aocc=1`** (see [Dumping engine defaults](#dumping-engine-defaults));
+the Java `DsAkSettings.defineSettings` flow — and this probe — write
+the 20-band constants via cmd 3 afterwards. See
 [../../docs/ddp/03-binary-protocol.md](../../docs/ddp/03-binary-protocol.md#the-mandatory-init-handshake)
 for the protocol-level discussion.
+
+## Dumping engine defaults
+
+`DUMP_DEFAULTS=1` (or `make dump`) prints every param's intrinsic
+power-on default and exits. cmd 3 GET is unimplemented, so the probe
+can't *ask* the engine for a value — instead it reads the engine's own
+settings cache straight out of shared process memory (the probe
+`dlopen`s `libdseffect.so`, so the heap is ours). A **zero-count cmd 3
+SET** makes the engine create and seed the cache from its AK instance
+*without writing anything*, so every slot — the trigger's target
+included — stays at its default; the cache is then located by an
+engine-written signature (`bver`/`bndl`/`ver`) and read whole.
+
+Headline finding: the engine boots a uniform **10-band / single-channel**
+config — `genb=ienb=aonb=arnb=10`, `aocc=1`, freq tables = the 10 ISO
+bands `[32,64,125,…,16000]` zero-padded. The 20-band layout the rest of
+the stack assumes is host-applied, not intrinsic. Notable settable
+defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
+`ngon=2`, `vmon=2`, `vmb=144`, `plmd=4`, `dvli=dvlo=-320`, `arbl=-192×40`,
+`artp=16`.
 
 ## Prerequisites
 
