@@ -4,6 +4,10 @@ DolbyX is a cross-platform wrapper around the Android Dolby Digital Plus
 `libdseffect.so` engine, exposing it to desktop audio hosts via a Rust
 daemon, a Solid-based Web UI, and platform-native plugins.
 
+**Goal.** Match the original DDP's default behaviour, look, and feel
+out of the box, then extend its capabilities beyond the original and
+simplify where possible.
+
 This document is the canonical glossary for terms specific to the DolbyX
 project — pin new project-specific terms here, not inline in plans or ADRs.
 
