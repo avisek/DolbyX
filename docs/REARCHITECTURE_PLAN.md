@@ -369,6 +369,19 @@ documents "scaled by 16 ie. 16 = 1 dB"); the metadata table stays
 the canonical source. `lkfs: bool` switches the unit label from
 `dB` to `LKFS` for `dvli`/`dvlo`.
 
+**Parameter defaults.** For settable params, `default` is the engine's
+intrinsic power-on value — what a freshly-created engine reports before
+any profile is pushed, captured by probe (`make -C tools/ddp_probe
+dump`). It's the base layer of the persistence overlay (Decision 7):
+`defaults.toml` and `config.toml` store only divergences from it, so the
+table is the single home for the per-param defaults the original DDP
+repeated in full in every profile. The structural **constants** (band
+counts / freq tables / channel count — `genb`, `ienb`, `aonb`, `aocc`,
+`gebf`, …) are the exception: the engine powers on **10-band / `aocc=1`**,
+but the host rewrites them to the standard **20-band stereo** config in
+the init constant-params dance, so their `default` is that operational
+value, not the boot state — and they sit outside the profile overlay.
+
 **Three-bucket settability classification.** This is a deliberate
 deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
 binary. Empirically, the engine accepts cmd 3 SET against any
@@ -880,10 +893,16 @@ Two TOML files in distinct locations:
 - `defaults.toml` — factory defaults, user-editable, in the **same directory
   as the daemon binary**.
 
-`defaults.toml` declares all factory profiles and EQ presets with
-their full default values. `config.toml` stores **only deltas** —
-matching the overlay model the original DDP used with
-`ds1-default.xml` / `ds1-current.xml`. The overlay is resolved at
+`defaults.toml` and `config.toml` both store **only deltas** over the
+`ParameterDef.default` base (Decision 3) — `defaults.toml` each factory
+profile / EQ preset's divergence from the per-param defaults,
+`config.toml` the user's edits on top. A param absent from both
+resolves to its `ParameterDef.default`; resolution is
+`ParameterDef.default → defaults.toml → config.toml`. The two TOML
+files mirror the original's `ds1-default.xml` / `ds1-current.xml` pair;
+the `ParameterDef.default` base is a v2 refinement — the original
+repeated the factory defaults in full in every profile, DolbyX factors
+them out. The overlay is resolved at
 load, so each in-memory profile is complete — a profile switch then
 pushes it via Decision 4's `SetParams` (cmd 2), with no per-param
 fallback. `defaults.toml` also drives
@@ -924,34 +943,25 @@ selected_profile = "music"
 
 [eq_preset.off]
 name = "Off"
-ieon = 0
-iebt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-geon = 0
-gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+# no deltas — resolves to ParameterDef.default (flat: IEQ + GEQ both off)
 
 [eq_preset.open]
 name = "Open"
 ieon = 1
 iebt = [117, 133, 188, 176, 141, 149, 175, 185, 185, 200,
         236, 242, 228, 213, 182, 132, 110,  68, -27, -240]
-geon = 0
-gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 [eq_preset.rich]
 name = "Rich"
 ieon = 1
 iebt = [67, 95, 172, 163, 168, 201, 189, 242, 196, 221,
         192, 186, 168, 139, 102,  57,  35,   9, -55, -235]
-geon = 0
-gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 [eq_preset.focused]
 name = "Focused"
 ieon = 1
 iebt = [-419, -112,  75, 116, 113, 160, 165,  80,  61,  79,
           98,  121,  64,  70,  44, -71, -33,-100,-238,-411]
-geon = 0
-gebg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 [profile.music]
 name = "Music"
@@ -1437,13 +1447,18 @@ does not apply. Treat this slice as one-shot setup.
   `vite-plugin-solid`, `vite-plugin-singlefile`,
   `@solidjs/testing-library`, and `eslint-plugin-solid` pinned. No
   Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
-- `defaults.toml` created with factory profiles and EQ presets
-  transcribed from `ds1-default.xml`.
+- `defaults.toml` created from `ds1-default.xml` — each factory profile
+  / EQ preset stored as its delta over the `ParameterDef.default` base.
 - AK parameter metadata table (`parameters.toml` + codegen) populated
   with all 53 surfaced entries from
   [docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md), with the
   three-bucket Settable / ReadOnly / Experimental classification from
   [ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md).
+  Each settable entry's `default` is the engine's power-on value
+  captured by probe (`make -C tools/ddp_probe dump`), not 02's
+  Music-profile column; structural constants (band counts, freq tables,
+  `aocc`) carry their host-set 20-band values instead — the engine boots
+  10-band (see Decision 3).
   (The 11 omitted entries — 7 engine-internal build-version / license
   slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` plus the
   4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` — share the
@@ -1457,6 +1472,7 @@ does not apply. Treat this slice as one-shot setup.
 - [ ] UI scaffold builds via `pnpm --prefix ui build`
 - [ ] `defaults.toml` round-trips through TOML parser
 - [ ] `parameters.toml` → codegen `parameters.rs` produces 53 entries
+- [ ] Settable `ParameterDef.default` values captured via `make -C tools/ddp_probe dump`
 - [ ] All linters / formatters / type-checkers clean
 
 **HITL/AFK:** HITL — module layout warrants a human review pass before
@@ -1837,7 +1853,8 @@ constant-params dance) — [tests.md](../.agents/skills/tdd/tests.md)
        - `DEFINE_SETTINGS` with the full `(param_idx, offset)`
          expansion (~422 cache slots, ~0.8 KB init payload).
        - Constant-params writes (`genb=20`, `ienb=20`, `aonb=20`,
-         `gebf[…]`, …) via cmd 3.
+         `gebf[…]`, …) via cmd 3 — the engine powers on 10-band, so
+         this dance establishes the 20-band stereo config.
        - `VISUALIZER_ENABLE` SET.
        - `EFFECT_CMD_ENABLE`.
 3. [ ] All Slices 1–8 integration tests pass under
