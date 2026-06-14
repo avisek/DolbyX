@@ -36,6 +36,7 @@ the previous.
 | 4   | [04-ui-data-flow.md](04-ui-data-flow.md)                         | The 30-method AIDL contract, the 8 callback events, the visualizer 50 ms pump, the equalizer paint loop and touch model, IEQ preset switching, and the originator-handle echo-suppression pattern.       |
 | 5   | [05-profiles-and-persistence.md](05-profiles-and-persistence.md) | The 6 × 4 × 20 GEQ matrix, the IEQ preset model, the `ds1-default.xml` / `ds1-current.xml` / `ds1-state.xml` files and exactly when each one is written, and the 5-bit `DsClientSettings` digest.        |
 | 6   | [06-gap-analysis.md](06-gap-analysis.md)                         | The actionable migration plan — every divergence between DolbyX today and the original, ranked by impact, with prescribed code changes.                                                                  |
+| 7   | [07-ak-api.md](07-ak-api.md)                                     | The engine's internal **Audio Kernel** API — `ak_get` / `ak_set` / `ak_enum` & friends, the tagged-ref / `ak_resolve` tree model, reaching AK in-process, and reading the engine's authoritative param metadata (the ground truth behind the Java table). Research reference. |
 
 ## Quick navigation by question
 
@@ -44,6 +45,7 @@ the previous.
 - **"What does the engine actually expect when I toggle the headphone virtualizer?"** → 02 (`vdhe` "on" is value `2`, not `1`).
 - **"What's the right initialization sequence for `libdseffect.so`?"** → 03 (the `DEFINE_PARAMS → DEFINE_SETTINGS` handshake, with constant-params first).
 - **"What changes does DolbyX need to faithfully match the original?"** → 06.
+- **"How do I read the engine's *real* ranges, or find params Java never exposed?"** → 07 (the AK API + live tree enumeration).
 
 ## Conventions
 

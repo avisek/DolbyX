@@ -10,7 +10,7 @@ new doc edit.
 
 ## What it proves
 
-The harness drives the engine through nine focused experiments and
+The harness drives the engine through ten focused experiments and
 prints the engine's own internal log lines (`__android_log_print`
 output) to stderr alongside a stdout summary. The combination
 establishes the following facts:
@@ -28,6 +28,7 @@ establishes the following facts:
 | 7   | **The DSP reads the clamped registry, not the raw cache.** A direct cache poke (registry frozen, verified via `ak_get`) leaves the output unchanged (`0/512`) while the matching `SET` changes `512/512`. Out-of-range sweep pairs collapse because `ak_set` clamps both to the same value: `vmb=240 ≡ vmb=480` (→192), `dvla=10 ≡ dvla=200` (→10). (The leveler/maximizer are stateful, so the cache-poke runs first on a clean path with reproducibility gates — sweep peaks are trends, not exact.) | stdout `POKE cache=160 … 0/512 … DSP READS CLAMPED REGISTRY`; sweep `dvla=10/200 peak=51`, `vmb=240/480 peak≈32764`                                                                                                                                                                                                               |
 | 8   | Cache writes addressing a flat index past `cache_total` are rejected with -22; but the engine only checks `begin` — a `count=20` SET starting at `cache_total - 5` is accepted with reply 0, so writes straddling the cache edge corrupt adjacent memory rather than failing safe (this destructive SET, #8b, runs **last**); bogus 4-CCs in DEFINE_PARAMS are accepted silently                                                       | `setting_index 767 is invalid (number of settings defined is 667)`; stdout "SET flat=662 count=20 ... -> reply=0"; absence of error for `DEFINE_PARAMS [xxxx, dvla, yyyy]`                                                                                                                                                       |
 | 9   | **The engine's own `ak_get` reads the live AK registry** (reachable from fixed context offsets). `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and the 20 excitations (`vcbe`); `vnbg`/`vnbe` have no cmd-4 path but are readable and both **mirror** `vcbg`/`vcbe`; `ak_get_min/max` expose the engine's true ranges, audited for a sample where `vmb` (`[0..192]`) and `vol` (`[-2080..480]`) differ from the Java table; a runtime value-diff shows only the visualizer slots change during `process()`     | stdout `(a) ak_get vs cmd 4: gains 20/20, excitations 20/20 match`, `(b) vnbg == vcbg: 20/20, vnbe == vcbe: 20/20`, `(c) vmb engine[0..192] … <- TABLE WRONG`, `(d) registry slots that CHANGED across runtime: vnbe vcbe`                                                                                                                                                   |
+| 10  | **The engine self-describes its whole param tree.** `ak_enum` walks the AK object tree (root = ref 1) and `ak_get_name/_length/_min/_max/_frac_bits` read each leaf's true metadata — **248 defs**, far more than the host's 64. Surfaces the internal DSP node graph (`dvle`, `gq`, `visq`, …), root params Java never exposed (`scpe`, `test`), and per-param `frac_bits` (the fixed-point scale, e.g. `gebg`/`vmb` = 4 ⇒ 1/16). Also exposes more table gaps — `gebg` is **len=40** in the engine, not 20. This is the ground truth a `parameters.toml` generator would emit | stdout `=== 10. AK TREE …`, `dvla len=1 [0..10] frac=0`, `vmb len=1 [0..192] frac=4`, `scpe len=1 [0..2]`, `gebg len=40 [-576..576] frac=4`, `(248 defs; frac=N …)` |
 
 The DEFINE_SETTINGS pre-population effect (engine fires
 `ak_get(0/bver, 0..4)` etc. to seed the cache from its own AK
@@ -123,6 +124,7 @@ make run 2>/dev/null | grep -E "vnbg == vcbg: 20/20, vnbe == vcbe: 20/20"       
 make run 2>/dev/null | grep -E "vmb .*0\.\.192.*TABLE WRONG"         # engine range != Java table
 make run 2>/dev/null | grep -E "accumulate-match=512/512"            # process() ACCUMULATE mode
 make run 2>/dev/null | grep -B1 "begin+count=682" | grep "flat=662"  # begin-only bounds (#8b, last)
+make run 2>/dev/null | grep -E "gebg +len=40|248 defs"               # exp 10: engine self-describe (true metadata; gebg len 40≠20)
 ```
 
 If any of these come back empty, the engine binary has changed
@@ -134,7 +136,7 @@ behavior — the docs need an updated review.
 tools/ddp_probe/
 ├── README.md            # this file
 ├── Makefile             # cross-compile + qemu-arm-static invocation
-├── ddp_probe.c          # the consolidated probe (9 experiments)
+├── ddp_probe.c          # the consolidated probe (10 experiments)
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 

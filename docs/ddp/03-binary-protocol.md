@@ -429,6 +429,10 @@ own write mirror. Caveat: it only works where `libdseffect.so` is
 in-process — the cross-process Android HAL can't reach the engine heap —
 and the offsets are pinned to this EOL build.
 
+For the full AK accessor surface (`ak_set`, `ak_enum`, `ak_find`, the
+ref/`ak_resolve` tree model, and reading the engine's authoritative param
+metadata), see [07 — AK API](07-ak-api.md).
+
 ## Command 0 — `DS_PARAM_TUNING`
 
 Not used by the standard service. The `DsEffect` class has a

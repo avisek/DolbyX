@@ -1,7 +1,7 @@
 /*
  * ddp_probe.c — Evidence harness for libdseffect.so engine behavior.
  *
- * Runs nine focused experiments under qemu-arm-static and prints
+ * Runs ten focused experiments under qemu-arm-static and prints
  * stdout summaries while the engine's own log lines (via the noisy
  * liblog_stub.c) print to stderr. The combination is the empirical
  * source-of-truth for the claims in:
@@ -45,11 +45,16 @@
  *      `begin + count > cache_total` (resolves whether the engine
  *      checks only `begin` or the full extent), and bogus 4-CC
  *      DEFINE_PARAMS acceptance (proves no name validation).
- *   9. AK registry via the engine's own ak_get/ak_get_bulk: ak_get
- *      reproduces cmd 4 (same source); vnbg/vnbe are live but mirror
- *      vcbg/vcbe; ak_get_min/max expose the engine's true ranges
- *      (vmb, vol differ from the table); a runtime scan shows only the
- *      visualizer slots change during process().
+ *   9. AK registry via the engine's own ak_get: reproduces cmd 4 (both
+ *      vcbg gains and vcbe excitations, same source); vnbg/vnbe are live
+ *      but mirror vcbg/vcbe; ak_get_min/max expose the engine's true
+ *      ranges (vmb, vol differ from the table); a runtime value-diff
+ *      shows only the visualizer slots change during process().
+ *  10. AK tree enumeration: ak_enum walks the engine's own object tree
+ *      (root = ref 1); ak_get_name/_length/_min/_max/_frac_bits read each
+ *      leaf's true metadata — the authoritative param table (248 defs),
+ *      surfacing the DSP node graph and root params Java never exposed
+ *      (scpe, test). The ground truth a parameters.toml generator emits.
  *
  * Build & run: see tools/ddp_probe/README.md.
  */
@@ -153,15 +158,22 @@ static int settings_begin[NPARAM];
  * ak_get_bulk(h, ref, 0, n, 4, dst) -> n int16s (stride 4 = the int16 form;
  *                                      stride 1 would give int32 elements)
  * ak_get_name(h, ref)               -> 4-CC packed little-endian in a uint32
- * ak_get_min/max(h, ref)            -> engine's declared range for the param */
+ * ak_get_min/max(h, ref)            -> engine's declared range for the param
+ * ak_get_length(h, ref)            -> array element count for the param
+ * ak_get_frac_bits(h, ref)         -> fixed-point fractional bits (unit = 1/2^n)
+ * ak_enum(h, parent_ref, i)         -> i-th child ref of parent (root = ref 1),
+ *                                      0 past the last child (see experiment 10) */
 typedef int      (*ak_get_fn)(void *, uint32_t, int);
 typedef int      (*ak_get_bulk_fn)(void *, uint32_t, int, int, int, void *);
 typedef uint32_t (*ak_get_name_fn)(void *, uint32_t);
 typedef int      (*ak_minmax_fn)(void *, uint32_t);
+typedef uint32_t (*ak_enum_fn)(void *, uint32_t, int);
 static ak_get_fn      ak_get;
 static ak_get_bulk_fn ak_get_bulk;
 static ak_get_name_fn ak_get_name;
 static ak_minmax_fn   ak_get_min, ak_get_max;
+static ak_minmax_fn   ak_get_length, ak_get_frac_bits;
+static ak_enum_fn     ak_enum;
 
 static void     *AK;       /* engine AK handle */
 static uint32_t *AK_REF;   /* per-param tagged refs (DEFINE_PARAMS order) */
@@ -193,6 +205,27 @@ static void snapshot_registry(int *dst) {
         uint32_t ref = ak_ref(G[i].name);
         for (int e = 0; e < G[i].len; e++)
             dst[settings_begin[i] + e] = ref ? ak_get(AK, ref, e) : 0;
+    }
+}
+
+/* Walk the engine's live AK object tree from `parent` (root = ref 1), printing
+ * each leaf param's true metadata straight from the engine — no host table.
+ * ak_enum returns the i-th child's tagged ref (0 past the last); a ref with its
+ * own children is a container (a DSP node) and recurses. `n` accumulates the
+ * count; the depth/count caps guard against a mis-resolved ref looping. */
+static void ak_walk(uint32_t parent, int depth, int *n) {
+    for (int i = 0; ; i++) {
+        uint32_t r = ak_enum(AK, parent, i);
+        if (!r || depth > 8 || ++*n > 400) return;
+        char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
+        if (ak_enum(AK, r, 0)) {                         /* has children -> node */
+            printf("    %*s%-4s  [node]\n", depth * 2, "", fc);
+            ak_walk(r, depth + 1, n);
+        } else {
+            printf("    %*s%-4s  len=%-2d  [%6d .. %6d]  frac=%d\n",
+                   depth * 2, "", fc, ak_get_length(AK, r),
+                   ak_get_min(AK, r), ak_get_max(AK, r), ak_get_frac_bits(AK, r));
+        }
     }
 }
 
@@ -387,6 +420,9 @@ int main(int argc, char *argv[]) {
     ak_get_name = (ak_get_name_fn) dlsym(lib, "ak_get_name");
     ak_get_min  = (ak_minmax_fn)   dlsym(lib, "ak_get_min");
     ak_get_max  = (ak_minmax_fn)   dlsym(lib, "ak_get_max");
+    ak_enum          = (ak_enum_fn) dlsym(lib, "ak_enum");          /* exp 10 */
+    ak_get_length    = (ak_minmax_fn) dlsym(lib, "ak_get_length");
+    ak_get_frac_bits = (ak_minmax_fn) dlsym(lib, "ak_get_frac_bits");
     if (!ak_get || !ak_get_bulk || !ak_get_name || !ak_get_min || !ak_get_max) {
         fprintf(stderr, "dlsym: libdseffect.so is missing an ak_* accessor "
                 "(ak_get/ak_get_bulk/ak_get_name/ak_get_min/ak_get_max)\n");
@@ -914,6 +950,22 @@ int main(int argc, char *argv[]) {
                ? "only visualizer slots changed value; nothing else moved"
                : "WARNING: a non-visualizer slot changed — see the list above");
         free(snapA); free(snapB);
+    }
+
+    /* ── 10. AK tree enumeration — the engine's authoritative param table ─
+     * DEFINE_PARAMS only ever sees the 64 names the HOST sends; the engine's
+     * own AK tree is the ground truth. ak_enum walks it (root = ref 1) and
+     * ak_get_name/_length/_min/_max/_frac_bits read each leaf's real metadata —
+     * the exact data a parameters.toml generator would emit (true ranges, array
+     * lengths, fixed-point scale). It also surfaces root params Java never
+     * exposed (e.g. scpe, test) and the per-node DSP sub-params. */
+    printf("\n=== 10. AK TREE — engine's authoritative param metadata ===\n");
+    if (ak_enum && ak_get_length && ak_get_frac_bits) {
+        int n = 0;
+        ak_walk(1, 0, &n);
+        printf("    (%d defs; frac=N means fixed-point 1/2^N units, e.g. 4 = 1/16 dB)\n", n);
+    } else {
+        printf("    (ak_enum/ak_get_length/ak_get_frac_bits not exported — skipped)\n");
     }
 
     /* ── 8b. begin-only bounds check (DELIBERATELY LAST — corrupts heap) ─
