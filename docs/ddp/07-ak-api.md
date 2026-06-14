@@ -67,9 +67,9 @@ All take `(handle, ref, …)` and resolve the ref internally.
 
 | Function                                            | Signature → returns                  | Notes                                                                 |
 | --------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------- |
-| `ak_get`                                            | `(h, ref, elem) → int`               | one element, clamped. **A shim over `ak_get_bulk(count=1, stride=1)`.** |
+| `ak_get`                                            | `(h, ref, elem) → int`               | one element — the stored, already-clamped value. **A shim over `ak_get_bulk(count=1, stride=1)`.** |
 | `ak_get_bulk`                                        | `(h, ref, start, count, stride, dst)`| the real reader. **stride 4 = packed int16, 1 = int32.**              |
-| `ak_set`                                            | `(h, ref, elem, val) → ok`           | single-element write. **Pure store — no recompute** (wraps the bulk-set core). |
+| `ak_set`                                            | `(h, ref, elem, val) → ok`           | single-element write. **Clamps to `[min,max]`, then stores; no recompute** (wraps the bulk-set core). |
 | `ak_set_bulk`                                        | `(h, ref, start, count, stride, src)`| batch write.                                                          |
 | `ak_get_name`                                        | `(h, ref) → u32`                     | 4-CC, packed little-endian.                                           |
 | `ak_get_min` / `ak_get_max`                          | `(h, ref) → int`                     | engine's own clamp bounds (authoritative).                            |
@@ -92,11 +92,14 @@ Two facts worth holding onto:
   code; the engine log labels every element `ak_get(idx/name, e)` either way (so
   the per-element log lines under cmd 4 are `ak_get_bulk`'s internal loop, not a
   separate path).
-- **`ak_set` doesn't recompute.** It only stores into the registry. The DSP's
-  coefficient recompute (`ak_update`) runs inside `ak_process`, which reads the
-  registry **live every block** — so a bare `ak_set` is enough for the new value
-  to take effect (matches the cache-poke result in
-  [`ddp_probe` #7](../../tools/ddp_probe/README.md)).
+- **`ak_set` clamps, then stores — but never recomputes.** The shared store core
+  (`0x1ab7c`, reached by both `ak_set` and `ak_set_bulk`) saturates the value to
+  the param's `[min, max]` *before* writing — so the registry physically holds the
+  **clamped** value, which is why it diverges from the raw settings cache (see
+  [03](03-binary-protocol.md)). What it does *not* do is recompute coefficients:
+  that's `ak_update`, inside `ak_process`, which reads the registry **live every
+  block** — so a bare `ak_set` still takes effect (matches the cache-poke result
+  in [`ddp_probe` #7](../../tools/ddp_probe/README.md)).
 
 ## Two layers: params and framework
 
@@ -125,11 +128,12 @@ the signal path; several map directly to DDP features in
 | `dele`                        | Dialogue enhancer | `amou`, `duck`, `dig[20]`            |
 | `gq`                          | Graphic EQ      | `gain`                                 |
 | `dvsq`                        | Virtualizer     | `angl`, `ofmt`                         |
-| `visq`                        | Visualizer      | the `vcb*` / `vnb*` slots              |
-| `fqmf` / `rqmf` / `fshq` / `rshq` | QMF filterbanks | `hdrm`                            |
+| `visq`                        | Visualizer      | `excd[20]`, `disg[20]`, `dcg[20]`, `dce[20]` |
+| `fqmf` / `rqmf` / `fshq` / `rshq` | QMF filterbanks | `hdrm` (`fshq`/`rshq`), `mxin` (`fqmf`), `zero[8]` (`rqmf`) |
 
 Each node carries its own `ver`, `on`, and params, all with **true ranges and
-`frac_bits`** straight from the engine.
+`frac_bits`** straight from the engine. (The root `vcb*`/`vnb*` arrays cmd 4 reads
+are separate leaves — the visualizer's *outputs*, not `visq`'s children.)
 
 ## Why this matters: authoritative metadata
 
@@ -138,7 +142,10 @@ is the ground truth, and it disagrees with the hand-transcribed Java table
 [02](02-ak-parameters.md) in more than one way:
 
 - **Ranges:** `vmb` is `[0..192]` (not 240), `vol` `[-2080..480]` (not -2048).
-- **Lengths:** `gebg` is **len 40**, not 20.
+- **Lengths:** the EQ band arrays (`gebg`, `gebf`, `iebt`, `iebf`, `aobf`, …) are
+  **len 40** — the engine's max band count (`genb`/`ienb` ≤ 40), of which the host
+  fills the first 20; `aobg` is **329**, not 42. A length is the array's capacity,
+  not the value count you must send.
 - **Hidden root params:** `scpe` (`[0..2]`) and `test` (`[0..1]`) — never exposed by Java.
 - **Unit scale:** per-param `frac_bits` (the engine's own fixed-point exponent),
   which the docs otherwise hardcode (e.g. "÷16").
@@ -156,4 +163,6 @@ ak_resolve 0x19e1c   ak_find    0x1a0b4   ak_enum        0x1a1ec   ak_count_defs
 ak_get     0x1a904   ak_get_bulk 0x1a5a4  ak_set         0x1af58   ak_set_bulk   0x1b070
 ak_get_name 0x1a2a0  ak_get_min 0x1a2d4   ak_get_max     0x1a308   ak_get_length 0x1a424
 ak_get_type 0x1a26c  ak_get_flags 0x1a574 ak_get_frac_bits 0x1a33c  ak_get_string 0x1a370
+
+clamp+store core 0x1ab7c  (ak_set + ak_set_bulk converge here; saturates to [min,max] then stores)
 ```
