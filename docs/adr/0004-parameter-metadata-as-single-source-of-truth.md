@@ -13,7 +13,7 @@ accepts cmd 3 SET against any declared parameter regardless of Java's
 `isParamSettable` whitelist. The remaining 11 slots (7 engine-internal
 build-version / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
 `lcsz`, `lcpt`, plus 4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`,
-`vnbe`) are omitted because they have no public read path; the engine
-version string is surfaced via cmd 6 → bootstrap `engine.version`
-instead. Adding a new parameter is a one-line edit; the UI
+`vnbe` — `ak_get` shows `vnbg`/`vnbe` are a live mirror of `vcbg`/`vcbe`)
+are omitted because they carry nothing the host needs; the engine version
+string is surfaced via cmd 6 → bootstrap `engine.version` instead. Adding a new parameter is a one-line edit; the UI
 auto-discovers it on next page load.

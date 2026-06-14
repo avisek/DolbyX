@@ -24,16 +24,18 @@ version of that array with explanatory annotations.
   standard 20-band stereo config).
 - **bounds**: clamped at `DsAkSettings.set` time
   (`Ds.apk/.../DsAkSettings.java:278-326`). Values outside the range
-  are silently clamped, not rejected. **The engine itself does NOT
-  clamp or validate values** — direct probe evidence in
-  [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 110
-  into `dvla` (range 0..10) produces an engine log line
-  `settingsCache[...] updated with value 110` (verbatim, no clamp);
-  the DSP then reads the raw 110 (its own math bounds the result — see
-  [Engine vs Java settability](#engine-vs-java-settability)). Clamping
-  is exclusively a Java-side concern;
-  any non-Java host that wants safety must validate before forwarding
-  to the engine.
+  are silently clamped, not rejected. **The engine clamps too, in the AK
+  registry** — direct probe evidence in
+  [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 210 into
+  `dvla` (range 0..10) logs `settingsCache[...] updated with value 210`
+  (the cache keeps the raw value), but the forwarded `ak_set` clamps the
+  registry copy to 10, and the DSP reads the **clamped registry** (#7).
+  So the cache and registry diverge on out-of-range writes; `ak_get`
+  reads the clamped value, `ak_get_min`/`ak_get_max` the engine's range
+  (which differs from the table for `vmb`/`vol` — see
+  [Engine vs Java settability](#engine-vs-java-settability)). A host
+  should still validate up front: the engine's silent clamp uses ranges
+  that don't always match the published table.
 - **dB scaling**: most dB-valued parameters are stored as
   `int16 = round(dB × 16)`. So a +6 dB setting is stored as `+96`.
   This 1/16 dB resolution applies uniformly to gains, leveler targets,
@@ -205,9 +207,11 @@ grid (1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rend
 
 These look identical in shape to the `vc*` family and exist alongside
 them. They are not used by the standard UI and exist for the engine's
-own internal monitoring. None of them are read by `DsClient`. DolbyX v2
-drops the `vnb*` family entirely (no cmd 4 path, no cmd 3 GET) — see the
-"Recommendation for DolbyX v2" section below.
+own internal monitoring. None of them are read by `DsClient`. `ak_get`
+(ddp_probe #9) shows `vnbg`/`vnbe` are live and audio-tracking but a
+byte-for-byte **mirror** of `vcbg`/`vcbe` regardless of their own band
+config — so DolbyX v2 drops the `vnb*` family entirely (redundant, and no
+cmd 4 path) — see the "Recommendation for DolbyX v2" section below.
 
 |   # | 4-CC   | len | bounds | settable | Description                                                   |
 | --: | ------ | --: | ------ | -------- | ------------------------------------------------------------- |
@@ -315,10 +319,10 @@ detailed sequence in
 
 ## Per-parameter visualization dimensions
 
-For UI widgets, here are the natural ranges to expose. These are the
-ranges to enforce **on the host side** before forwarding to the
-engine — the engine itself never clamps (see "Conventions / bounds"
-above):
+For UI widgets, here are the natural ranges to expose. Enforce these
+**on the host side** before forwarding: the engine does clamp silently
+in its registry, but to its own bounds, which differ from these for some
+params (see "Conventions / bounds" above):
 
 | Parameter group                               | UI control                                             | Range to expose                                                                        |
 | --------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
@@ -381,22 +385,22 @@ below for the exclusion list):
 The remaining 11 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
 `lcsz`, `lcpt` (engine-internal build-version / license; DSP doesn't
 read at runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`,
-`vnbf`, `vnbg`, `vnbe` (native-visualizer state; same DSP-overwrites
-inferred shape as `vcb*` but with no host read path) — share one trait:
-no public read path. Only `ver` is reachable from outside, via cmd 6,
-which DolbyX v2 surfaces as `engine.version` rather than as an AK
-parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and DEFINE_SETTINGS.
+`vnbf`, `vnbg`, `vnbe` (native-visualizer state — `ak_get` shows
+`vnbg`/`vnbe` are live but a byte-for-byte mirror of `vcbg`/`vcbe`) —
+carry nothing the host needs. Only `ver` is reachable over the protocol,
+via cmd 6, which DolbyX v2 surfaces as `engine.version` rather than as an
+AK parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and
+DEFINE_SETTINGS.
 
-The engine never clamps a written value (see
+The engine **clamps** a written value in the AK registry (the cache keeps
+the raw value; see
 [Engine validation behavior](03-binary-protocol.md#engine-validation-behavior)),
-but the DSP's math is bounded — out-of-range values saturate or clamp,
-they don't scale without limit. In probe section 7, a `vmb` sweep
-(declared 0..240) over a strong sine amplifies up to `vmb=120`, then
-rails the int16 output, so `vmb=240` and `vmb=480` come out
-bit-identical, and `vmb=-100` is bit-identical to `vmb=0` (negative
-clamps to 0). A `dvla` sweep confirms the raw read — `dvla=200` vs
-`dvla=10` differ by 2/512 samples — but the leveler saturates, so the
-out-of-range effect is negligible.
+and the DSP reads the clamped registry. In probe section 7, a `vmb` sweep
+(declared 0..240) raises the output up through `vmb=120`, then flattens at
+the top: `vmb=240` and `vmb=480` produce near-identical output (peak/rms
+stop climbing) because both clamp to the engine's `vmb` max of 192 — #2/#9
+read the clamped value back via `ak_get`. The decisive proof is a direct
+cache poke (registry frozen) the DSP ignores.
 (See [tools/ddp_probe/](../../tools/ddp_probe/README.md) section 7.)
 The forwarding behaviour proven in section 5b — every cmd 3 SET
 fires `ak_set(idx/name, offset) = V` regardless of bucket — means
@@ -453,11 +457,11 @@ The remaining 11 AK slots are dropped entirely:
   out of cmd 6 and is surfaced as `engine.version` on the bootstrap
   rather than as an AK parameter.
 - `vnnb`, `vnbf`, `vnbg`, `vnbe` — the native-visualizer family.
-  Same fate as the license slots from DolbyX's perspective: no cmd 4
-  path, no cmd 3 GET, would only ever show static
-  DEFINE_SETTINGS-time pre-population values. Naming symmetry with
-  `vcb*` suggests they're Dynamic in the DSP sense, but that's
-  unverifiable from outside.
+  No cmd 4 path and no cmd 3 GET, but in-process `ak_get` reads them
+  (ddp_probe #9): `vnbg`/`vnbe` *are* Dynamic — live and audio-tracking
+  — yet a byte-for-byte **mirror** of `vcbg`/`vcbe` regardless of their
+  own band config, so they carry nothing the `vcb*` channel doesn't
+  already deliver. Dropped as redundant.
 
 This brings DEFINE_SETTINGS to **~422 cache slots (~844 bytes,
 ≈0.8 KB per device)**, a clean ~58 % reduction from the all-64 baseline

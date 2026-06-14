@@ -1,7 +1,7 @@
 /*
  * ddp_probe.c — Evidence harness for libdseffect.so engine behavior.
  *
- * Runs eight focused experiments under qemu-arm-static and prints
+ * Runs nine focused experiments under qemu-arm-static and prints
  * stdout summaries while the engine's own log lines (via the noisy
  * liblog_stub.c) print to stderr. The combination is the empirical
  * source-of-truth for the claims in:
@@ -17,12 +17,12 @@
  *      params + VISUALIZER_ENABLE + ENABLE). Also exercises cmd 7
  *      GET to confirm the host can read back the visualizer-enable
  *      bit.
- *   2. Engine-side range/validation: write in-range, over-max,
- *      below-min values into each of 17 settable params via cmd 3
- *      SET. The engine accepts all of them with reply 0 (proves
- *      no value-range validation).
- *   3. Cmd 3 GET unimplemented: try a flat-index GET and observe
- *      reply -22 plus the matching engine log line.
+ *   2. Two parameter stores: a cmd 3 SET writes the RAW value to the
+ *      settings cache (reply 0, no protocol validation) but ak_set
+ *      CLAMPS the forwarded copy into the AK registry. Reads both back
+ *      (cache vs ak_get) on over-range writes to show the split.
+ *   3. Cmd 3 GET unimplemented: try a flat-index GET, observe reply -22;
+ *      ak_get (see #9) is the real getter.
  *   4. cmd 4 VISUALIZER_DATA returns dynamic vcbg||vcbe. Captured
  *      twice — once after warm-up and once at the end of section 7
  *      after audio shape has changed — to show the DSP refreshes
@@ -34,17 +34,22 @@
  *      disabled (-ENODATA) block (out = prior + input); Test B —
  *      process() clobbers its own input buffer in both states (enabled
  *      leaves that block's processed output, stable across blocks).
- *   7. Behavioral sweep: dvla, vmb past their declared bounds with a
- *      strong (amp-20000) sine streamed each block. The DSP reads raw
- *      int16 but its math is bounded — out-of-range values saturate
- *      (vmb hits the int16 rail; the leveler saturates) or clamp
- *      (vmb<0 -> 0), proven per-sample (vmb=-100 == vmb=0; dvla=200
- *      vs 10 differ by 2/512).
+ *   7. Behavioral sweep: dvla, vmb past their declared max. The DSP
+ *      reads the CLAMPED registry, not the raw cache — proven by a
+ *      direct cache poke (registry frozen) that leaves the output
+ *      unchanged. Over-max sweep pairs stop diverging because ak_set
+ *      clamps both to the engine max (vmb=240, 480 -> 192; dvla=10,
+ *      200 -> 10); the exact clamped values are read via ak_get in #2.
  *   8. Out-of-cache flat-index SET (proves the engine's only SET-side
  *      validation is index-range), the boundary case
  *      `begin + count > cache_total` (resolves whether the engine
  *      checks only `begin` or the full extent), and bogus 4-CC
  *      DEFINE_PARAMS acceptance (proves no name validation).
+ *   9. AK registry via the engine's own ak_get/ak_get_bulk: ak_get
+ *      reproduces cmd 4 (same source); vnbg/vnbe are live but mirror
+ *      vcbg/vcbe; ak_get_min/max expose the engine's true ranges
+ *      (vmb, vol differ from the table); a runtime scan shows only the
+ *      visualizer slots change during process().
  *
  * Build & run: see tools/ddp_probe/README.md.
  */
@@ -77,7 +82,11 @@ typedef struct {
 } ak_param_t;
 
 /* The canonical 64-parameter table verbatim from DsAkSettings.akParams_.
- * Order matches DEFINE_PARAMS index assignment expected by the engine. */
+ * Order matches DEFINE_PARAMS index assignment expected by the engine.
+ * These bounds are the JAVA view: experiment 9c deliberately diffs them
+ * against the engine's true ranges (ak_get_min/max) to surface where they
+ * disagree (vmb, vol). Do NOT "correct" them to the engine values — that
+ * erases 9c's finding. */
 static ak_param_t G[] = {
     {"bver", 5, -32768, 32767}, {"bndl", 2, -32768, 32767},
     {"ocf",  1, 0, 5},          {"preg", 1, -2080, 480},
@@ -126,6 +135,66 @@ static effect_handle_t H = NULL;
 /* settings_begin[i] is the flat cache index at which param i's value
  * array starts. -1 means the param isn't in DEFINE_SETTINGS. */
 static int settings_begin[NPARAM];
+
+/* ── Engine AK API — read the live AK registry ───────────────────────
+ * cmd 4 fetches visualizer state from this same registry with ak_get_bulk
+ * (the per-element ak_get lines in the engine log are that bulk call's
+ * internal loop, not separate calls);
+ * these are the same exported symbols, reachable from fixed offsets in
+ * the effect context. The registry is the store the DSP actually
+ * reads/writes — the +0xb0 settings cache is a raw host-side mirror the
+ * DSP ignores (proven in experiments 2 and 9). Resolved by ak_attach()
+ * once the init handshake has built the schema.
+ *
+ *   handle  = *(void**)(*(void**)(H + 0x44))   pDs1ap, double-deref
+ *   AK_REF  = *(uint32_t**)(H + 0xb4)           tagged refs, DEFINE_PARAMS order
+ *
+ * ak_get(h, ref, elem)              -> one value, clamped to the engine range
+ * ak_get_bulk(h, ref, 0, n, 4, dst) -> n int16s (stride 4 = the int16 form;
+ *                                      stride 1 would give int32 elements)
+ * ak_get_name(h, ref)               -> 4-CC packed little-endian in a uint32
+ * ak_get_min/max(h, ref)            -> engine's declared range for the param */
+typedef int      (*ak_get_fn)(void *, uint32_t, int);
+typedef int      (*ak_get_bulk_fn)(void *, uint32_t, int, int, int, void *);
+typedef uint32_t (*ak_get_name_fn)(void *, uint32_t);
+typedef int      (*ak_minmax_fn)(void *, uint32_t);
+static ak_get_fn      ak_get;
+static ak_get_bulk_fn ak_get_bulk;
+static ak_get_name_fn ak_get_name;
+static ak_minmax_fn   ak_get_min, ak_get_max;
+
+static void     *AK;       /* engine AK handle */
+static uint32_t *AK_REF;   /* per-param tagged refs (DEFINE_PARAMS order) */
+
+static void ak_attach(void) {
+    void *pDs1ap = *(void **)((char *)H + 0x44);
+    AK     = *(void **)pDs1ap;
+    AK_REF = *(uint32_t **)((char *)H + 0xb4);
+}
+static uint32_t ak_ref(const char *name) {
+    int p = find_param(name);
+    return p < 0 ? 0 : AK_REF[p];
+}
+/* Live registry value of param `name` element `elem` — what the DSP uses. */
+static int ak_get_param(const char *name, int elem) {
+    return ak_get(AK, ak_ref(name), elem);
+}
+/* Decode ak_get_name's packed 4-CC into a C string (buf >= 5 bytes). */
+static void ak_fourcc(uint32_t f, char *buf) {
+    buf[0] = f; buf[1] = f >> 8; buf[2] = f >> 16; buf[3] = f >> 24; buf[4] = 0;
+}
+
+/* Snapshot every param's live registry value into a cache-flat int[] (indexed
+ * by settings_begin[], which every param has since all are in DEFINE_SETTINGS).
+ * ak_ref is resolved once per param, not once per element. Params absent from
+ * the AK registry (ref 0, e.g. mxou/lcsz) read as 0. */
+static void snapshot_registry(int *dst) {
+    for (int i = 0; i < NPARAM; i++) {
+        uint32_t ref = ak_ref(G[i].name);
+        for (int e = 0; e < G[i].len; e++)
+            dst[settings_begin[i] + e] = ref ? ak_get(AK, ref, e) : 0;
+    }
+}
 
 static int cmd_set(int cmd, const void *val, int vsize) {
     int total = sizeof(effect_param_t) + 4 + vsize;
@@ -271,34 +340,28 @@ static int diff_count(const int16_t *a, const int16_t *b, int n) {
     return d;
 }
 
-/* ── Default-value dump (research aside, gated by $DUMP_DEFAULTS) ──────
- * cmd 3 GET is unimplemented, so we don't read params from the engine at
- * all — we read the engine's own settings cache out of shared process
- * memory (the probe dlopen's libdseffect.so, so its heap is ours). On the
- * first cmd 3 SET the engine mallocs the cache and seeds every slot from
- * its AK instance's intrinsic power-on defaults — the 668 ak_get calls at
- * the top of engine.log. We trigger that seed with a zero-count cmd 3 SET
- * (creates + seeds the cache but writes no value), so EVERY slot stays at
- * the engine's default, then read the cache whole and map each slot to
- * (param, element) via settings_begin.
- *
- * The engine keeps the cache pointer at a fixed offset in the effect
- * context (H + 0xb0) — found by disassembling the cmd-3 cache-create path,
- * verified byte-identical to a full-memory scan for the engine-seeded
- * bver/bndl/ver signature. libdseffect.so is its EOL build, so the layout
- * is frozen; we just deref the pointer. */
+/* ── Settings cache (raw host-side mirror) ────────────────────────────
+ * cmd 3 SET writes the RAW value here — a flat int16[cache_total] the
+ * engine keeps at a fixed offset (H + 0xb0), found by disassembling the
+ * cmd-3 cache-create path. It is NOT what the DSP reads: the DSP acts on
+ * the clamped AK registry (ak_get), so the cache and the registry diverge
+ * on any out-of-range write — experiment 2 reads both to show the split.
+ * libdseffect.so is its EOL build, so the offset is frozen. */
 #define CACHE_PTR_OFFSET 0xb0
 static const int16_t *find_cache(void) {
     return *(const int16_t **)((char *)H + CACHE_PTR_OFFSET);
 }
 
-static void dump_ak_defaults(int cache_total) {
-    printf("\n=== ENGINE DEFAULT VALUES (settings cache, seeded from AK instance) ===\n");
-    const int16_t *c = find_cache();
-    printf("  cache @ %p, %d slots\n\n", (const void *)c, cache_total);
+/* DUMP_DEFAULTS: print every param's intrinsic power-on default. The AK
+ * registry already holds the engine's defaults right after the init
+ * handshake (before any SET), so we ak_get each one — no cache, no seed
+ * trick. These are the clamped values the DSP would actually use. */
+static void dump_ak_defaults(void) {
+    printf("\n=== ENGINE DEFAULT VALUES (AK registry via ak_get) ===\n");
     for (int i = 0; i < NPARAM; i++) {
+        if (!ak_ref(G[i].name)) { printf("%-4s = (not in AK)\n", G[i].name); continue; }
         printf("%-4s =", G[i].name);
-        for (int e = 0; e < G[i].len; e++) printf(" %d", c[settings_begin[i] + e]);
+        for (int e = 0; e < G[i].len; e++) printf(" %d", ak_get_param(G[i].name, e));
         printf("\n");
     }
 }
@@ -319,6 +382,16 @@ int main(int argc, char *argv[]) {
     EffectQueryEffect_t QE       = dlsym(lib, "EffectQueryEffect");
     EffectCreate_t C             = dlsym(lib, "EffectCreate");
     EffectRelease_t R            = dlsym(lib, "EffectRelease");
+    ak_get      = (ak_get_fn)      dlsym(lib, "ak_get");
+    ak_get_bulk = (ak_get_bulk_fn) dlsym(lib, "ak_get_bulk");
+    ak_get_name = (ak_get_name_fn) dlsym(lib, "ak_get_name");
+    ak_get_min  = (ak_minmax_fn)   dlsym(lib, "ak_get_min");
+    ak_get_max  = (ak_minmax_fn)   dlsym(lib, "ak_get_max");
+    if (!ak_get || !ak_get_bulk || !ak_get_name || !ak_get_min || !ak_get_max) {
+        fprintf(stderr, "dlsym: libdseffect.so is missing an ak_* accessor "
+                "(ak_get/ak_get_bulk/ak_get_name/ak_get_min/ak_get_max)\n");
+        return 1;
+    }
     uint32_t n = 0; Q(&n);
     effect_descriptor_t desc; QE(0, &desc);
     int32_t cr = C(&desc.uuid, 0, 0, &H);
@@ -334,16 +407,12 @@ int main(int argc, char *argv[]) {
     printf("\n=== 1. INIT HANDSHAKE ===\n");
     define_params();
     int cache_total = define_settings_all();
+    ak_attach();   /* resolve the AK handle + per-param refs from the context */
 
-    /* Default capture: a zero-count cmd 3 SET makes the engine create and
-     * seed the cache (from the AK instance) without writing any value, so
-     * every slot — the EQ-structural params below included — stays at its
-     * power-on default. Then dump the whole cache. */
+    /* DUMP_DEFAULTS: the registry already holds the engine's power-on
+     * defaults at this point (no SET yet), so just read them out. */
     if (getenv("DUMP_DEFAULTS")) {
-        int16_t none = 0;
-        int tr = set_flat(0, &none, 0);   /* count=0: seed only, write nothing */
-        printf("seed trigger (cmd 3, count=0) -> reply=%d\n", tr);
-        dump_ak_defaults(cache_total);
+        dump_ak_defaults();
         return 0;
     }
 
@@ -392,26 +461,26 @@ int main(int argc, char *argv[]) {
     /* Warm up past the 7560-sample enable crossfade (~30 blocks of 256). */
     process_blocks(pcm_in, pcm_out, frames, 35);
 
-    /* ── 2. ENGINE-LEVEL RANGE VALIDATION ───────────────────────── */
-    printf("\n=== 2. SET RANGE PROBES — engine accepts everything ===\n");
-    printf("    For each param: write mid, over-hi+100, under-lo-100.\n"
-           "    SET reply 0 = engine accepted (no value-range validation).\n");
-    const char *to_probe[] = {
-        "dvla", "dea", "dhsb", "vmb", "dvle", "vdhe", "plmd",
-        "dvli", "dvlo", "dvmc", "ieon", "geon", "dssf", "dssa",
-        "arod", "arbl", "plb", NULL
-    };
-    for (int i = 0; to_probe[i]; ++i) {
-        const char *nm = to_probe[i];
-        int p = find_param(nm);
-        int16_t mid = (int16_t)((G[p].lo + G[p].hi) / 2);
-        int16_t hi  = (int16_t)(G[p].hi + 100);
-        int16_t lo  = (int16_t)(G[p].lo - 100);
-        int rm = set_param(nm, 0, &mid, 1);
-        int rh = set_param(nm, 0, &hi,  1);
-        int rl = set_param(nm, 0, &lo,  1);
-        printf("    %-4s [%6d..%6d]: %6d->%d  %6d->%d  %6d->%d\n",
-               nm, G[p].lo, G[p].hi, mid, rm, hi, rh, lo, rl);
+    /* ── 2. TWO STORES — raw cache vs clamped AK registry ───────── */
+    printf("\n=== 2. TWO STORES — cmd 3 SET: cache=raw, registry=clamped ===\n");
+    printf("    cmd 3 SET writes the RAW value to the settings cache (reply 0,\n"
+           "    no protocol validation) AND forwards to ak_set, which CLAMPS to\n"
+           "    the engine's range. The DSP reads the clamped registry (see #7),\n"
+           "    so an over-range write is silently clamped — ak_get reads it back.\n");
+    {
+        const int16_t *cache = find_cache();
+        const char *probe2[] = { "dvla", "vmb", "dssa", "plmd", "arbl", "vol", NULL };
+        for (int i = 0; probe2[i]; ++i) {
+            const char *nm = probe2[i];
+            int p = find_param(nm);
+            if (!ak_ref(nm)) { printf("    %-4s: (not in AK)\n", nm); continue; }
+            int16_t over = (int16_t)(G[p].hi + 200);
+            int rep = set_param(nm, 0, &over, 1);
+            printf("    %-4s: SET %-6d -> reply=%d  cache(raw)=%-6d  "
+                   "ak_get(clamped)=%-5d  engine[%d..%d]\n",
+                   nm, over, rep, cache[settings_begin[p]], ak_get_param(nm, 0),
+                   ak_get_min(AK, ak_ref(nm)), ak_get_max(AK, ak_ref(nm)));
+        }
     }
 
     /* ── 3. cmd 3 GET unimplemented ─────────────────────────────── */
@@ -431,8 +500,9 @@ int main(int argc, char *argv[]) {
         free(gbuf);
         printf("    SET dvla=7, then GET via cmd 3 -> status=%d, val=%d\n"
                "    (engine log: 'Effect_getParameter() Invalid command 3.\n"
-               "     Returning -EINVAL(-22)')\n",
-               gs, out);
+               "     Returning -EINVAL(-22)')\n"
+               "    ak_get is the real getter — reads it live: dvla=%d (see #9)\n",
+               gs, out, ak_get_param("dvla", 0));
     }
 
     /* ── 4. cmd 4 VISUALIZER_DATA returns dynamic state ─────────── */
@@ -618,76 +688,99 @@ int main(int argc, char *argv[]) {
         set_param("dvle", 0, &lev_off, 1);
     }
 
-    /* ── 7. Behavioral sweep: DSP reads raw int16 ────────────────── */
-    printf("\n=== 7. BEHAVIORAL SWEEP — DSP reads raw int16 ===\n");
-    /* Enable leveler so dvla actually has an effect. */
+    /* ── 7. Behavioral sweep: the clamped registry drives the DSP ── */
+    printf("\n=== 7. BEHAVIORAL SWEEP — DSP reads the CLAMPED registry ===\n");
     int16_t on = 1, off = 0;
+
+    /* (7a) WHICH store does the DSP read? Run FIRST, before any stateful
+     * effect (leveler/maximizer) is exercised, so the path stays clean. A
+     * linear GEQ band gain settles to a reproducible steady state; the two
+     * control diffs (repro, return-to-0) must be ~0 for the test to mean
+     * anything. Then poke ONLY the cache (registry frozen, verified via
+     * ak_get): output unchanged => the DSP reads the clamped registry. */
+    {
+        int16_t g_on = 1, g_off = 0, flat = 0, boost = 160;
+        set_param("dvle", 0, &off, 1);      /* leveler + maximizer OFF: clean */
+        set_param("vmon", 0, &off, 1);
+        set_param("geon", 0, &g_on, 1);     /* GEQ on, IEQ off */
+        set_param("ieon", 0, &g_off, 1);
+        const int band = 4;                  /* gebf[4] = 431 Hz */
+        int gslot = settings_begin[find_param("gebg")] + band;
+        int16_t *cache = (int16_t *)find_cache();
+        int16_t *base = calloc(frames * 2, 2);
+        int16_t *pre  = calloc(frames * 2, 2);
+        #define GEQ_BLOCKS(n) do { for (int i = 0; i < (n); i++) {             \
+            fill_sine(pcm_in, frames, rate, 6000.0, 431.0);                    \
+            audio_buffer_t in = { .frameCount = frames, .s16 = pcm_in };       \
+            audio_buffer_t out = { .frameCount = frames, .s16 = pcm_out };     \
+            memset(pcm_out, 0, frames * 4); (*H)->process(H, &in, &out); }     \
+        } while (0)
+
+        set_param("gebg", band, &flat, 1);  GEQ_BLOCKS(60);    /* settle */
+        memcpy(base, pcm_out, frames * 4);
+        GEQ_BLOCKS(40);
+        int d_repro = diff_count(base, pcm_out, frames * 2);    /* noise floor */
+        set_param("gebg", band, &boost, 1); GEQ_BLOCKS(40);     /* SET: both stores */
+        int d_set = diff_count(base, pcm_out, frames * 2);      /* the effect */
+        set_param("gebg", band, &flat, 1);  GEQ_BLOCKS(40);     /* back to 0 */
+        memcpy(pre, pcm_out, frames * 4);                       /* state just before poke */
+        cache[gslot] = boost;                                   /* POKE cache only */
+        int reg = ak_get_param("gebg", band);
+        GEQ_BLOCKS(40);
+        int d_poke = diff_count(pre, pcm_out, frames * 2);      /* poke's own effect */
+        cache[gslot] = flat;
+        /* poke is inert if its diff stays near the noise floor, far below the
+         * SET effect (registry); it would rival the SET effect if read (cache). */
+        printf("    GEQ band %d cache-poke (noise floor repro=%d/%d):\n"
+               "      SET gebg=160 -> %d/%d changed (effect); POKE cache=160\n"
+               "      (ak_get=%d, registry frozen) -> %d/%d -> %s\n",
+               band, d_repro, frames * 2, d_set, frames * 2,
+               reg, d_poke, frames * 2,
+               d_set < 8 * (d_repro + 1)
+                   ? "INVALID TEST — SET barely moved the output (d_set near noise floor)"
+                   : d_poke * 8 < d_set
+                       ? "DSP READS CLAMPED REGISTRY (cache poke inert)"
+                       : "DSP reads cache");
+        free(pre);
+        set_param("geon", 0, &g_off, 1);
+        free(base);
+        #undef GEQ_BLOCKS
+    }
+
+    /* (7b) Behavioral sweeps — gross illustration that in-range values drive
+     * the DSP and over-range writes collapse onto the clamp (dvla 10==200;
+     * vmb 240==480). These run through the stateful leveler/maximizer, so
+     * read peak/rms as trends, not exact figures (see #2/#9 for the precise
+     * clamped values via ak_get). Enable the leveler so dvla has an effect. */
     set_param("dvle", 0, &on, 1);
     int16_t lkfs = -320;
     set_param("dvli", 0, &lkfs, 1);
     set_param("dvlo", 0, &lkfs, 1);
     process_blocks(pcm_in, pcm_out, frames, 30);
 
-    int16_t dvla_sweep[] = {0, 5, 10, 200, -100};
-    printf("    dvla sweep (declared 0..10):\n");
+    int16_t dvla_sweep[] = {0, 5, 10, 200};
+    printf("    dvla sweep (declared 0..10; 10 and 200 collapse = clamp):\n");
     for (size_t i = 0; i < sizeof dvla_sweep / sizeof dvla_sweep[0]; ++i) {
         int16_t v = dvla_sweep[i];
         set_param("dvla", 0, &v, 1);
-        process_blocks(pcm_in, pcm_out, frames, 20);
-        process_blocks(pcm_in, pcm_out, frames, 1);  /* measured block */
+        process_blocks(pcm_in, pcm_out, frames, 30);
         char tag[40]; snprintf(tag, sizeof tag, "dvla=%-5d", v);
         measure(tag, pcm_out, frames);
     }
-    set_param("dvle", 0, &off, 1);  /* leveler off for the next test */
+    set_param("dvle", 0, &off, 1);
 
     int16_t vmon_on = 1;
     set_param("vmon", 0, &vmon_on, 1);
-    int16_t vmb_sweep[] = {0, 120, 240, 480, -100};
-    printf("    vmb sweep (declared 0..240):\n");
+    int16_t vmb_sweep[] = {0, 120, 240, 480};
+    printf("    vmb sweep (declared 0..240; 240 and 480 collapse = clamp at 192):\n");
     for (size_t i = 0; i < sizeof vmb_sweep / sizeof vmb_sweep[0]; ++i) {
         int16_t v = vmb_sweep[i];
         set_param("vmb", 0, &v, 1);
-        process_blocks(pcm_in, pcm_out, frames, 20);
-        process_blocks(pcm_in, pcm_out, frames, 1);
+        process_blocks(pcm_in, pcm_out, frames, 30);
         char tag[40]; snprintf(tag, sizeof tag, "vmb=%-5d", v);
         measure(tag, pcm_out, frames);
     }
-
-    /* Per-sample proof (sharper than peak/rms) that out-of-range values
-     * SATURATE/CLAMP rather than producing distinct output: compare an
-     * out-of-range write against the in-range result byte-for-byte. */
-    {
-        int16_t *cmp = calloc(frames * 2, 2);
-        int16_t z = 0, neg = -100, big = 200, ten = 10;
-
-        /* vmb: negative vs zero, vmon still on from the sweep above. */
-        set_param("vmb", 0, &z, 1);
-        process_blocks(pcm_in, pcm_out, frames, 21);
-        memcpy(cmp, pcm_out, frames * 4);
-        set_param("vmb", 0, &neg, 1);
-        process_blocks(pcm_in, pcm_out, frames, 21);
-        int dv = diff_count(cmp, pcm_out, frames * 2);
-        printf("    vmb=-100 vs vmb=0:  %d/%d samples differ -> %s\n",
-               dv, frames * 2, dv == 0
-                 ? "IDENTICAL (negative clamps to 0; does NOT attenuate)"
-                 : "differ (genuinely distinct)");
-        set_param("vmon", 0, &off, 1);
-
-        /* dvla: out-of-range vs in-range max, leveler on, vmon off. */
-        set_param("dvle", 0, &on, 1);
-        set_param("dvla", 0, &ten, 1);
-        process_blocks(pcm_in, pcm_out, frames, 21);
-        memcpy(cmp, pcm_out, frames * 4);
-        set_param("dvla", 0, &big, 1);
-        process_blocks(pcm_in, pcm_out, frames, 21);
-        int dd = diff_count(cmp, pcm_out, frames * 2);
-        printf("    dvla=200 vs dvla=10: %d/%d samples differ -> %s\n",
-               dd, frames * 2, dd == 0
-                 ? "IDENTICAL (out-of-range saturates to the in-range effect)"
-                 : "differ (genuinely distinct)");
-        set_param("dvle", 0, &off, 1);
-        free(cmp);
-    }
+    set_param("vmon", 0, &off, 1);
 
     /* Second cmd 4 snapshot — output shape has changed
      * substantially since snapshot A (vmon cycled on/off, vmb swept
@@ -719,23 +812,9 @@ int main(int argc, char *argv[]) {
                cache_total + 100, cache_total, rr);
     }
 
-    /* Does the engine check 'begin' only, or 'begin + count'?
-     * This resolves whether v1's count=20 SET against gebg (which
-     * straddles the 24-slot cache edge) is rejected outright or
-     * silently corrupts adjacent slots. */
-    {
-        int16_t vals[20] = {0};
-        int begin = cache_total - 5;
-        int rr = set_flat(begin, vals, 20);
-        printf("    SET flat=%d count=20 (begin+count=%d, cache=%d)\n"
-               "        -> reply=%d  (%s)\n",
-               begin, begin + 20, cache_total, rr,
-               rr == 0
-                   ? "engine accepts — only 'begin' is bounds-checked,\n"
-                     "             v1's count=20-against-1-slot SET would corrupt adjacent slots"
-                   : "engine rejects — 'begin + count <= cache_total' enforced,\n"
-                     "             v1's count=20-against-1-slot SET would no-op silently");
-    }
+    /* The destructive 'begin + count > cache_total' SET is deferred to the
+     * very end (it corrupts the heap by design), so the experiments below
+     * still run on an intact heap. */
 
     /* Bogus 4-CCs in DEFINE_PARAMS on a fresh effect instance.  We
      * use a second effect handle so we don't disturb the main one's
@@ -759,7 +838,109 @@ int main(int argc, char *argv[]) {
                "(engine accepts unknown 4-CCs silently)\n", rr);
     }
 
-    free(pcm_in); free(pcm_out); free(in_ref);
-    R(H); dlclose(lib);
-    return 0;
+    /* ── 9. AK registry — the live engine state (ak_get/ak_get_bulk) ─ */
+    printf("\n=== 9. AK REGISTRY (ak_get) — live engine state ===\n");
+    {
+        process_blocks(pcm_in, pcm_out, frames, 30);   /* warm the visualizer */
+
+        /* (a) ak_get reproduces cmd 4 exactly — same source, the registry.
+         * cmd 4 = vcbg‖vcbe (40 int16s), so check BOTH halves: vcbg vs the
+         * gains (vis[0..19]) and vcbe vs the excitations (vis[20..39]). */
+        uint8_t empty[80] = {0};
+        int16_t vis[40] = {0};
+        cmd_get(DS_PARAM_VISUALIZER_DATA, empty, 80, vis, 80);
+        int mg = 0, me = 0;
+        for (int e = 0; e < 20; e++) {
+            if (ak_get_param("vcbg", e) == vis[e])      mg++;
+            if (ak_get_param("vcbe", e) == vis[20 + e]) me++;
+        }
+        char fc[5]; ak_fourcc(ak_get_name(AK, ak_ref("vcbg")), fc);
+        printf("    (a) ak_get vs cmd 4: gains %d/20, excitations %d/20 match  "
+               "(ak_get_name(vcbg)=\"%s\")\n", mg, me, fc);
+
+        /* (b) vnbg/vnbe have NO cmd 4 path but ARE readable here — and BOTH
+         * mirror vcbg/vcbe (the native visualizer duplicates the current). */
+        int mng = 0, mne = 0;
+        for (int e = 0; e < 20; e++) {
+            if (ak_get_param("vnbg", e) == ak_get_param("vcbg", e)) mng++;
+            if (ak_get_param("vnbe", e) == ak_get_param("vcbe", e)) mne++;
+        }
+        printf("    (b) vnbg == vcbg: %d/20, vnbe == vcbe: %d/20  "
+               "(both live but mirrors of the vcb* channel)\n", mng, mne);
+
+        /* (c) engine's true ranges (ak_get_min/max) vs the Java G[] table. */
+        printf("    (c) range audit (engine vs G[] table):\n");
+        const char *audit[] = { "dvla", "vmb", "vol", "gebg", "arbl", NULL };
+        for (int i = 0; audit[i]; i++) {
+            int p = find_param(audit[i]);
+            if (!ak_ref(audit[i])) { printf("        %-4s (not in AK)\n", audit[i]); continue; }
+            int emin = ak_get_min(AK, ak_ref(audit[i]));
+            int emax = ak_get_max(AK, ak_ref(audit[i]));
+            printf("        %-4s engine[%d..%d]  G[]=[%d..%d]%s\n",
+                   audit[i], emin, emax, G[p].lo, G[p].hi,
+                   (emin == G[p].lo && emax == G[p].hi) ? "" : "   <- TABLE WRONG");
+        }
+
+        /* (d) runtime-update scan: which params does the DSP write across
+         * blocks of a different tone? Snapshot the registry, process, diff.
+         * Both snapshots are cache-flat (settings_begin[]), so cache_total
+         * sizes them exactly. NOTE: a value-diff is blind to an idempotent
+         * same-value rewrite, so this bounds what *changes*, not every slot
+         * the DSP writes. */
+        int *snapA = calloc(cache_total, sizeof(int));
+        int *snapB = calloc(cache_total, sizeof(int));
+        snapshot_registry(snapA);
+        for (int i = 0; i < 40; i++) {                  /* a different shape (90 Hz) */
+            fill_sine(pcm_in, frames, rate, 12000.0, 90.0);
+            audio_buffer_t in = { .frameCount = frames, .s16 = pcm_in };
+            audio_buffer_t out = { .frameCount = frames, .s16 = pcm_out };
+            memset(pcm_out, 0, frames * 4); (*H)->process(H, &in, &out);
+        }
+        snapshot_registry(snapB);
+        printf("    (d) registry slots that CHANGED across runtime:");
+        int non_vis = 0;
+        for (int i = 0; i < NPARAM; i++) {
+            int d = 0;
+            for (int e = 0; e < G[i].len; e++)
+                if (snapA[settings_begin[i] + e] != snapB[settings_begin[i] + e]) d++;
+            if (d) {
+                printf(" %s", G[i].name);
+                const char *nm = G[i].name;
+                if (strcmp(nm, "vcbg") && strcmp(nm, "vcbe") &&
+                    strcmp(nm, "vnbg") && strcmp(nm, "vnbe")) non_vis++;
+            }
+        }
+        printf("\n        (%s)\n", non_vis == 0
+               ? "only visualizer slots changed value; nothing else moved"
+               : "WARNING: a non-visualizer slot changed — see the list above");
+        free(snapA); free(snapB);
+    }
+
+    /* ── 8b. begin-only bounds check (DELIBERATELY LAST — corrupts heap) ─
+     * Does the engine check 'begin' only, or 'begin + count'? A count=20 SET
+     * starting 5 slots before the cache end writes 15 slots past it. This
+     * resolves whether v1's count=20 SET against a 1-slot tail is rejected or
+     * silently corrupts adjacent memory. The straddling write trashes the
+     * heap, so it runs last and we `_Exit` straight after — the normal
+     * free/EffectRelease teardown would double-free/abort on the corrupted
+     * heap and make `make run` exit non-zero in CI. */
+    printf("\n=== 8b. begin+count bounds (runs last; heap-destructive) ===\n");
+    {
+        int16_t vals[20] = {0};
+        int begin = cache_total - 5;
+        int rr = set_flat(begin, vals, 20);
+        printf("    SET flat=%d count=20 (begin+count=%d, cache=%d) -> reply=%d\n"
+               "        (%s)\n",
+               begin, begin + 20, cache_total, rr,
+               rr == 0
+                   ? "engine accepts — only 'begin' is bounds-checked; v1's\n"
+                     "         count=20-against-1-slot SET corrupts adjacent slots"
+                   : "engine rejects — 'begin + count <= cache_total' enforced");
+    }
+
+    /* 8b corrupted the heap by design; stdout/stderr are unbuffered (setbuf
+     * NULL at startup) so everything is already flushed. Skip the free/
+     * EffectRelease/dlclose teardown — it would abort on the trashed heap —
+     * and exit clean. The OS reclaims the process memory. */
+    _Exit(0);
 }

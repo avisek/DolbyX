@@ -1038,10 +1038,10 @@ local-only state.
 
 This means the curve reflects whatever the engine wrote into its
 internal `vcbg` state for the most recent audio block. (The engine
-itself does no clamping — see
-[03-binary-protocol.md → Engine validation behavior](03-binary-protocol.md#engine-validation-behavior).
-Any clamping that happened did so at the Java layer before the value
-even reached the engine.)
+silently clamps writes into its AK registry to its own range — see
+[03-binary-protocol.md → Engine validation behavior](03-binary-protocol.md#engine-validation-behavior)
+— in addition to any Java-layer clamping before the value reaches the
+engine.)
 
 ### What DolbyX does today
 

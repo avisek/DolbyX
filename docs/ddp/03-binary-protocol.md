@@ -56,7 +56,7 @@ them by what the engine actually accepts on each side:
 | 1    | `DS_PARAM_DEFINE_SETTINGS`     | yes (init) | —      | Cache layout + pre-population at init                                                                                                                          |
 | 2    | `DS_PARAM_ALL_VALUES`          | yes        | —      | Bulk push of cache values (profile switching)                                                                                                                  |
 | 3    | `DS_PARAM_SINGLE_DEVICE_VALUE` | **yes**    | **NO** | Point write into the cache. The engine's `Effect_getParameter` dispatcher does NOT route cmd 3 — every cmd 3 GET hits the catch-all and returns `-EINVAL(-22)` |
-| 4    | `DS_PARAM_VISUALIZER_DATA`     | —          | yes    | Returns `vcbg ‖ vcbe` (= 40 int16s) — the only way to read DSP state                                                                                           |
+| 4    | `DS_PARAM_VISUALIZER_DATA`     | —          | yes    | Returns `vcbg ‖ vcbe` (= 40 int16s) — the only *protocol* read of DSP state (in-process `ak_get` reads any registry value)                                      |
 | 5    | `DS_PARAM_DEFINE_PARAMS`       | yes (init) | —      | Names the 4-CC namespace; assigns DEFINE_PARAMS indices                                                                                                        |
 | 6    | `DS_PARAM_VERSION`             | —          | yes    | Returns the 4-int16 engine version                                                                                                                             |
 | 7    | `DS_PARAM_VISUALIZER_ENABLE`   | yes        | yes    | Visualizer-tap on/off                                                                                                                                          |
@@ -256,15 +256,17 @@ host added to the cache and in what order.)
 
 Two important details:
 
-- **Value is not validated.** Writing 110 into `dvla` (range 0..10)
-  succeeds with reply 0 and the engine logs `value 110` verbatim.
-  Writing -2180 into `arbl` (range -2080..0) writes `-2180`. No
-  clamping. See [Engine validation behavior](#engine-validation-behavior).
-- **Every write fires `ak_set`.** The cache and the internal AK
-  registry stay in lockstep — even for params Java considers
-  read-only (writes to `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `endp`,
-  `preg`, etc. all produce `ak_set(idx/name, offset) = V` log lines).
-  See [Settings cache lifecycle](#settings-cache-lifecycle).
+- **Stored raw, then clamped.** Writing 210 into `dvla` (range 0..10)
+  succeeds with reply 0; the engine logs `value 210` verbatim into the
+  cache, but the forwarded `ak_set` **clamps** the registry copy to 10.
+  The cache and registry **diverge** on out-of-range writes, and the DSP
+  reads the clamped registry. See
+  [Engine validation behavior](#engine-validation-behavior).
+- **Every write fires `ak_set`.** The cache gets the raw value, the AK
+  registry the clamped one — even for params Java considers read-only
+  (writes to `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `endp`, `preg`, etc.
+  all produce `ak_set(idx/name, offset) = V` log lines). See
+  [Settings cache lifecycle](#settings-cache-lifecycle).
 
 #### Example: setting `dvle` (Volume Leveler enable) to 1
 
@@ -314,9 +316,13 @@ The values are in the engine's standard 1/16 dB units. The UI converts
 to float dB by dividing by 16. The visible range is `[-12, +36]` dB →
 `[-192, +576]` int16.
 
-The engine refills `vcbg`/`vcbe` from the DSP every audio block, so
-the values change with the input audio and the active EQ curve. This
-is the only path to read DSP state from outside.
+The DSP writes `vcbg`/`vcbe` into the **AK registry** every audio block
+(not the settings cache), so the values change with the input audio and
+the active EQ curve. cmd 4 fetches them from that registry with the
+engine's own `ak_get_bulk` (once each for `vcbg`/`vcbe`); it's the only
+*protocol* path to DSP state, but in-process `ak_get` reads the same
+registry directly — and most other params too. See
+[the AK registry read path](#the-ak-registry-read-path).
 
 ### Command 6 GET — `DS_PARAM_VERSION`
 
@@ -370,7 +376,58 @@ For DolbyX v2 it's the daemon's in-memory state plus the persisted
 
 > **Implication for DolbyX v2**: the daemon's
 > `engine.get_visualizer_data(session)` Engine-trait method should
-> implement using cmd 4 directly. There is no fallback via cmd 3.
+> implement using cmd 4 directly. There is no fallback via cmd 3 — but
+> the engine subprocess can offer a *real* GET via `ak_get` (next
+> section), which it can surface to the daemon as a new opcode.
+
+## The AK registry read path
+
+The "no GET" limit is a *protocol* limit. `libdseffect.so` exports its
+own AK accessors — `ak_get`, `ak_get_bulk`, `ak_get_name`, `ak_get_min`,
+`ak_get_max` — and they're reachable from fixed offsets in the effect
+context, so the process that hosts the engine (the `ddp_probe` harness
+today; the `dolbyx-engine-arm` subprocess in v2) can read most params'
+**live registry** value — what the DSP actually uses, not just the cmd-4
+visualizer slots. cmd 4 itself reads `vcbg`/`vcbe` from this registry via
+`ak_get_bulk` — the disassembled handler calls it once per param; the
+per-element `ak_get` lines in the engine log are that bulk call's internal
+loop, not separate calls.
+
+```c
+void*     handle = *(void**)(*(void**)((char*)H + 0x44));  // pDs1ap, 2 derefs
+uint32_t* refs   = *(uint32_t**)((char*)H + 0xb4);         // tagged refs, DEFINE_PARAMS order
+int v = ak_get(handle, refs[param_index], elem);           // one value (what the probe uses)
+```
+
+The probe reads element-wise via `ak_get` and never calls `ak_get_bulk`
+directly — but the cmd-4 handler does (`ak_get_bulk(handle, refs[idx], 0,
+bands, 4, dst)`, stride 4 = packed int16), and #9a shows that path matches
+the element-wise read 40/40, so the signature is confirmed. A handful of
+slots (`mxou`, `lcsz`) have a `0` ref in that array and aren't reachable
+this way even though the engine resolves them internally.
+
+What it establishes (see [ddp_probe](../../tools/ddp_probe/README.md) #9):
+
+- **A real GET.** `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and
+  the 20 excitations (`vcbe`) match (#9a); any other reachable param reads
+  back live (the clamped value the DSP uses — see
+  [validation](#engine-validation-behavior)).
+- **True ranges.** `ak_get_min`/`ak_get_max` give the engine's own clamp
+  bounds. #9c audits a sample and finds `vmb` (`[0..192]`) and `vol`
+  (`[-2080..480]`) diverge from the Java table — so treat the table as
+  advisory and validate per-param, not just for those two.
+- **What moves at runtime.** A registry value-diff across `process()`
+  blocks shows only the visualizer slots (`vcbe`/`vnbe`) change value; the
+  gains track the EQ curve, not the audio. (A value-diff can't see an
+  idempotent same-value rewrite, so this bounds what *changes*, not every
+  slot the DSP writes.)
+
+The engine subprocess can expose this to the daemon as a GET opcode over
+the [binary protocol](../REARCHITECTURE_PLAN.md), giving the daemon a true
+read-back (verification, defaults, engine-computed state) on top of its
+own write mirror. Caveat: it only works where `libdseffect.so` is
+in-process — the cross-process Android HAL can't reach the engine heap —
+and the offsets are pinned to this EOL build.
 
 ## Command 0 — `DS_PARAM_TUNING`
 
@@ -521,13 +578,21 @@ checks exactly these things, and nothing else:
 | Value-buffer size                  | size doesn't match the command's encoding    | `DS_PARAM_VISUALIZER_ENABLE Invalid value size N` (and similar)                             | `-22`                        |
 | Param-index range (`ak_set` layer) | `param_idx >= num_defined_params`            | `_akSet: Wrong parameter index N`                                                           | (internal; cmd reply varies) |
 
-What the engine does **NOT** check:
+What the engine does **NOT** check at the protocol/cache layer (but see
+the value-range note — the registry *does* clamp):
 
-- **Value range.** Writing 110 into `dvla` (range 0..10) succeeds with
-  reply 0; the engine logs `value 110` verbatim. Writing 9999, -2180,
-  or any other int16 likewise succeeds. There are no clamp-related
-  strings anywhere in the binary; clamping is exclusively a Java-side
-  concern (`DsAkSettings.set` at `Ds.apk/.../DsAkSettings.java:278-326`).
+- **Value range — raw in the cache, clamped in the registry.** A cmd 3
+  SET writes the value to two places: the **raw** int16 into the settings
+  cache (the engine logs `value 210` verbatim for `dvla`, range 0..10),
+  and a forwarded `ak_set` that **clamps** the copy in the AK registry to
+  the engine's own range. The DSP reads the **clamped registry**, not the
+  raw cache (proven by a cache poke the DSP ignores — ddp_probe #7), so an
+  out-of-range write is silently clamped, not honoured. The clamp emits no
+  log string (why an earlier string scan missed it); read the clamped
+  value back with `ak_get`, and the range with `ak_get_min`/`ak_get_max`
+  — which differ from the Java table for `vmb` (`[0..192]`, not `..240`)
+  and `vol` (`[-2080..480]`). Java clamps too
+  (`DsAkSettings.set` at `Ds.apk/.../DsAkSettings.java:278-326`).
 - **4-CC name validity in DEFINE_PARAMS.** A DEFINE_PARAMS blob
   containing `[xxxx, dvla, yyyy]` is accepted with reply 0. The bogus
   4-CCs occupy param-index slots that simply don't resolve to anything
@@ -557,15 +622,18 @@ dispatch for it.
 
 | Reply           | Source  | Meaning                                                                                                            |
 | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| 0               | success | engine accepted; SET writes propagated to cache and `ak_set`                                                       |
+| 0               | success | engine accepted; SET writes the raw value to the cache and a clamped copy via `ak_set`                              |
 | -1 (`-EPERM`)   | engine  | invalid command data (e.g. psize wrong)                                                                            |
 | -22 (`-EINVAL`) | engine  | invalid command code (cmd 3 GET, etc.), bad setting_index, or wrong value-buffer size                              |
 | -4              | Java    | `Ds.setDsApParam` host-side rejection (e.g. `iebt`/`gebg` going through the wrong API) — not emitted by the engine |
 
 `DsClient.translateErrorCodeToExceptions` maps Java-side codes to
-exceptions. For the daemon, propagate engine `-22` as
-`ENGINE_REJECTED` and own all value-range validation up front
-because the engine offers no second line of defense.
+exceptions. For the daemon, propagate engine `-22` as `ENGINE_REJECTED`
+and still own value-range validation up front: the engine clamps to its
+own `ak_get_min`/`ak_get_max` (a silent second line), but those ranges
+differ from the published table for some params, so a host that validates
+gives predictable, inspectable behaviour rather than relying on a hidden
+clamp.
 
 ## Settings cache lifecycle
 
@@ -613,22 +681,24 @@ during DEFINE_SETTINGS show three things:
    [EffectDs] ak_set(<param_idx>/<name>, 0) = V
    [EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE returned from ak_set()/ak_set_bulk()
    ```
-   This means the cache and the AK registry stay synchronized — the
-   cache isn't a "stage and apply" buffer; writes propagate
-   immediately into the engine's internal DSP-input state.
+   The cache gets the **raw** value; `ak_set` **clamps** its copy into
+   the AK registry. The two stores **diverge** on out-of-range writes,
+   and the DSP reads the **registry**, not the cache (ddp_probe #7) — so
+   the cache is a raw host-side record, not the engine's DSP-input state.
 
 What the DSP does with that state then depends on the param. DolbyX v2
 surfaces three buckets, each derived from observed DSP behaviour:
 
-- **Settable params** — DSP reads each block.
-- **ReadOnly** (`vcbg`, `vcbe`) — DSP overwrites the cache+AK slot
-  every block with its own computed value. Writes are clobbered.
-  The host reads them via cmd 4.
-- **Experimental** (`endp`, `mxou`, `preg`, etc.) — DSP reads them
-  on the same audio block. Probe section 7 shows the Settable bucket
-  (`dvla`, `vmb`) is read raw (bounded by DSP saturation); the universal
-  ak_set forwarding in section 5b extends this to every Experimental
-  param.
+- **Settable params** — the DSP reads them from the clamped registry
+  each block.
+- **ReadOnly** (`vcbg`, `vcbe`) — the DSP overwrites the **registry**
+  slot every block with its own computed value (the cache slot is never
+  touched). The host reads them via cmd 4 or `ak_get`.
+- **Experimental** (`endp`, `mxou`, `preg`, etc.) — read from the
+  registry on the same audio block. Probe section 7 shows the clamped
+  registry (not the raw cache) drives the DSP, proven by a cache poke the
+  DSP ignores; the universal ak_set forwarding in section 5b extends this
+  to every Experimental param.
 
 A fourth group of 11 AK slots is **excluded** from DolbyX v2's
 surfaces (DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because
@@ -641,9 +711,12 @@ they share one trait — no host read path:
   have no observable effect. The engine version string (`ver`) is
   reachable via cmd 6 and surfaces as `engine.version` on the
   bootstrap rather than as an AK parameter.
-- Native-visualizer slots: `vnnb`, `vnbf`, `vnbg`, `vnbe`. Same
-  fate; naming symmetry with `vcb*` suggests they're Dynamic in the
-  DSP sense, but that's unverifiable from outside (no cmd 4 path).
+- Native-visualizer slots: `vnnb`, `vnbf`, `vnbg`, `vnbe`. No cmd 4
+  path, but `ak_get` reads them (ddp_probe #9): `vnbg`/`vnbe` **are**
+  live and audio-tracking — yet a byte-for-byte **mirror** of
+  `vcbg`/`vcbe` regardless of `vnbf`/`vnnb`, so they carry nothing extra.
+  Excluded because they duplicate the `vcb*` channel the visualizer
+  already rides.
 
 The bucket classification lives in
 [02-ak-parameters.md](02-ak-parameters.md#engine-vs-java-settability).

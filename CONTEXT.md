@@ -35,9 +35,12 @@ shared engine subprocess multiplexes many sessions.
 _Avoid_: stream, connection, instance.
 
 **`vcbg` / `vcbe`**:
-The two `ReadOnly` AK parameters the DSP rewrites every audio block.
-Returned together by engine cmd 4 (`DS_PARAM_VISUALIZER_DATA`) as 40
-int16s. The only live-engine-state read path DolbyX has.
+The two `ReadOnly` AK parameters the DSP rewrites every audio block (in
+the AK registry). Returned together by engine cmd 4
+(`DS_PARAM_VISUALIZER_DATA`) as 40 int16s — the *protocol* read path the
+visualizer rides. In-process, the engine's own `ak_get` reads the same
+registry, and most other params' live value too (see
+[docs/ddp/03](docs/ddp/03-binary-protocol.md#the-ak-registry-read-path)).
 _Avoid_: "visualizer data" alone (ambiguous between the raw cmd-4 bytes
 and the post-processed `vis` event payload).
 

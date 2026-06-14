@@ -9,6 +9,11 @@ metadata table. The daemon assigns each WebSocket connection a serial
 originator id at handshake and broadcasts state changes to all clients
 **except** the originator, preventing echo loops in multi-tab scenarios.
 The visualizer pump broadcasts unconditionally. Validation is asymmetric
-by design: the daemon owns range validation completely (the engine
-accepts out-of-range writes without clamping — see
-[`tools/ddp_probe/`](../../tools/ddp_probe/README.md) section 7).
+by design: the daemon owns range validation up front. The engine *does*
+silently clamp an out-of-range write — but only in its AK registry, to its
+own bounds (which differ from the published table for some params), while
+the raw value lingers in the settings cache; see
+[`tools/ddp_probe/`](../../tools/ddp_probe/README.md) section 7 and
+[ddp/03 → Engine validation behavior](../ddp/03-binary-protocol.md#engine-validation-behavior).
+Host-side validation keeps behaviour predictable instead of relying on that
+hidden clamp.

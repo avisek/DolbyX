@@ -77,9 +77,10 @@ build a cleaner foundation that:
 6. Every AK parameter that the engine surfaces (53 of `libdseffect.so`'s 64) is exposed in the Advanced UI section, driven by metadata — including
    ReadOnly ones (for live monitoring) and Experimental ones (engine-internal
    slots the original DDP UI hid; DolbyX is also a research vehicle for
-   `libdseffect.so`). The remaining 11 — 7 build-version / license slots
-   plus 4 native-visualizer slots (`vnnb`, `vnbf`, `vnbg`, `vnbe`) — have
-   no public read path and are dropped entirely; the engine version
+   `libdseffect.so`). The remaining 11 — 7 static build-version / license
+   slots plus 4 native-visualizer slots (`vnnb`, `vnbf`, `vnbg`, `vnbe`;
+   `ak_get` shows `vnbg`/`vnbe` are a live mirror of `vcbg`/`vcbe`) — carry
+   nothing the host needs and are dropped entirely; the engine version
    surfaces via cmd 6.
 7. Backend-agnostic engine layer: the QEMU subprocess approach is the
    default for v2.0; Unicorn Engine and Static Binary Translation slot in
@@ -302,10 +303,12 @@ Visualizer/Equalizer, behind a toggle).
 
 53 of `libdseffect.so`'s 64 AK parameters are declared once in a static
 metadata table. (The other 11 — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcsz`, `lcpt` (engine-internal build-version / license slots) plus
-`vnnb`, `vnbf`, `vnbg`, `vnbe` (native-visualizer slots) — have no public
-read path and are omitted; the engine version string is surfaced via cmd 6
-→ bootstrap `engine.version` instead.) Everything else — wire protocol,
+`lcsz`, `lcpt` (static engine-internal build-version / license slots) plus
+`vnnb`, `vnbf`, `vnbg`, `vnbe` (native-visualizer slots; `ak_get` shows
+`vnbg`/`vnbe` are a live byte-for-byte mirror of `vcbg`/`vcbe`) — carry
+nothing the host needs and are omitted; the engine version string is
+surfaced via cmd 6 → bootstrap `engine.version` instead.) Everything
+else — wire protocol,
 engine init, persistence, UI generation, range validation — derives from
 this table.
 
@@ -400,32 +403,32 @@ engine-level acceptance:
   40 int16s in one round-trip; live-updated read-only displays in
   the UI ride the visualizer pump (see Decision 4 and Decision 10).
   Two families of slots that would naturally fit "ReadOnly" by DSP
-  semantics are excluded from the metadata table entirely because
-  they have no public read path: (a) engine-internal build-version
-  / license slots (`bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`,
-  `lcpt`) — the engine pre-populates them at DEFINE_SETTINGS time
-  from its internal AK registry but cmd 3 GET is unimplemented and
-  cmd 4 returns only `vcbg`/`vcbe`; (b) the native-visualizer family
-  (`vnnb`, `vnbf`, `vnbg`, `vnbe`) — same fate, no cmd 4 path,
-  inferred-Dynamic from naming symmetry with `vcb*` but unverifiable
-  from outside. Both groups would only ever surface static
-  pre-populated values, so DolbyX drops them. The engine version
+  semantics are excluded from the metadata table entirely: (a)
+  engine-internal build-version / license slots (`bver`, `bndl`, `ver`,
+  `lcmf`, `lcvd`, `lcsz`, `lcpt`) — the engine pre-populates them at
+  DEFINE_SETTINGS time and they never change at runtime, so they'd only
+  surface static values; (b) the native-visualizer family (`vnnb`,
+  `vnbf`, `vnbg`, `vnbe`) — no cmd 4 path, and although `ak_get` confirms
+  `vnbg`/`vnbe` are live and audio-tracking, they're a byte-for-byte
+  mirror of `vcbg`/`vcbe` regardless of their own band config, so they
+  carry nothing the visualizer pump doesn't already deliver. Both groups
+  are dropped. The engine version
   string, which the original DDP UI does display, is exposed via
   the bootstrap `engine.version` field (sourced from cmd 6) instead
   of as an AK parameter — see Decision 6.
 - **Experimental** — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`. Editable behind an
-  "experimental" badge. Behavioral confirmation that the DSP reads
-  raw int16 from the cache regardless of declared range is in
-  [tools/ddp_probe/](../tools/ddp_probe/README.md) section 7: a
-  `vmb` sweep over `{0, 120, 240, 480, -100}` produces peak/rms
-  pairs `(1, 0.6)`, `(1, 0.7)`, `(16, 8)`, `(128, 90)`, `(21, 8.5)`
-  — `vmb=480` amplifies ~10× past the declared `vmb=240` clamp
-  point and `vmb=-100` attenuates instead of acting like 0. A
-  `dvla` sweep over `{0, 5, 10, 200, -100}` confirms the leveler
-  also varies, though its envelope-driven dynamics make the
-  per-block measurement noisier than `vmb`. The same
+  "experimental" badge. Behavioral confirmation that the DSP applies
+  these params (read from the clamped registry, not the raw cache) is in
+  [tools/ddp_probe/](../tools/ddp_probe/README.md) section 7: a `vmb`
+  sweep over `{0, 120, 240, 480}` raises peak/rms up through `vmb=120`,
+  then flattens at the top — `vmb=240` and `vmb=480` both clamp to the
+  engine's `vmb` max of 192 (read back via `ak_get` in #2/#9). The decisive
+  proof in the same section is a direct cache poke (registry frozen) the
+  DSP ignores. A `dvla` sweep confirms the leveler also varies and
+  collapses the same way (`dvla=10` and `dvla=200` give identical output,
+  both clamped to 10). The same
   forwarding path applies to every Experimental param — cmd 3 SET
   fires `ak_set(idx/name, offset) = V` regardless of bucket
   (section 5b), so a host that drives `endp`, `mxou`, etc. gets
@@ -552,22 +555,25 @@ that is asymmetric — cmd 3 GET is always rejected because it isn't
 implemented; see Decision 4 protocol table below). It returns
 `-EINVAL(-22)` for any of these, surfaced as
 `{ "type": "error", "code": "ENGINE_REJECTED", "request_id": "...",
-"status": -22, "message": "..." }`. The engine does **NOT**
-validate value ranges, does **NOT** clamp, does **NOT** reject
-unknown 4-CCs in DEFINE_PARAMS, does **NOT** reject non-zero offsets
-in DEFINE_SETTINGS — direct evidence from
-[tools/ddp_probe/](../tools/ddp_probe/README.md) and engine string
-table (relevant strings:
-`_akSet: Wrong parameter index %d`,
+"status": -22, "message": "..." }`. The engine does **NOT** *reject*
+out-of-range values, does **NOT** reject unknown 4-CCs in DEFINE_PARAMS,
+does **NOT** reject non-zero offsets in DEFINE_SETTINGS — direct evidence
+from [tools/ddp_probe/](../tools/ddp_probe/README.md) and the engine
+string table (`_akSet: Wrong parameter index %d`,
 `DS_PARAM_SINGLE_DEVICE_VALUE setting_index %i is invalid`,
-`Effect_getParameter() Invalid command 3. Returning -EINVAL(-22)`;
-no range-check strings exist anywhere).
+`Effect_getParameter() Invalid command 3. Returning -EINVAL(-22)`; no
+range-check strings exist). But it does **silently clamp**: a cmd 3 SET
+stores the raw value in the settings cache, while the forwarded `ak_set`
+clamps the registry copy to the engine's own `[ak_get_min, ak_get_max]`
+— and the DSP reads the **clamped registry** (ddp_probe #7).
 
-This is why the daemon must own range validation completely. An
-out-of-range write doesn't get rejected — it propagates verbatim
-into the DSP, which then produces undefined-shape output (probe
-section 7: `vmb=-100` attenuates the signal to ~16% of baseline rms
-instead of acting like `vmb=0`).
+This is why the daemon must still own range validation up front. An
+out-of-range write isn't rejected — it's silently clamped to a range that
+differs from the published table for some params (`vmb` clamps at 192,
+not 240; `vol` at -2080, not -2048). Validating host-side gives
+predictable, inspectable behaviour rather than relying on a hidden clamp
+(probe section 7: `vmb=240` and `vmb=480` both clamp to 192; #2 reads the
+clamped values back via `ak_get`).
 
 **Visualizer source.** The daemon always reads the `vis` event's data
 from the **oldest session** (the first entry in the session list),
@@ -613,14 +619,17 @@ Each message is `[u32 length][u32 opcode][payload]`. Replies are
 | 0x30 | `Process`        | `[u32 session_id][u32 frames][i16 × frames × 2 pcm]`  | `[i16 × frames × 2 pcm]`                 |
 | 0x40 | `Version`        | empty                                                 | `[u8 len][u8 × len utf-8]`               |
 
-There is intentionally **no `GetParam` opcode**. The underlying
-engine (libdseffect.so) does not implement cmd 3 GET — see
+There is intentionally **no `GetParam` opcode** in v2. cmd 3 GET is
+unimplemented in the engine — see
 [docs/ddp/03-binary-protocol.md → Cmd 3 GET](ddp/03-binary-protocol.md#cmd-3-get-unimplemented).
-The daemon caches every write itself and serves it back from
-the in-memory state mirror plus `config.toml` overlay.
-`GetVisualizer` (mapped to cmd 4 in the engine wire protocol) is
-the only way to read live engine state. Version is served by the
-daemon from a cached cmd 6 result captured at init.
+An in-process `ak_get` *could* back a real per-param read (see
+[docs/ddp/03 → The AK registry read path](ddp/03-binary-protocol.md#the-ak-registry-read-path)),
+but v2 deliberately serves params from the daemon's own write-mirror plus
+`config.toml` overlay instead of reading them back; an `ak_get` GET opcode
+is a possible later addition, not part of this protocol.
+`GetVisualizer` (mapped to cmd 4 in the engine wire protocol) reads the
+live visualizer slots; version is served by the daemon from a cached cmd 6
+result captured at init.
 
 `SetParams` maps to the engine's cmd 2 (`DS_PARAM_ALL_VALUES`) — see the
 batch-vs-single note under Decision 1.
@@ -1459,10 +1468,11 @@ does not apply. Treat this slice as one-shot setup.
   Music-profile column; structural constants (band counts, freq tables,
   `aocc`) carry their host-set 20-band values instead — the engine boots
   10-band (see Decision 3).
-  (The 11 omitted entries — 7 engine-internal build-version / license
-  slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` plus the
-  4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` — share the
-  same fate: no public read path.)
+  (The 11 omitted entries — 7 static engine-internal build-version /
+  license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt`
+  plus the 4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe`
+  (live via `ak_get` but a mirror of `vcbg`/`vcbe`) — carry nothing the
+  host needs.)
 
 **Progress checklist:**
 
@@ -1861,8 +1871,8 @@ constant-params dance) — [tests.md](../.agents/skills/tdd/tests.md)
        `cargo test --features qemu`.
 4. [ ] `tools/ddp_probe/` regression harness runs in CI under
        `qemu-user-static` and verifies the documented validation
-       surface (cmd 3 GET unimplemented, no value-range clamp,
-       7560 / 5512 sample crossfade).
+       surface (cmd 3 GET unimplemented but `ak_get` reads the registry,
+       cache-raw vs registry-clamped, 7560 / 5512 sample crossfade).
 5. [ ] `EngineSupervisor` respawns the subprocess on crash; the
        session map is reconstructed transparently.
 6. [ ] `QemuBackend::version()` returns `"APPv1 version 2.0.4.0"`
