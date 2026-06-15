@@ -9,6 +9,7 @@
  *   docs/ddp/02-ak-parameters.md
  *   docs/ddp/03-binary-protocol.md
  *   docs/ddp/05-profiles-and-persistence.md
+ *   docs/ddp/07-ak-api.md
  *   docs/REARCHITECTURE_PLAN.md
  *
  * Experiments
@@ -50,11 +51,18 @@
  *      but mirror vcbg/vcbe; ak_get_min/max expose the engine's true
  *      ranges (vmb, vol differ from the table); a runtime value-diff
  *      shows only the visualizer slots change during process().
- *  10. AK tree enumeration: ak_enum walks the engine's own object tree
- *      (root = ref 1); ak_get_name/_length/_min/_max/_frac_bits read each
- *      leaf's true metadata — the authoritative param table (248 defs),
- *      surfacing the DSP node graph and root params Java never exposed
- *      (scpe, test). The ground truth a parameters.toml generator emits.
+ *  10. Java param-set discrepancy: set-diff the engine's real root leaves
+ *      against the host's DEFINE_PARAMS list (G[], verbatim DsAkSettings) —
+ *      surfaces the mismatch without assuming it. Java lists two phantoms
+ *      (mxou/lcsz) that aren't root leaves, so their flat registration gets
+ *      ref 0 — dead, the write is dropped (they're node params; see dump
+ *      tree) — and omits two real root leaves (scpe/test). Correct host set =
+ *      Java's 64 − phantoms + omitted.
+ *
+ * Dump mode (no experiments) — the engine's own AK tree is the authoritative
+ * param table, so these walk it instead of trusting the host list:
+ *   ddp_probe <lib> dump tree      full object tree + metadata + names + descriptions
+ *   ddp_probe <lib> dump defaults  each root param's power-on default (4-CC = value)
  *
  * Build & run: see tools/ddp_probe/README.md.
  */
@@ -161,22 +169,29 @@ static int settings_begin[NPARAM];
  * ak_get_min/max(h, ref)            -> engine's declared range for the param
  * ak_get_length(h, ref)            -> array element count for the param
  * ak_get_frac_bits(h, ref)         -> fixed-point fractional bits (unit = 1/2^n)
+ * ak_get_string(h, ref, 0, idx)     -> display string: idx 0 name, 1 desc, 2 help
  * ak_enum(h, parent_ref, i)         -> i-th child ref of parent (root = ref 1),
- *                                      0 past the last child (see experiment 10) */
+ *                                      0 past the last child (dump mode)
+ * ak_find(h, parent_ref, packed4cc) -> child ref by name, 0 if absent (exp 10) */
 typedef int      (*ak_get_fn)(void *, uint32_t, int);
 typedef int      (*ak_get_bulk_fn)(void *, uint32_t, int, int, int, void *);
 typedef uint32_t (*ak_get_name_fn)(void *, uint32_t);
 typedef int      (*ak_minmax_fn)(void *, uint32_t);
 typedef uint32_t (*ak_enum_fn)(void *, uint32_t, int);
+typedef uint32_t (*ak_find_fn)(void *, uint32_t, uint32_t);
+typedef char *   (*ak_get_string_fn)(void *, uint32_t, int, int);
 static ak_get_fn      ak_get;
 static ak_get_bulk_fn ak_get_bulk;
 static ak_get_name_fn ak_get_name;
 static ak_minmax_fn   ak_get_min, ak_get_max;
 static ak_minmax_fn   ak_get_length, ak_get_frac_bits;
 static ak_enum_fn     ak_enum;
+static ak_find_fn     ak_find;
+static ak_get_string_fn ak_get_string;
 
 static void     *AK;       /* engine AK handle */
 static uint32_t *AK_REF;   /* per-param tagged refs (DEFINE_PARAMS order) */
+static int       g_quiet;  /* dump mode: silence the init-handshake chatter */
 
 static void ak_attach(void) {
     void *pDs1ap = *(void **)((char *)H + 0x44);
@@ -195,6 +210,13 @@ static int ak_get_param(const char *name, int elem) {
 static void ak_fourcc(uint32_t f, char *buf) {
     buf[0] = f; buf[1] = f >> 8; buf[2] = f >> 16; buf[3] = f >> 24; buf[4] = 0;
 }
+/* Pack a 4-CC into the engine's little-endian uint32 form (inverse of
+ * ak_fourcc) — what ak_find expects for a name. */
+static uint32_t pack_fourcc(const char *s) {
+    uint32_t f = 0;
+    for (int i = 0; i < 4 && s[i]; i++) f |= (uint32_t)(uint8_t)s[i] << (8 * i);
+    return f;
+}
 
 /* Snapshot every param's live registry value into a cache-flat int[] (indexed
  * by settings_begin[], which every param has since all are in DEFINE_SETTINGS).
@@ -208,24 +230,49 @@ static void snapshot_registry(int *dst) {
     }
 }
 
-/* Walk the engine's live AK object tree from `parent` (root = ref 1), printing
- * each leaf param's true metadata straight from the engine — no host table.
- * ak_enum returns the i-th child's tagged ref (0 past the last); a ref with its
- * own children is a container (a DSP node) and recurses. `n` accumulates the
- * count; the depth/count caps guard against a mis-resolved ref looping. */
-static void ak_walk(uint32_t parent, int depth, int *n) {
+/* ak_get_string(idx), or "" if the engine has none / the symbol is absent.
+ * idx 0 = display name, 1 = one-line description, 2 = long help. */
+static const char *ak_str(uint32_t ref, int idx) {
+    const char *s = ak_get_string ? ak_get_string(AK, ref, 0, idx) : NULL;
+    return s ? s : "";
+}
+
+/* `dump tree`: walk the engine's AK object tree from `parent` (root = ref 1),
+ * printing each def's authoritative metadata + name + description straight from
+ * the engine — no host table. A ref with children is a DSP node and recurses;
+ * the depth/count caps guard against a mis-resolved ref looping. */
+static void dump_tree(uint32_t parent, int depth, int *n) {
     for (int i = 0; ; i++) {
         uint32_t r = ak_enum(AK, parent, i);
         if (!r || depth > 8 || ++*n > 400) return;
         char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
-        if (ak_enum(AK, r, 0)) {                         /* has children -> node */
-            printf("    %*s%-4s  [node]\n", depth * 2, "", fc);
-            ak_walk(r, depth + 1, n);
-        } else {
-            printf("    %*s%-4s  len=%-2d  [%6d .. %6d]  frac=%d\n",
-                   depth * 2, "", fc, ak_get_length(AK, r),
-                   ak_get_min(AK, r), ak_get_max(AK, r), ak_get_frac_bits(AK, r));
-        }
+        int ind = 2 + depth * 2, node = ak_enum(AK, r, 0) != 0;
+        printf("%*s%-4s  %s%s\n", ind, "", fc, ak_str(r, 0), node ? "  [node]" : "");
+        if (!node)
+            printf("%*slen=%-3d [%d .. %d]  frac=%d\n", ind + 6, "",
+                   ak_get_length(AK, r), ak_get_min(AK, r), ak_get_max(AK, r),
+                   ak_get_frac_bits(AK, r));
+        const char *desc = ak_str(r, 1);
+        if (*desc) printf("%*s%s\n", ind + 6, "", desc);
+        if (node) dump_tree(r, depth + 1, n);
+    }
+}
+
+/* `dump defaults`: each ROOT leaf's power-on default (4-CC = value...). Root
+ * leaves are the host-addressable set — the correct one: scpe/test included,
+ * mxou/lcsz absent (they're node params). Read straight after open, before any
+ * SET, so the AK registry still holds the engine's intrinsic defaults. */
+static void dump_defaults(void) {
+    printf("# engine power-on defaults — root params, before any SET\n");
+    for (int i = 0; i < 400; i++) {
+        uint32_t r = ak_enum(AK, 1, i);
+        if (!r) break;
+        if (ak_enum(AK, r, 0)) continue;            /* skip nodes — root leaves only */
+        char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
+        int len = ak_get_length(AK, r);
+        printf("%-4s =", fc);
+        for (int e = 0; e < len; e++) printf(" %d", ak_get(AK, r, e));
+        printf("\n");
     }
 }
 
@@ -295,7 +342,7 @@ static void define_params(void) {
         memcpy(buf + 2 + i * 4, G[i].name, strlen(G[i].name));
     }
     int r = cmd_set(DS_PARAM_DEFINE_PARAMS, buf, 2 + NPARAM * 4);
-    printf("DEFINE_PARAMS (%d names) -> reply=%d\n", NPARAM, r);
+    if (!g_quiet) printf("DEFINE_PARAMS (%d names) -> reply=%d\n", NPARAM, r);
     free(buf);
 }
 
@@ -320,8 +367,9 @@ static int define_settings_all(void) {
         }
     }
     int r = cmd_set(DS_PARAM_DEFINE_SETTINGS, buf, byte_size);
-    printf("DEFINE_SETTINGS (all 64 params, %d slots, %d bytes) "
-           "-> reply=%d\n", total, byte_size, r);
+    if (!g_quiet)
+        printf("DEFINE_SETTINGS (all 64 params, %d slots, %d bytes) "
+               "-> reply=%d\n", total, byte_size, r);
     free(buf);
     return total;
 }
@@ -385,26 +433,20 @@ static const int16_t *find_cache(void) {
     return *(const int16_t **)((char *)H + CACHE_PTR_OFFSET);
 }
 
-/* DUMP_DEFAULTS: print every param's intrinsic power-on default. The AK
- * registry already holds the engine's defaults right after the init
- * handshake (before any SET), so we ak_get each one — no cache, no seed
- * trick. These are the clamped values the DSP would actually use. */
-static void dump_ak_defaults(void) {
-    printf("\n=== ENGINE DEFAULT VALUES (AK registry via ak_get) ===\n");
-    for (int i = 0; i < NPARAM; i++) {
-        if (!ak_ref(G[i].name)) { printf("%-4s = (not in AK)\n", G[i].name); continue; }
-        printf("%-4s =", G[i].name);
-        for (int e = 0; e < G[i].len; e++) printf(" %d", ak_get_param(G[i].name, e));
-        printf("\n");
-    }
-}
-
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <libdseffect.so>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <libdseffect.so> [dump tree|dump defaults]\n",
+                argv[0]);
         return 1;
+    }
+    /* Dump mode walks the engine's own AK tree instead of running experiments;
+     * silence the init-handshake chatter so stdout is a clean dump. */
+    const char *dump_what = NULL;
+    if (argc >= 3 && !strcmp(argv[2], "dump")) {
+        dump_what = argc >= 4 ? argv[3] : "tree";
+        g_quiet = 1;
     }
     void *lib = dlopen(argv[1], RTLD_NOW);
     if (!lib) {
@@ -420,9 +462,11 @@ int main(int argc, char *argv[]) {
     ak_get_name = (ak_get_name_fn) dlsym(lib, "ak_get_name");
     ak_get_min  = (ak_minmax_fn)   dlsym(lib, "ak_get_min");
     ak_get_max  = (ak_minmax_fn)   dlsym(lib, "ak_get_max");
-    ak_enum          = (ak_enum_fn) dlsym(lib, "ak_enum");          /* exp 10 */
+    ak_enum          = (ak_enum_fn) dlsym(lib, "ak_enum");          /* dump + exp 10 */
     ak_get_length    = (ak_minmax_fn) dlsym(lib, "ak_get_length");
     ak_get_frac_bits = (ak_minmax_fn) dlsym(lib, "ak_get_frac_bits");
+    ak_find          = (ak_find_fn) dlsym(lib, "ak_find");          /* exp 10 */
+    ak_get_string    = (ak_get_string_fn) dlsym(lib, "ak_get_string"); /* dump tree */
     if (!ak_get || !ak_get_bulk || !ak_get_name || !ak_get_min || !ak_get_max) {
         fprintf(stderr, "dlsym: libdseffect.so is missing an ak_* accessor "
                 "(ak_get/ak_get_bulk/ak_get_name/ak_get_min/ak_get_max)\n");
@@ -437,18 +481,29 @@ int main(int argc, char *argv[]) {
     }
     uint32_t rs = 4; int32_t r = 0;
     (*H)->command(H, EFFECT_CMD_INIT, 0, NULL, &rs, &r);
-    printf("EFFECT_CMD_INIT -> reply=%d\n", r);
+    if (!g_quiet) printf("EFFECT_CMD_INIT -> reply=%d\n", r);
 
     /* ── 1. Init handshake ──────────────────────────────────────── */
-    printf("\n=== 1. INIT HANDSHAKE ===\n");
+    if (!g_quiet) printf("\n=== 1. INIT HANDSHAKE ===\n");
     define_params();
     int cache_total = define_settings_all();
     ak_attach();   /* resolve the AK handle + per-param refs from the context */
 
-    /* DUMP_DEFAULTS: the registry already holds the engine's power-on
-     * defaults at this point (no SET yet), so just read them out. */
-    if (getenv("DUMP_DEFAULTS")) {
-        dump_ak_defaults();
+    /* Dump mode: the registry holds the engine's power-on defaults here (no
+     * SET yet) and the AK tree is fully built — walk it and exit. */
+    if (dump_what) {
+        if (!ak_enum) { fprintf(stderr, "dump: ak_enum not exported\n"); return 2; }
+        if (!strcmp(dump_what, "tree")) {
+            printf("# AK object tree — 4-CC / name; leaves: len, [min..max], "
+                   "frac (unit 1/2^frac), description\n");
+            int n = 0; dump_tree(1, 0, &n);
+            printf("# %d defs\n", n);
+        } else if (!strcmp(dump_what, "defaults")) {
+            dump_defaults();
+        } else {
+            fprintf(stderr, "dump: expected 'tree' or 'defaults'\n");
+            return 2;
+        }
         return 0;
     }
 
@@ -952,20 +1007,41 @@ int main(int argc, char *argv[]) {
         free(snapA); free(snapB);
     }
 
-    /* ── 10. AK tree enumeration — the engine's authoritative param table ─
-     * DEFINE_PARAMS only ever sees the 64 names the HOST sends; the engine's
-     * own AK tree is the ground truth. ak_enum walks it (root = ref 1) and
-     * ak_get_name/_length/_min/_max/_frac_bits read each leaf's real metadata —
-     * the exact data a parameters.toml generator would emit (true ranges, array
-     * lengths, fixed-point scale). It also surfaces root params Java never
-     * exposed (e.g. scpe, test) and the per-node DSP sub-params. */
-    printf("\n=== 10. AK TREE — engine's authoritative param metadata ===\n");
-    if (ak_enum && ak_get_length && ak_get_frac_bits) {
-        int n = 0;
-        ak_walk(1, 0, &n);
-        printf("    (%d defs; frac=N means fixed-point 1/2^N units, e.g. 4 = 1/16 dB)\n", n);
-    } else {
-        printf("    (ak_enum/ak_get_length/ak_get_frac_bits not exported — skipped)\n");
+    /* ── 10. Java param-set discrepancy — Java's 64 vs the engine's root ──
+     * Set-diff the engine's real root leaves (ak_enum from root, leaves only)
+     * against G[] (verbatim DsAkSettings) — surfaces the mismatch instead of
+     * asserting it: phantoms (in G[] but not a root leaf → ref 0, dead; they're
+     * node params, see `dump tree`) and omissions (real root leaves G[] leaves
+     * out: scpe/test). The full authoritative tree is `ddp_probe <lib> dump tree`. */
+    printf("\n=== 10. JAVA PARAM-SET DISCREPANCY ===\n");
+    {
+        /* The engine's real root leaves: direct children of root (ref 1) with
+         * no children of their own. */
+        char     lname[128][5];
+        uint32_t lref[128];
+        int      nl = 0;
+        for (int i = 0; nl < 128; i++) {
+            uint32_t r = ak_enum(AK, 1, i);
+            if (!r) break;
+            if (ak_enum(AK, r, 0)) continue;          /* a node, not a leaf */
+            lref[nl] = r; ak_fourcc(ak_get_name(AK, r), lname[nl]); nl++;
+        }
+        printf("    in Java's list but NOT an engine root leaf (phantom -> ref 0, dead):\n");
+        for (int i = 0; i < NPARAM; i++) {
+            int leaf = 0;
+            for (int j = 0; j < nl && !leaf; j++) leaf = !strcmp(G[i].name, lname[j]);
+            if (!leaf)
+                printf("      %-4s -> ref %u  (not a root leaf; see dump tree)\n",
+                       G[i].name, ak_ref(G[i].name));
+        }
+        printf("    engine root leaves Java OMITS (real, settable if registered):\n");
+        for (int j = 0; j < nl; j++) {
+            if (find_param(lname[j]) >= 0) continue;  /* already in G[] */
+            uint32_t r = ak_find ? ak_find(AK, 1, pack_fourcc(lname[j])) : lref[j];
+            printf("      %-4s -> ref %u  [%d .. %d] frac=%d\n", lname[j], r,
+                   ak_get_min(AK, r), ak_get_max(AK, r), ak_get_frac_bits(AK, r));
+        }
+        printf("    => correct host set = Java's 64 − {phantoms} + {omitted}\n");
     }
 
     /* ── 8b. begin-only bounds check (DELIBERATELY LAST — corrupts heap) ─

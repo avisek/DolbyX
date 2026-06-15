@@ -15,7 +15,8 @@
 #   make run       — build then run under qemu-arm-static; stdout is
 #                    the test summary, stderr is the engine's own log
 #   make run-log   — like run but redirects engine log to engine.log
-#   make dump      — print every param's intrinsic power-on default
+#   make dump-tree     — print the engine's full AK tree + metadata + descriptions
+#   make dump-defaults — print each root param's power-on default (4-CC = value)
 #   make clean
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -38,7 +39,7 @@ LIBLOG   = $(LIBDIR)/liblog.so
 STAGED_LIBS = libdseffect.so libc.so libcutils.so libdl.so libm.so \
               libstdc++.so libutils.so
 
-.PHONY: all run run-log dump clean
+.PHONY: all run run-log dump-tree dump-defaults clean
 
 all: $(PROBE) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
 
@@ -67,9 +68,13 @@ run-log: all
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
 	  $(PROBE) $(LIBDIR)/libdseffect.so 2>engine.log
 
-dump: all
-	@DUMP_DEFAULTS=1 LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
-	  $(PROBE) $(LIBDIR)/libdseffect.so 2>/dev/null
+dump-tree: all
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(PROBE) $(LIBDIR)/libdseffect.so dump tree 2>/dev/null
+
+dump-defaults: all
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(PROBE) $(LIBDIR)/libdseffect.so dump defaults 2>/dev/null
 
 clean:
 	rm -rf $(BUILDDIR) engine.log

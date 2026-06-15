@@ -226,7 +226,7 @@ cmd 4 path) — see the "Recommendation for DolbyX v2" section below.
 |   # | 4-CC   | len | bounds     | settable | Description                                                                                                                                                                                                                                   |
 | --: | ------ | --: | ---------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |  55 | `endp` |   1 | 0..6       | no       | Output endpoint enum. **0 = SPEAKER, 1 = HEADPHONES, 2 = HDMI, 3 = SPDIF, 4 = DLNA, 5 = LINE_OUT, 6 = BLUETOOTH.** Read-only at the AK level — the service is supposed to set this via the `setOutputDevice` HAL flow, not by `setDsApParam`. |
-|  56 | `mxou` |   1 | 1..8       | no       | Maximum output channels (mono..7.1).                                                                                                                                                                                                          |
+|  56 | `mxou` |   1 | 1..8       | no       | Maximum output channels (mono..7.1). **Not an engine root leaf** — a node param (under the `le`/`e` excitation buses); the host's flat registration resolves to **ref 0 (dead)**, so writes are ignored. See [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).                                                                                                                                                                                                          |
 |  57 | `vol`  |   1 | -2048..480 | no       | System volume hint in 1/16 dB. The leveler uses this to know how loud the user is currently playing back.                                                                                                                                     |
 
 ### Licensing
@@ -240,8 +240,38 @@ payloads.
 | --: | ------ | --: | --------- | -------- | ---------------------------------------------- |
 |  60 | `lcmf` |   2 | int16     | no       | License modifier (2 int16s, opaque).           |
 |  61 | `lcvd` |   2 | int16     | no       | License vendor (2 int16s, opaque).             |
-|  62 | `lcsz` |   1 | 1..32767  | no       | License size.                                  |
+|  62 | `lcsz` |   1 | 1..32767  | no       | License size. **Not an engine root leaf** — a node param (under `init`/`eval`); resolves to **ref 0 (dead)**. See [the discrepancy](#javas-list-vs-the-engines-root-leaves). |
 |  63 | `lcpt` | 168 | -128..127 | no       | License payload (168 bytes of signed payload). |
+
+## Java's list vs the engine's root leaves
+
+`DsAkSettings.akParams_` is hand-maintained, and it disagrees with the
+engine's real root leaves two ways — proven in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) experiment 10, which
+resolves every host name against the live AK tree:
+
+- **Two phantoms.** `mxou` and `lcsz` are in Java's 64 but are **node**
+  params, not root leaves — in `dump tree` they sit nested under DSP nodes
+  (`mxou` under the `le`/`e` excitation buses, `lcsz` under `init`/`eval`).
+  Their flat registration can't resolve to a root leaf, so the engine hands
+  back **ref 0** — a dead, unresolved ref. A cmd 3 SET still forwards to
+  `ak_set`, but the resolve fails and the write is dropped before it reaches
+  a leaf. As host params they are non-functional.
+- **Two omissions.** `scpe` and `test` are real root leaves with real
+  ranges that Java leaves out:
+
+  | 4-CC   | ref | len | bounds | frac | default | engine description            |
+  | ------ | --: | --: | ------ | ---: | ------: | ----------------------------- |
+  | `scpe` |  71 |   1 | 0..2   |    0 |       2 | Surround Compressor enable    |
+  | `test` | 139 |   1 | 0..1   |    0 |       0 | Peak Limiter Test Mode Enable |
+
+So the **correct host set is Java's 64 − {`mxou`, `lcsz`} + {`scpe`,
+`test`}** (still 64). Neither `scpe` nor `test` is in Java's
+`isParamSettable` whitelist, so DolbyX v2 surfaces them as **Experimental**
+(see [Recommendation for DolbyX v2](#recommendation-for-dolbyx-v2)); the
+`mxou`/`lcsz` phantoms drop out entirely. The engine ships a name +
+one-line description per param, so a generated table sources these straight
+from `ddp_probe dump tree` — no hand-transcription.
 
 ## Per-parameter scaling cheat-sheet
 
@@ -367,7 +397,9 @@ This includes writes to `bver` (`ak_set(0/bver, 0) = 9999`), `bndl`,
 `ver` (`ak_set(37/ver, 0) = 4242`), `vcbg`, `vcbe`, `endp`
 (`ak_set(55/endp, 0) = 2`), `preg`, `pstg`, `mxou`, `ocf`, `vol`,
 `ven`, `vcnb`, `vnnb`, `lcsz`. The cache update + AK forward both
-fire.
+fire — except for `mxou`/`lcsz`, where the forward fires but resolves
+to **ref 0**, a dead write that never reaches a leaf (see
+[Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves)).
 
 What differs across "non-settable" params is **whether the DSP uses
 the value afterwards** and, separately, **whether there is a host read
@@ -380,17 +412,18 @@ below for the exclusion list):
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
 | **ReadOnly** — `vcbg`, `vcbe`                                                          | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
-| **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf` | DSP reads them; behavior is well-defined. Original DDP UI hides them.                                      | no in Java's setup; included by DolbyX v2                    |
+| **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
-The remaining 11 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcsz`, `lcpt` (engine-internal build-version / license; DSP doesn't
-read at runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`,
-`vnbf`, `vnbg`, `vnbe` (native-visualizer state — `ak_get` shows
-`vnbg`/`vnbe` are live but a byte-for-byte mirror of `vcbg`/`vcbe`) —
-carry nothing the host needs. Only `ver` is reachable over the protocol,
-via cmd 6, which DolbyX v2 surfaces as `engine.version` rather than as an
-AK parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and
-DEFINE_SETTINGS.
+The remaining 10 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+`lcpt` (engine-internal build-version / license; DSP doesn't read at
+runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`, `vnbf`,
+`vnbg`, `vnbe` (native-visualizer state — `ak_get` shows `vnbg`/`vnbe`
+are live but a byte-for-byte mirror of `vcbg`/`vcbe`) — carry nothing the
+host needs. Only `ver` is reachable over the protocol, via cmd 6, which
+DolbyX v2 surfaces as `engine.version` rather than as an AK parameter.
+DolbyX v2 omits all 10 from DEFINE_PARAMS and DEFINE_SETTINGS. (`lcsz`,
+Java's 7th license/build name, isn't an engine root leaf at all — it's a
+phantom, not a dropped slot; see above.)
 
 The engine **clamps** a written value in the AK registry (the cache keeps
 the raw value; see
@@ -432,7 +465,7 @@ but they are there.
 ## Recommendation for DolbyX v2
 
 The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a three-bucket classification of the **53 params that get
+above into a three-bucket classification of the **54 params that get
 surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
 
 - **Settable** (42 params) — every param with `settable = yes` above.
@@ -443,13 +476,15 @@ surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
   via cmd 4 (`DS_PARAM_VISUALIZER_DATA`), which returns
   `vcbg ‖ vcbe` as 40 int16s. Rendered as live read-only displays
   driven by the visualizer pump.
-- **Experimental** (9 params) — `preg`, `pstg`, `endp`, `mxou`, `ocf`,
-  `ven`, `vol`, `vcnb`, `vcbf`. DSP reads them. Settable behind a UI
-  badge.
+- **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
+  `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
+  a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —
+  formerly counted here — is a dead phantom, dropped. See
+  [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).)
 
-The remaining 11 AK slots are dropped entirely:
+The remaining 10 AK slots are dropped entirely:
 
-- `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` —
+- `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` —
   engine-internal build-version / license slots. DSP doesn't read
   them at runtime; the engine pre-populates them at DEFINE_SETTINGS
   time via internal `ak_get` but there is no host read path. The

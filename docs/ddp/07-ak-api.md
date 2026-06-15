@@ -9,7 +9,8 @@ parameter layer on top. The host-facing [binary protocol](03-binary-protocol.md)
 The engine exports the AK functions as ordinary symbols, so a process that
 `dlopen`s the engine can call them directly. That's how
 [`ddp_probe`](../../tools/ddp_probe/README.md) reads live DSP state
-(experiment 9) and enumerates the engine's true metadata (experiment 10).
+(experiment 9) and enumerates the engine's true metadata + descriptions (the
+`dump` command).
 
 > **Scope.** Reverse-engineered from the v8.1 `libdseffect.so` and
 > **version-pinned to that binary** — the symbol behaviour and context offsets
@@ -53,9 +54,9 @@ bit is a flag, the rest is a bit-packed sequence of child indices.
 `ak_resolve(ref, &slot)` decodes it, walks root→leaf, and writes the resolved
 object to `*slot`. **Every accessor calls `ak_resolve` first.**
 
-- A ref with the low bit **clear** (e.g. `0`) resolves to the **root container**
-  at depth 0 — which `ak_enum`/`ak_find` then reject, so it's not an enumerable
-  parent.
+- A ref with the low bit **clear** (e.g. `0`) **doesn't resolve** — `ak_resolve`
+  returns 0 (not resolved), so every accessor bails: a read yields NULL, a write
+  is dropped, `ak_enum`/`ak_find` find no child. `0` is the dead / absent ref.
 - **Root-for-enumeration is ref `1`** — the engine's own `ak_find`/`ak_enum`
   calls pass `1` as the parent.
 - The host's 64 refs are tagged values like `3`, `0xb`, `0x31` — leaves nested
@@ -76,7 +77,7 @@ All take `(handle, ref, …)` and resolve the ref internally.
 | `ak_get_length`                                      | `(h, ref) → int`                     | array element count.                                                  |
 | `ak_get_frac_bits`                                   | `(h, ref) → int`                     | fixed-point fractional bits; unit = 1/2ⁿ (4 ⇒ 1/16 dB).               |
 | `ak_get_type` / `ak_get_flags` / `ak_get_size` / `ak_get_offset` | `(h, ref) → int`        | type tag, flags, byte size, struct offset.                            |
-| `ak_get_string`                                      | `(h, ref, …) → char*`                | string labels (enum-option names).                                    |
+| `ak_get_string`                                      | `(h, ref, 0, idx) → char*`           | **display strings**: `idx` 0 = name, 1 = description, 2 = long help.   |
 | `ak_find`                                            | `(h, parent_ref, packed_4cc) → ref`  | resolve a name → ref **without** DEFINE_PARAMS.                       |
 | `ak_enum`                                            | `(h, parent_ref, i) → ref`           | i-th child ref; `0` past the last.                                    |
 | `ak_count_defs`                                      | `(obj*, &n)`                         | recursive count of all defs under an object.                          |
@@ -100,6 +101,24 @@ Two facts worth holding onto:
   that's `ak_update`, inside `ak_process`, which reads the registry **live every
   block** — so a bare `ak_set` still takes effect (matches the cache-poke result
   in [`ddp_probe` #7](../../tools/ddp_probe/README.md)).
+
+## Names & descriptions
+
+Every def also carries a small **string table**, read with
+`ak_get_string(h, ref, 0, idx)` — `idx` 0 = display name, 1 = one-line
+description, 2 = long help (mostly nodes). Human-authored, not just the 4-CC,
+straight from the binary:
+
+| ref           | name                               | description                                                            |
+| ------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| `vol`         | Volume                             | The gain the user would like the Audio Processing Platform to apply…  |
+| `iebt`        | Intelligent Equalizer Band Targets | Specifies the band target levels for the Intelligent Equalizer.       |
+| `amou`        | Amount                             | Controls the amount of dialog boost.                                  |
+| `duck`        | Ducking                            | Controls the amount of attenuation to apply to channels that do not contain dialog. |
+| `dele` (node) | Dialog Enhancer                    | Improves the clarity and intelligibility of dialog.                  |
+
+So a generated `parameters.toml` can carry an authoritative name + description
+per param — zero hand-transcription — next to the range/length/`frac_bits`.
 
 ## Two layers: params and framework
 
@@ -146,12 +165,16 @@ is the ground truth, and it disagrees with the hand-transcribed Java table
   **len 40** — the engine's max band count (`genb`/`ienb` ≤ 40), of which the host
   fills the first 20; `aobg` is **329**, not 42. A length is the array's capacity,
   not the value count you must send.
-- **Hidden root params:** `scpe` (`[0..2]`) and `test` (`[0..1]`) — never exposed by Java.
+- **Param-set bugs:** Java omits real root leaves `scpe` (`[0..2]`) and `test`
+  (`[0..1]`), and *includes* `mxou`/`lcsz` — which are node params, not root
+  leaves, so the engine assigns them ref 0 (dead). The correct host set is
+  Java's 64 − {`mxou`, `lcsz`} + {`scpe`, `test`} (`ddp_probe` experiment 10).
 - **Unit scale:** per-param `frac_bits` (the engine's own fixed-point exponent),
   which the docs otherwise hardcode (e.g. "÷16").
 
-[`ddp_probe` experiment 10](../../tools/ddp_probe/README.md) dumps the full table
-(name · length · range · frac_bits) by walking the tree — the exact data a
+[`ddp_probe`'s dump](../../tools/ddp_probe/README.md#dumping-the-engines-ak-tree)
+walks the tree for this: `dump tree` emits name · description · length · range ·
+frac_bits, `dump defaults` the power-on values — the exact data a
 `parameters.toml` generator should emit, instead of transcribing Java by hand.
 
 ## Symbol offsets (v8.1 `libdseffect.so`)

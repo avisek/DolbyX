@@ -22,13 +22,13 @@ establishes the following facts:
 | 3   | Cmd 3 GET is NOT in the engine's GET dispatcher — but `ak_get` (the engine's own getter, #9) reads any value live                                                                                                                                                                                                                                                                                                                     | `Effect_getParameter() Invalid command 3. Returning -EINVAL(-22)`; stdout `ak_get is the real getter — reads it live: dvla=7`                                                                                                                                                                                                     |
 | 4   | cmd 4 returns dynamic vcbg‖vcbe filled by the DSP each block. Two snapshots taken either side of a substantial audio-shape change differ in 40/40 slots, confirming the per-block refresh                                                                                                                                                                                                                                             | non-zero gains/excitations in the stdout summary; "40/40 slots differ from snapshot A"                                                                                                                                                                                                                                           |
 | 5   | cmd 6 returns the 4-int16 engine version                                                                                                                                                                                                                                                                                                                                                                                              | `components=2.0.4.0` in the stdout summary                                                                                                                                                                                                                                                                                       |
-| 5b  | A representative sample of cmd 3 SETs against "ReadOnly"/static params (`bver`, `bndl`, `ver`, `vcbg`, `vcbe`, etc.) and "Experimental" params (`endp`, `mxou`, `vol`, etc.) — all 15 forward to `ak_set`. The pattern is uniform across the dispatch path; the probe samples rather than enumerates every name                                                                                                                       | `ak_set(0/bver, 0) = 9999`, `ak_set(37/ver, 0) = 4242`, `ak_set(55/endp, 0) = 2`, etc.                                                                                                                                                                                                                                           |
+| 5b  | A representative sample of cmd 3 SETs against "ReadOnly"/static params (`bver`, `bndl`, `ver`, `vcbg`, `vcbe`, etc.) and "Experimental" params (`endp`, `preg`, `pstg`, etc.) — all 15 forward to `ak_set`. The pattern is uniform across the dispatch path; the probe samples rather than enumerates every name                                                                                                                       | `ak_set(0/bver, 0) = 9999`, `ak_set(37/ver, 0) = 4242`, `ak_set(55/endp, 0) = 2`, etc.                                                                                                                                                                                                                                           |
 | 6   | EFFECT_CMD_ENABLE/DISABLE perform a graceful crossfade — ENABLE over 7560 samples (~171 ms @ 44.1 kHz), DISABLE over 5512 samples (~125 ms); second call is idempotent; engine returns -ENODATA from process() after the disable crossfade completes; parameter state (cache + AK registry) survives a full DISABLE→ENABLE cycle and the post-cycle value takes immediate effect at the DSP (pre/post measurements bracket the cycle) | `EFFECT_CMD_ENABLE Starting graceful enable over 7560 samples`, `EFFECT_CMD_DISABLE Starting graceful disable over 5512 samples`, `Already enabled, ignoring.`, `Already disabled, ignoring.`, `Effect_process() Graceful disable finished. Returning -ENODATA`; stdout `pre-cycle dvla=7 peak=93` vs `post-cycle dvla=3 peak=88` |
 | 6b  | `process()` **accumulates** into the output and **clobbers its input**. Pre-filling the output yields `prior + input`, so the host must zero it every block (a disabled `-ENODATA` block then passes the input through). The input is overwritten too — enabled leaves that block's output, disabled leaves ~noise — so pass a scratch copy if you need the original PCM | stdout `Test A: … accumulate-match=512/512`; `input after enabled block N` == that block's output; `input after process()` `peak≈394` (disabled) |
 | 7   | **The DSP reads the clamped registry, not the raw cache.** A direct cache poke (registry frozen, verified via `ak_get`) leaves the output unchanged (`0/512`) while the matching `SET` changes `512/512`. Out-of-range sweep pairs collapse because `ak_set` clamps both to the same value: `vmb=240 ≡ vmb=480` (→192), `dvla=10 ≡ dvla=200` (→10). (The leveler/maximizer are stateful, so the cache-poke runs first on a clean path with reproducibility gates — sweep peaks are trends, not exact.) | stdout `POKE cache=160 … 0/512 … DSP READS CLAMPED REGISTRY`; sweep `dvla=10/200 peak=51`, `vmb=240/480 peak≈32764`                                                                                                                                                                                                               |
 | 8   | Cache writes addressing a flat index past `cache_total` are rejected with -22; but the engine only checks `begin` — a `count=20` SET starting at `cache_total - 5` is accepted with reply 0, so writes straddling the cache edge corrupt adjacent memory rather than failing safe (this destructive SET, #8b, runs **last**); bogus 4-CCs in DEFINE_PARAMS are accepted silently                                                       | `setting_index 767 is invalid (number of settings defined is 667)`; stdout "SET flat=662 count=20 ... -> reply=0"; absence of error for `DEFINE_PARAMS [xxxx, dvla, yyyy]`                                                                                                                                                       |
 | 9   | **The engine's own `ak_get` reads the live AK registry** (reachable from fixed context offsets). `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and the 20 excitations (`vcbe`); `vnbg`/`vnbe` have no cmd-4 path but are readable and both **mirror** `vcbg`/`vcbe`; `ak_get_min/max` expose the engine's true ranges, audited for a sample where `vmb` (`[0..192]`) and `vol` (`[-2080..480]`) differ from the Java table; a runtime value-diff shows only the visualizer slots change during `process()`     | stdout `(a) ak_get vs cmd 4: gains 20/20, excitations 20/20 match`, `(b) vnbg == vcbg: 20/20, vnbe == vcbe: 20/20`, `(c) vmb engine[0..192] … <- TABLE WRONG`, `(d) registry slots that CHANGED across runtime: vnbe vcbe`                                                                                                                                                   |
-| 10  | **The engine self-describes its whole param tree.** `ak_enum` walks the AK object tree (root = ref 1) and `ak_get_name/_length/_min/_max/_frac_bits` read each leaf's true metadata — **248 defs**, far more than the host's 64. Surfaces the internal DSP node graph (`dvle`, `gq`, `visq`, …), root params Java never exposed (`scpe`, `test`), and per-param `frac_bits` (the fixed-point scale, e.g. `gebg`/`vmb` = 4 ⇒ 1/16). Also exposes more table gaps — `gebg` is **len=40** in the engine, not 20. This is the ground truth a `parameters.toml` generator would emit | stdout `=== 10. AK TREE …`, `dvla len=1 [0..10] frac=0`, `vmb len=1 [0..192] frac=4`, `scpe len=1 [0..2]`, `gebg len=40 [-576..576] frac=4`, `(248 defs; frac=N …)` |
+| 10  | **Java's param set disagrees with the engine's root.** Set-diffs the engine's real root leaves against the host's DEFINE_PARAMS list (`G[]`, verbatim `DsAkSettings`), so it discovers the mismatch rather than asserting it: two **phantoms** (`mxou`/`lcsz`) aren't root leaves — they're node params (nested under DSP nodes in `dump-tree`), so their flat registration gets **ref 0** (dead, the write is dropped) — and two real root leaves (`scpe`/`test`) are omitted. Correct host set = Java's 64 − {`mxou`,`lcsz`} + {`scpe`,`test`}. Full authoritative tree + metadata: `make dump-tree`. | stdout `mxou -> ref 0  (not a root leaf; see dump tree)`, `lcsz -> ref 0 …`, `scpe -> ref 71  [0 .. 2] frac=0`, `test -> ref 139  [0 .. 1] frac=0` |
 
 The DEFINE_SETTINGS pre-population effect (engine fires
 `ak_get(0/bver, 0..4)` etc. to seed the cache from its own AK
@@ -44,28 +44,36 @@ schema-defining SETs ahead of cache allocation. The probe's
 hard-coded `G[]` lengths (e.g. `aobg=42`) match the standard
 **20-band stereo** config (`genb=ienb=aonb=20`, `aocc=2`) — which is
 *host-established, not an engine default*. The engine actually powers
-on **10-band / `aocc=1`** (see [Dumping engine defaults](#dumping-engine-defaults));
+on **10-band / `aocc=1`** (see [Dumping the engine's AK tree](#dumping-the-engines-ak-tree));
 the Java `DsAkSettings.defineSettings` flow — and this probe — write
 the 20-band constants via cmd 3 afterwards. See
 [../../docs/ddp/03-binary-protocol.md](../../docs/ddp/03-binary-protocol.md#the-mandatory-init-handshake)
 for the protocol-level discussion.
 
-## Dumping engine defaults
+## Dumping the engine's AK tree
 
-`DUMP_DEFAULTS=1` (or `make dump`) prints every param's intrinsic
-power-on default and exits. cmd 3 GET is unimplemented, so the probe
-can't *ask* over the protocol — instead it calls the engine's **own**
-getter, `ak_get`, on every param (the probe `dlopen`s `libdseffect.so`,
-so its exported AK API is ours). The AK registry already holds the
-defaults right after the init handshake, before any SET, so no seed
-trick is needed. `ak_get`/`ak_get_bulk` reach the registry from fixed
-context offsets — see experiment 9 and the `ak_attach` comment in
-`ddp_probe.c`. (`mxou`/`lcsz` print `(not in AK)` because their entry in the
-probe-read tagged-ref array at `H+0xb4` is `0` — *not* because the engine
-lacks them: the engine resolves both at runtime, e.g. `ak_get(56/mxou, 0)` at
-DEFINE_SETTINGS and `ak_set(56/mxou, 0) = 2` on a write. The probe just can't
-build a ref for them from that array, so it skips them rather than passing a
-0 ref to `ak_get`.)
+The engine self-describes its whole parameter tree; the probe dumps it two
+ways (both exit before the experiments, with the engine log silenced):
+
+```bash
+make dump-tree       # full AK object tree: 4-CC, name, len, range, frac, description
+make dump-defaults   # each root param's power-on default (4-CC = value)
+```
+
+`dump tree` walks the engine's own object graph (`ak_enum` from root = ref 1)
+and reads each def's authoritative metadata plus the human-readable **name and
+description** (`ak_get_string`) — **248 defs**, far past the host's 64. It
+surfaces the internal DSP node graph (`dvle`, `dele`, `gq`, `visq`, …) and
+per-param `frac_bits` (the fixed-point scale, e.g. `gebg`/`vmb` = 4 ⇒ 1/16),
+and is the ground truth a `parameters.toml` generator should emit. cmd 3 GET is
+unimplemented, so this uses the engine's **own** accessors (the probe
+`dlopen`s `libdseffect.so`) — see
+[../../docs/ddp/07-ak-api.md](../../docs/ddp/07-ak-api.md).
+
+`dump defaults` lists the **root leaves only** — the host-addressable set —
+read straight after open, before any SET, so the registry still holds the
+engine's intrinsic defaults. That set is the *correct* one (experiment 10):
+`scpe`/`test` present, `mxou`/`lcsz` absent (node params Java mis-listed).
 
 Headline finding: the engine boots a uniform **10-band / single-channel**
 config — `genb=ienb=aonb=arnb=10`, `aocc=1`, freq tables = the 10 ISO
@@ -73,7 +81,7 @@ bands `[32,64,125,…,16000]` zero-padded. The 20-band layout the rest of
 the stack assumes is host-applied, not intrinsic. Notable settable
 defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
 `ngon=2`, `vmon=2`, `vmb=144`, `plmd=4`, `dvli=dvlo=-320`, `arbl=-192×40`,
-`artp=16`.
+`artp=16`, `scpe=2`.
 
 ## Prerequisites
 
@@ -124,7 +132,9 @@ make run 2>/dev/null | grep -E "vnbg == vcbg: 20/20, vnbe == vcbe: 20/20"       
 make run 2>/dev/null | grep -E "vmb .*0\.\.192.*TABLE WRONG"         # engine range != Java table
 make run 2>/dev/null | grep -E "accumulate-match=512/512"            # process() ACCUMULATE mode
 make run 2>/dev/null | grep -B1 "begin+count=682" | grep "flat=662"  # begin-only bounds (#8b, last)
-make run 2>/dev/null | grep -E "gebg +len=40|248 defs"               # exp 10: engine self-describe (true metadata; gebg len 40≠20)
+make run 2>/dev/null | grep -E "mxou -> ref 0|scpe -> ref"           # exp 10: Java param-set discrepancy
+make dump-tree     | grep -E "^# 248 defs"                           # engine self-describes 248 defs (full metadata)
+make dump-defaults | grep -E "^scpe |^test "                         # correct host set: scpe/test present, mxou/lcsz gone
 ```
 
 If any of these come back empty, the engine binary has changed
@@ -136,7 +146,7 @@ behavior — the docs need an updated review.
 tools/ddp_probe/
 ├── README.md            # this file
 ├── Makefile             # cross-compile + qemu-arm-static invocation
-├── ddp_probe.c          # the consolidated probe (10 experiments)
+├── ddp_probe.c          # the consolidated probe (10 experiments + dump)
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 

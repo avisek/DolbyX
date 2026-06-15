@@ -648,6 +648,57 @@ goal. It also means adding a new parameter is a one-place edit
 
 ---
 
+## Issue: host registers two dead params, omits two real ones
+
+### What the original does
+
+`DsAkSettings.akParams_` is the 64-name `DEFINE_PARAMS` contract, and two
+of its names are wrong. `mxou` and `lcsz` are **node** params, not engine
+root leaves; meanwhile two real root leaves — `scpe` (Surround Compressor
+enable, `[0..2]`) and `test` (Peak Limiter test mode, `[0..1]`) — are
+missing. The original ships this list; the bug is invisible because
+`mxou`/`lcsz` were never functional anyway.
+
+### Engine-level evidence
+
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) experiment 10
+resolves every host name against the live AK tree:
+
+```
+mxou -> ref 0  (dead)      lcsz -> ref 0  (dead)
+scpe -> ref 71 [0..2]      test -> ref 139 [0..1]
+```
+
+Ref 0 is a dead, unresolved ref — `ak_set` forwards but the resolve fails
+and the write is dropped, so as host params `mxou`/`lcsz` are no-ops.
+`scpe`/`test` resolve to real leaves and would be settable if registered. ∴ correct host set =
+Java's 64 − {`mxou`, `lcsz`} + {`scpe`, `test`}. Full detail in
+[02 → Java's list vs the engine's root leaves](02-ak-parameters.md#javas-list-vs-the-engines-root-leaves).
+
+### What DolbyX does today
+
+`arm/ddp_processor.c:g_param_names[]` is a 24-name subset that includes
+none of the four, so v1 isn't bitten yet — but it **inherits Java's buggy
+contract** the moment the dictionary grows toward parity by transcribing
+the Java list.
+
+### Impact
+
+Low today, latent later. Anyone extending the dictionary toward the full
+set from Java registers two dead names and silently omits two real
+features (notably the Surround Compressor).
+
+### Recommended fix
+
+When building the metadata-driven table (issue above), **seed it from the
+engine tree, not from Java** — `ddp_probe dump tree` enumerates the real
+root leaves with authoritative ranges, frac bits, and descriptions. Drop
+`mxou`/`lcsz`; add `scpe`/`test` (DolbyX v2 classifies both as
+Experimental — engine-surfaced, hidden by the original UI). The v2 plan
+bakes this in: [REARCHITECTURE_PLAN → Slice 0](../REARCHITECTURE_PLAN.md).
+
+---
+
 ## Issue: parameters indexed by position, breaking backwards compat
 
 ### What the original does
