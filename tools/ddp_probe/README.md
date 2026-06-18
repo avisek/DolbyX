@@ -52,28 +52,54 @@ for the protocol-level discussion.
 
 ## Dumping the engine's AK tree
 
-The engine self-describes its whole parameter tree; the probe dumps it two
-ways (both exit before the experiments, with the engine log silenced):
+The engine self-describes its whole parameter tree; the probe dumps it four
+ways (all exit before the experiments, with the engine log silenced):
 
 ```bash
-make dump-tree       # full AK object tree: 4-CC, name, len, range, frac, description
+make dump-tree       # branch-drawn AK tree: per-leaf type/flags/size/off/range/frac + desc
 make dump-defaults   # each root param's power-on default (4-CC = value)
+make dump-types      # root leaves as a flat table + write-protection probe
+make dump-docs       # every def's name · description · long help (rule-divided)
 ```
 
-`dump tree` walks the engine's own object graph (`ak_enum` from root = ref 1)
-and reads each def's authoritative metadata plus the human-readable **name and
-description** (`ak_get_string`) — **248 defs**, far past the host's 64. It
-surfaces the internal DSP node graph (`dvle`, `dele`, `gq`, `visq`, …) and
-per-param `frac_bits` (the fixed-point scale, e.g. `gebg`/`vmb` = 4 ⇒ 1/16),
-and is the ground truth a `parameters.toml` generator should emit. cmd 3 GET is
-unimplemented, so this uses the engine's **own** accessors (the probe
-`dlopen`s `libdseffect.so`) — see
+`dump tree` walks the engine's own object graph (`ak_enum` from root = ref 1),
+**branch-drawn** for readability. Each leaf carries the full per-param metadata
+— `type`, the `flags` word (incl. the write-protect bit `0x2`), byte `size`,
+struct `offset`, `len`, range, and `frac_bits` (the fixed-point scale, e.g.
+`gebg`/`vmb` = 4 ⇒ 1/16) — plus the human-readable **name and description**
+(`ak_get_string`). **248 defs**, far past the host's 64: it surfaces the
+internal DSP node graph (`dvle`, `dele`, `gq`, `visq`, …) and is the ground
+truth a `parameters.toml` generator should emit. cmd 3 GET is unimplemented, so
+this uses the engine's **own** accessors (the probe `dlopen`s
+`libdseffect.so`) — see
 [../../docs/ddp/07-ak-api.md](../../docs/ddp/07-ak-api.md).
 
 `dump defaults` lists the **root leaves only** — the host-addressable set —
 read straight after open, before any SET, so the registry still holds the
 engine's intrinsic defaults. That set is the *correct* one (experiment 10):
 `scpe`/`test` present, `mxou`/`lcsz` absent (node params Java mis-listed).
+
+`dump types` is the same per-leaf metadata as a quick **flat table of the root
+leaves** — the def `type` (`3` = value, `2` = opaque/by-ref), the instance
+`flags` word, byte `size`, and struct `offset` — then a **write-protection
+probe**: it hits a sample of params through all three write paths (public
+`ak_set`, the forcing `ak_set_internal`, and a cmd-3 SET), reads each back, and
+reports each path's return. Headline finding: the engine carries its **own**
+read-only marker, the `flags` write-protect bit `0x2` — the 10 leaves
+`bver ver bndl lcvd vcbg vcbe vnnb vnbf vnbg vnbe`. Public `ak_set` and the
+cmd-3 protocol path both **reject** a write to a read-only leaf (value
+unchanged; `ak_set` returns `0`); only `ak_set_internal` forces it. So
+`vcbg`/`vcbe` writes are *rejected*, not
+"written then clobbered" — the DSP fills them and cmd 4 reads them. See
+[../../docs/ddp/07-ak-api.md](../../docs/ddp/07-ak-api.md#per-param-type--flags).
+
+`dump docs` is the engine's **own documentation** — every def's display name,
+one-line description, and the **long help string** (`ak_get_string` idx 2): the
+last of the three engine strings, and the only one no other dump shows. All 248
+defs in tree order, rule-divided, with an `a/b/c` path crumb to disambiguate
+repeated 4-CCs (26 `ver`s, 21 `on`s, 15 `hdrm`s). **75 defs carry help** — e.g.
+`plmd` enumerates its `DAP_PLMD_*` modes. Strings print verbatim, so the
+engine's own line breaks structure the longer entries.
 
 Headline finding: the engine boots a uniform **10-band / single-channel**
 config — `genb=ienb=aonb=arnb=10`, `aocc=1`, freq tables = the 10 ISO
@@ -135,6 +161,7 @@ make run 2>/dev/null | grep -B1 "begin+count=682" | grep "flat=662"  # begin-onl
 make run 2>/dev/null | grep -E "mxou -> ref 0|scpe -> ref"           # exp 10: Java param-set discrepancy
 make dump-tree     | grep -E "^# 248 defs"                           # engine self-describes 248 defs (full metadata)
 make dump-defaults | grep -E "^scpe |^test "                         # correct host set: scpe/test present, mxou/lcsz gone
+make dump-docs     | grep -E "^# 248 defs, 75 with help"             # 75 of 248 defs carry the long help string
 ```
 
 If any of these come back empty, the engine binary has changed

@@ -45,8 +45,10 @@ version of that array with explanatory annotations.
   `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **This is a
   Java-side UI whitelist, not an engine-level constraint** — see the
   ["Engine vs Java settability" section](#engine-vs-java-settability)
-  near the end of this document for the empirical detail. The engine's
-  `_akSet` accepts writes to any declared parameter index.
+  near the end of this document for the empirical detail. The engine
+  accepts writes to any declared index **except its 10 write-protected
+  leaves** (the `ak_get_flags` write-protect bit `0x2` — version /
+  license-vendor / visualizer outputs).
 - **basic**: whether the parameter is one of the 5 booleans digested
   into `DsClientSettings`. Setting a basic param fires
   `onProfileSettingsChanged`; setting a non-basic settable param fires
@@ -270,8 +272,9 @@ So the **correct host set is Java's 64 − {`mxou`, `lcsz`} + {`scpe`,
 `isParamSettable` whitelist, so DolbyX v2 surfaces them as **Experimental**
 (see [Recommendation for DolbyX v2](#recommendation-for-dolbyx-v2)); the
 `mxou`/`lcsz` phantoms drop out entirely. The engine ships a name +
-one-line description per param, so a generated table sources these straight
-from `ddp_probe dump tree` — no hand-transcription.
+one-line description per param — and a long help string for 75 of them
+(`ddp_probe dump docs`) — so a generated table sources these straight
+from `ddp_probe dump tree`, no hand-transcription.
 
 ## Per-parameter scaling cheat-sheet
 
@@ -379,8 +382,12 @@ params (see "Conventions / bounds" above):
 The "settable" column above mirrors Java's `DsAkSettings.isParamSettable`
 whitelist (42 of the 64 names). That whitelist exists in the original
 DDP service for two reasons: (a) gating UI controls, and (b) deciding
-which params get a flat cache slot in DEFINE_SETTINGS. **It is not an
-engine-level constraint.**
+which params get a flat cache slot in DEFINE_SETTINGS. **It is not _the_
+engine-level constraint** — the engine enforces its own, much smaller
+read-only set via the `ak_get_flags` write-protect bit `0x2` (10 params; see
+[07 — Per-param type & flags](07-ak-api.md#per-param-type--flags)). Java's
+22 non-settable names are a superset that also hides many engine-writable
+params (`preg`, `endp`, `vol`, …).
 
 Empirically (see [tools/ddp_probe/](../../tools/ddp_probe/README.md)
 section 5b), if the host puts a "non-settable" param in
@@ -396,10 +403,19 @@ emits the same three log lines it emits for any settable write:
 This includes writes to `bver` (`ak_set(0/bver, 0) = 9999`), `bndl`,
 `ver` (`ak_set(37/ver, 0) = 4242`), `vcbg`, `vcbe`, `endp`
 (`ak_set(55/endp, 0) = 2`), `preg`, `pstg`, `mxou`, `ocf`, `vol`,
-`ven`, `vcnb`, `vnnb`, `lcsz`. The cache update + AK forward both
-fire — except for `mxou`/`lcsz`, where the forward fires but resolves
-to **ref 0**, a dead write that never reaches a leaf (see
-[Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves)).
+`ven`, `vcnb`, `vnnb`, `lcsz`. The log line records the *attempted*
+value, and the cache update always fires — but the **AK forward only
+lands for writable leaves**, and two classes don't: `mxou`/`lcsz`
+resolve to **ref 0** (dead — node params, see
+[Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves)),
+and the **10 write-protected leaves** (`bver`, `ver`, `bndl`, `lcvd`,
+`vcbg`, `vcbe`, `vnnb`, `vnbf`/`vnbg`/`vnbe`) carry the engine's read-only
+flag (`0x2`), so the public `ak_set` the cmd-3 path calls stores nothing and
+returns `0` — the registry value is unchanged (the raw cache still
+keeps it). The engine's
+own `ak_get_type`/`ak_get_flags` are the authoritative read-only signal —
+see [07 — Per-param type & flags](07-ak-api.md#per-param-type--flags) and
+`ddp_probe dump types`.
 
 What differs across "non-settable" params is **whether the DSP uses
 the value afterwards** and, separately, **whether there is a host read
@@ -411,7 +427,7 @@ below for the exclusion list):
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly** — `vcbg`, `vcbe`                                                          | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
+| **ReadOnly** — `vcbg`, `vcbe`                                                          | Engine **write-protects** both (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing and returns `0`; cmd 3 too), not clobbered. The DSP fills them each block; read via cmd 4. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
 | **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
 The remaining 10 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
@@ -471,11 +487,12 @@ surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
 - **Settable** (42 params) — every param with `settable = yes` above.
   Daemon validates against metadata; engine accepts the forwarded
   write into both the settings cache and AK registry.
-- **ReadOnly** (2 params) — `vcbg`, `vcbe`. DSP overwrites both slots
-  every audio block, so writes are clobbered. Readable from outside
-  via cmd 4 (`DS_PARAM_VISUALIZER_DATA`), which returns
-  `vcbg ‖ vcbe` as 40 int16s. Rendered as live read-only displays
-  driven by the visualizer pump.
+- **ReadOnly** (2 params) — `vcbg`, `vcbe`. The engine **write-protects**
+  both (flag bit `0x2`), so host writes are rejected, not clobbered; the DSP
+  fills them each block. Readable from outside via cmd 4
+  (`DS_PARAM_VISUALIZER_DATA`), which returns `vcbg ‖ vcbe` as 40
+  int16s. Rendered as live read-only displays driven by the visualizer
+  pump.
 - **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
   `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
   a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —

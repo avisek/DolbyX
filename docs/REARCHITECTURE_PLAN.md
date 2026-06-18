@@ -1474,7 +1474,9 @@ does not apply. Treat this slice as one-shot setup.
   with all 54 surfaced entries, **seeded from the engine tree**
   (`make -C tools/ddp_probe dump-tree`) — authoritative names, ranges,
   frac bits, and one-line descriptions straight from the binary — *not*
-  transcribed from Java / [02](ddp/02-ak-parameters.md). Seeding from the
+  transcribed from Java / [02](ddp/02-ak-parameters.md). (The engine also
+  carries a long per-param help string, `make -C tools/ddp_probe dump-docs`,
+  available for UI tooltips.) Seeding from the
   engine corrects Java's param-set bug for free: it drops the `mxou`/`lcsz`
   phantoms (node params that resolve to ref 0) and picks up the real leaves
   Java omits, `scpe`/`test` (both Experimental). Three-bucket Settable /

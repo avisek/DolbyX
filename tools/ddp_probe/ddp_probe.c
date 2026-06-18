@@ -61,8 +61,12 @@
  *
  * Dump mode (no experiments) — the engine's own AK tree is the authoritative
  * param table, so these walk it instead of trusting the host list:
- *   ddp_probe <lib> dump tree      full object tree + metadata + names + descriptions
+ *   ddp_probe <lib> dump tree      full object tree, branch-drawn: every leaf's
+ *                                  type/flags/size/off/len/range/frac + descriptions
  *   ddp_probe <lib> dump defaults  each root param's power-on default (4-CC = value)
+ *   ddp_probe <lib> dump types     root leaves as a flat table + write-protect probe
+ *   ddp_probe <lib> dump docs      every def's name · description · long help (idx 2),
+ *                                  rule-divided; the only dump that shows the help text
  *
  * Build & run: see tools/ddp_probe/README.md.
  */
@@ -189,6 +193,18 @@ static ak_enum_fn     ak_enum;
 static ak_find_fn     ak_find;
 static ak_get_string_fn ak_get_string;
 
+/* Per-param metadata the engine ALSO exposes (see 07-ak-api). ak_get_type → the
+ * def's type tag; ak_get_flags → the instance flag word (bit 0x2 = write-protected);
+ * ak_get_size/offset write the byte size / struct offset through an out-param.
+ * ak_set is the PUBLIC writer — clamps, and HONORS the write-protect bit 0x2
+ * (returns 0 on a read-only leaf, storing nothing); ak_set_internal is the engine's
+ * forcing writer that bypasses it (how the DSP writes computed slots). */
+typedef int (*ak_getout_fn)(void *, uint32_t, int *);
+typedef int (*ak_set_fn)(void *, uint32_t, int, int);
+static ak_minmax_fn ak_get_type, ak_get_flags;
+static ak_getout_fn ak_get_size, ak_get_offset;
+static ak_set_fn    ak_set, ak_set_internal;
+
 static void     *AK;       /* engine AK handle */
 static uint32_t *AK_REF;   /* per-param tagged refs (DEFINE_PARAMS order) */
 static int       g_quiet;  /* dump mode: silence the init-handshake chatter */
@@ -239,22 +255,43 @@ static const char *ak_str(uint32_t ref, int idx) {
 
 /* `dump tree`: walk the engine's AK object tree from `parent` (root = ref 1),
  * printing each def's authoritative metadata + name + description straight from
- * the engine — no host table. A ref with children is a DSP node and recurses;
- * the depth/count caps guard against a mis-resolved ref looping. */
-static void dump_tree(uint32_t parent, int depth, int *n) {
+ * the engine — no host table. Leaves carry the FULL per-param detail (the same
+ * fields as `dump types`: type/flags/size/offset on top of len/range/frac).
+ * `prefix` is the accumulated branch art (│ / blanks) for the ancestor columns;
+ * `last` (peeked from the next sibling) picks └─ vs ├─. A ref with children is a
+ * DSP node and recurses; the depth/count caps guard a mis-resolved ref looping. */
+static void dump_tree(uint32_t parent, const char *prefix, int depth, int *n) {
     for (int i = 0; ; i++) {
         uint32_t r = ak_enum(AK, parent, i);
         if (!r || depth > 8 || ++*n > 400) return;
+        /* spacer before each item (keeps │ unbroken) — incl. parent→first-child at
+         * depth>0, but not above the very first root item. */
+        if (i > 0 || depth > 0) printf("%s│\n", prefix);
+        int last = (ak_enum(AK, parent, i + 1) == 0);
+        const char *branch = last ? "└─ " : "├─ ";
+        const char *cont   = last ? "   " : "│  ";   /* ancestor column past us */
         char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
-        int ind = 2 + depth * 2, node = ak_enum(AK, r, 0) != 0;
-        printf("%*s%-4s  %s%s\n", ind, "", fc, ak_str(r, 0), node ? "  [node]" : "");
-        if (!node)
-            printf("%*slen=%-3d [%d .. %d]  frac=%d\n", ind + 6, "",
-                   ak_get_length(AK, r), ak_get_min(AK, r), ak_get_max(AK, r),
-                   ak_get_frac_bits(AK, r));
+        int flags = ak_get_flags(AK, r), node = ak_enum(AK, r, 0) != 0;
+        printf("%s%s%-4s  %s%s\n", prefix, branch, fc, ak_str(r, 0),
+               node ? "  [node]" : "");
+        if (!node) {
+            int size = -1, off = -1;
+            if (ak_get_size)   ak_get_size(AK, r, &size);
+            if (ak_get_offset) ak_get_offset(AK, r, &off);
+            printf("%s%s      type=%d len=%-3d size=%-4d off=%-6d "
+                   "[%d .. %d] frac=%d  flags=0x%04x%s\n",
+                   prefix, cont, ak_get_type(AK, r), ak_get_length(AK, r),
+                   size, off, ak_get_min(AK, r), ak_get_max(AK, r),
+                   ak_get_frac_bits(AK, r), flags & 0xffff,
+                   (flags & 2) ? "  read-only" : "");
+        }
         const char *desc = ak_str(r, 1);
-        if (*desc) printf("%*s%s\n", ind + 6, "", desc);
-        if (node) dump_tree(r, depth + 1, n);
+        if (*desc) printf("%s%s      %s\n", prefix, cont, desc);
+        if (node) {
+            char sub[256];
+            snprintf(sub, sizeof sub, "%s%s", prefix, cont);
+            dump_tree(r, sub, depth + 1, n);
+        }
     }
 }
 
@@ -273,6 +310,124 @@ static void dump_defaults(void) {
         printf("%-4s =", fc);
         for (int e = 0; e < len; e++) printf(" %d", ak_get(AK, r, e));
         printf("\n");
+    }
+}
+
+static int set_param(const char *name, int offset, const int16_t *v, int c); /* defined below */
+
+/* `dump types`: per ROOT LEAF, the engine's full per-param metadata beyond
+ * len/range/frac — the def's `type` tag, the instance `flags` word, byte `size`,
+ * and struct `offset`. type 3 = a normal addressable value (inline storage, real
+ * range); type 2 = an opaque/by-reference slot (size 0, full-int16 range) — the
+ * build/version/license blobs and the visualizer-output arrays. The flags answer
+ * "is this param read-only at the engine level": bit 0x2 = write-protected (public
+ * ak_set/ak_set_bulk return 0 and store nothing; only ak_set_internal can write). */
+static void dump_types(void) {
+    printf("# root leaves — engine per-param metadata (type/flags/size/len/offset)\n");
+    printf("# type: 3=value(inline) 2=opaque/by-ref ; flags: 0x2=write-protect(read-only) "
+           "0x1000=inline-storage 0x8000=on most simple knobs (0x1/0x4/0x20 on every def)\n");
+    printf("%-4s %4s %6s %-6s %4s %4s %4s %7s %7s %4s\n",
+           "name", "type", "flags", "rdonly", "size", "len", "off", "min", "max", "frac");
+    for (int i = 0; i < 400; i++) {
+        uint32_t r = ak_enum(AK, 1, i);
+        if (!r) break;
+        if (ak_enum(AK, r, 0)) continue;            /* leaves only, like dump_defaults */
+        char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
+        int flags = ak_get_flags(AK, r), size = -1, off = -1;
+        if (ak_get_size)   ak_get_size(AK, r, &size);
+        if (ak_get_offset) ak_get_offset(AK, r, &off);
+        printf("%-4s %4d 0x%04x %-6s %4d %4d %4d %7d %7d %4d\n",
+               fc, ak_get_type(AK, r), flags & 0xffff,
+               (flags & 2) ? "YES" : "-", size, ak_get_length(AK, r), off,
+               ak_get_min(AK, r), ak_get_max(AK, r), ak_get_frac_bits(AK, r));
+    }
+}
+
+static void doc_rule(void) { for (int k = 0; k < 78; k++) fputs("─", stdout); putchar('\n'); }
+
+/* `dump docs`: every def's human-readable strings — display name (idx 0), one-line
+ * description (idx 1), and the long help (idx 2) that no other dump surfaces. Walks
+ * the WHOLE tree (nodes + leaves, every def) in tree order; `path` is the parent
+ * 4-CC chain (a/b/c) so repeated names (26 `ver`s, 21 `on`s …) stay distinguishable
+ * without tree art. Strings print verbatim — the engine's own newlines structure the
+ * help, the terminal soft-wraps the rest. Pure strings: type/range/flags are in
+ * `dump tree`/`dump types`. Each def: a rule, `path · name` (` · name` dropped when it
+ * equals the 4-CC), the `desc:` line, then a blank line + the help — desc/help only
+ * when present, so a doc-less internal leaf is just its path. */
+static void dump_docs(uint32_t parent, const char *path, int depth, int *n, int *nh) {
+    for (int i = 0; ; i++) {
+        uint32_t r = ak_enum(AK, parent, i);
+        if (!r || depth > 8 || ++*n > 400) return;
+        char fc[5]; ak_fourcc(ak_get_name(AK, r), fc);
+        char here[256];
+        snprintf(here, sizeof here, "%s%s%s", path, *path ? "/" : "", fc);
+        const char *name = ak_str(r, 0), *desc = ak_str(r, 1), *help = ak_str(r, 2);
+        doc_rule();
+        if (*name && strcmp(name, fc)) printf("%s · %s\n", here, name);
+        else                           printf("%s\n", here);
+        if (*desc) printf("desc: %s\n", desc);
+        if (*help) { printf("\n%s\n", help); (*nh)++; }
+        if (ak_enum(AK, r, 0)) dump_docs(r, here, depth + 1, n, nh);
+    }
+}
+
+/* Resolve a 4-CC straight from the engine tree (root = ref 1), so params the host
+ * G[] omits (scpe/test) still resolve. Falls back to the host ref for names in G[]. */
+static uint32_t leaf_ref(const char *name) {
+    uint32_t r = ak_ref(name);
+    if (!r && ak_find) r = ak_find(AK, 1, pack_fourcc(name));
+    return r;
+}
+
+/* Write-protection probe. Runs in dump mode: NO process() has run, so the DSP can't
+ * clobber — this isolates the engine's flag-level protection from the runtime
+ * overwrite of vcbg/vcbe. Each param is hit by all three write paths with a distinct
+ * in-range target (the registry is reset to the default via the forcing internal
+ * setter between paths), and the readback says whether the write actually landed:
+ *   - public ak_set      — clamps AND honors write-protect (returns the stored value,
+ *                          or 0 on reject); a read-only leaf is left UNCHANGED.
+ *   - ak_set_internal    — forces past it (how the DSP writes computed slots);
+ *                          still bounded by storage length (type-2 leaves are len-0).
+ *   - cmd 3 SET          — the real host/protocol path; resolves whether PRODUCTION
+ *                          can overwrite a protected param.
+ * Each cell shows the readback verdict + that path's raw return — the stored (clamped)
+ * value on success, 0 (never -4) on a read-only reject; the cmd 3 reply is 0 either way. */
+static void probe_write_protect(void) {
+    /* dvla = plain settable control; vnnb = type-3 read-only WITH storage (the clean
+     * case); vcbg/vcbe = type-2 read-only, len-0 visualizer outputs; vcnb = settable
+     * visualizer config; scpe = real root leaf the host omits. */
+    const char *names[] = { "dvla", "vnnb", "vcbg", "vcbe", "vcnb", "scpe", NULL };
+    printf("\n# write-protection — three write paths: post-write readback + raw return.\n");
+    printf("# public ak_set/ak_set_internal return the stored (clamped) value on success,\n"
+           "# 0 (unchanged) on a read-only reject — never -4; the cmd 3 reply is 0 either\n"
+           "# way, so only the readback reveals a rejection.\n");
+    printf("%-4s %4s %6s  %-18s %-18s %-18s\n",
+           "name", "type", "flags", "ak_set", "ak_set_internal", "cmd3 SET");
+    for (int i = 0; names[i]; i++) {
+        const char *nm = names[i];
+        uint32_t r = leaf_ref(nm);
+        if (!r) { printf("%-4s  (ref 0 — unresolved)\n", nm); continue; }
+        int flags = ak_get_flags(AK, r), mn = ak_get_min(AK, r), mx = ak_get_max(AK, r);
+        int def = ak_get(AK, r, 0);
+        int t = (mx > def) ? mx : mn;               /* a legal value != default */
+        if (t == def) t = (mn != def) ? mn : mx;
+        #define RESET() (ak_set_internal ? ak_set_internal(AK, r, 0, def) : 0)
+        int rp = ak_set(AK, r, 0, t);          int a_pub = ak_get(AK, r, 0); RESET();
+        int ri = ak_set_internal(AK, r, 0, t); int a_int = ak_get(AK, r, 0); RESET();
+        /* cmd 3 only reaches params with a cache slot (every G[] entry has one). */
+        int in_G = find_param(nm) >= 0, rc = 0;
+        if (in_G) rc = set_param(nm, 0, &(int16_t){ (int16_t)t }, 1);
+        int a_cmd = ak_get(AK, r, 0);          RESET();
+        #undef RESET
+        /* verdict (readback) + the raw return value that proves it */
+        char cp[24], ci[24], cc[24];
+        snprintf(cp, sizeof cp, "%-6s ret=%d", a_pub == t ? "wrote" : "reject", rp);
+        snprintf(ci, sizeof ci, "%-6s ret=%d", a_int == t ? "force" : "=def",   ri);
+        if (in_G) snprintf(cc, sizeof cc, "%-6s reply=%d", a_cmd == t ? "wrote" : "reject", rc);
+        else      snprintf(cc, sizeof cc, "n/a (not in G[])");
+        printf("%-4s %4d 0x%04x  %-18s %-18s %-18s %s\n",
+               nm, ak_get_type(AK, r), flags & 0xffff, cp, ci, cc,
+               (flags & 2) ? "[read-only]" : "");
     }
 }
 
@@ -437,7 +592,7 @@ int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <libdseffect.so> [dump tree|dump defaults]\n",
+        fprintf(stderr, "Usage: %s <libdseffect.so> [dump tree|defaults|types|docs]\n",
                 argv[0]);
         return 1;
     }
@@ -467,6 +622,12 @@ int main(int argc, char *argv[]) {
     ak_get_frac_bits = (ak_minmax_fn) dlsym(lib, "ak_get_frac_bits");
     ak_find          = (ak_find_fn) dlsym(lib, "ak_find");          /* exp 10 */
     ak_get_string    = (ak_get_string_fn) dlsym(lib, "ak_get_string"); /* dump tree */
+    ak_get_type   = (ak_minmax_fn) dlsym(lib, "ak_get_type");      /* dump types */
+    ak_get_flags  = (ak_minmax_fn) dlsym(lib, "ak_get_flags");
+    ak_get_size   = (ak_getout_fn) dlsym(lib, "ak_get_size");
+    ak_get_offset = (ak_getout_fn) dlsym(lib, "ak_get_offset");
+    ak_set          = (ak_set_fn) dlsym(lib, "ak_set");
+    ak_set_internal = (ak_set_fn) dlsym(lib, "ak_set_internal");
     if (!ak_get || !ak_get_bulk || !ak_get_name || !ak_get_min || !ak_get_max) {
         fprintf(stderr, "dlsym: libdseffect.so is missing an ak_* accessor "
                 "(ak_get/ak_get_bulk/ak_get_name/ak_get_min/ak_get_max)\n");
@@ -494,14 +655,26 @@ int main(int argc, char *argv[]) {
     if (dump_what) {
         if (!ak_enum) { fprintf(stderr, "dump: ak_enum not exported\n"); return 2; }
         if (!strcmp(dump_what, "tree")) {
-            printf("# AK object tree — 4-CC / name; leaves: len, [min..max], "
-                   "frac (unit 1/2^frac), description\n");
-            int n = 0; dump_tree(1, 0, &n);
-            printf("# %d defs\n", n);
+            printf("# AK object tree — 4-CC / name; leaves: type, len/size/off, "
+                   "[min..max], frac (1/2^frac), flags, description\n");
+            printf("#   type 3=value 2=opaque/by-ref (6/7 = internal AK objects) ; "
+                   "flags bit 0x2 = write-protect (read-only)\n\n");
+            int n = 0; dump_tree(1, "", 0, &n);
+            printf("\n# %d defs\n", n);
         } else if (!strcmp(dump_what, "defaults")) {
             dump_defaults();
+        } else if (!strcmp(dump_what, "types")) {
+            dump_types();
+            probe_write_protect();
+        } else if (!strcmp(dump_what, "docs")) {
+            printf("# engine strings — every def's display name · one-line desc · long\n"
+                   "# help (idx 2), the docs no other dump shows. Tree order; the `a/b/c`\n"
+                   "# path crumb disambiguates repeated 4-CCs (26 ver, 21 on, 15 hdrm …).\n");
+            int n = 0, nh = 0; dump_docs(1, "", 0, &n, &nh);
+            doc_rule();
+            printf("# %d defs, %d with help\n", n, nh);
         } else {
-            fprintf(stderr, "dump: expected 'tree' or 'defaults'\n");
+            fprintf(stderr, "dump: expected 'tree', 'defaults', 'types', or 'docs'\n");
             return 2;
         }
         return 0;

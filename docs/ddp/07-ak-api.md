@@ -76,7 +76,9 @@ All take `(handle, ref, …)` and resolve the ref internally.
 | `ak_get_min` / `ak_get_max`                          | `(h, ref) → int`                     | engine's own clamp bounds (authoritative).                            |
 | `ak_get_length`                                      | `(h, ref) → int`                     | array element count.                                                  |
 | `ak_get_frac_bits`                                   | `(h, ref) → int`                     | fixed-point fractional bits; unit = 1/2ⁿ (4 ⇒ 1/16 dB).               |
-| `ak_get_type` / `ak_get_flags` / `ak_get_size` / `ak_get_offset` | `(h, ref) → int`        | type tag, flags, byte size, struct offset.                            |
+| `ak_get_type`                                       | `(h, ref) → int`                     | def **type tag**: `3` = value (inline storage), `2` = opaque / by-reference. |
+| `ak_get_flags` / `ak_set_flags`                     | `(h, ref) → int` / `(h, ref, set, clr)` | instance **flag word**; bit `0x2` = write-protected. `ak_set_flags`: `flags = (flags \| set) & ~clr`. |
+| `ak_get_size` / `ak_get_offset`                     | `(h, ref, int* out) → 0/-2`          | byte **size** / struct **offset**, written through `out`.             |
 | `ak_get_string`                                      | `(h, ref, 0, idx) → char*`           | **display strings**: `idx` 0 = name, 1 = description, 2 = long help.   |
 | `ak_find`                                            | `(h, parent_ref, packed_4cc) → ref`  | resolve a name → ref **without** DEFINE_PARAMS.                       |
 | `ak_enum`                                            | `(h, parent_ref, i) → ref`           | i-th child ref; `0` past the last.                                    |
@@ -93,8 +95,10 @@ Two facts worth holding onto:
   code; the engine log labels every element `ak_get(idx/name, e)` either way (so
   the per-element log lines under cmd 4 are `ak_get_bulk`'s internal loop, not a
   separate path).
-- **`ak_set` clamps, then stores — but never recomputes.** The shared store core
-  (`0x1ab7c`, reached by both `ak_set` and `ak_set_bulk`) saturates the value to
+- **`ak_set` honours the write-protect bit, clamps, then stores — but never recomputes.** The
+  shared store core (`0x1ab7c`, reached by both `ak_set` and `ak_set_bulk`) bails on a
+  write-protected leaf (storing nothing; see
+  [Per-param type & flags](#per-param-type--flags)); otherwise it saturates the value to
   the param's `[min, max]` *before* writing — so the registry physically holds the
   **clamped** value, which is why it diverges from the raw settings cache (see
   [03](03-binary-protocol.md)). What it does *not* do is recompute coefficients:
@@ -119,6 +123,36 @@ straight from the binary:
 
 So a generated `parameters.toml` can carry an authoritative name + description
 per param — zero hand-transcription — next to the range/length/`frac_bits`.
+
+## Per-param type & flags
+
+Each param resolves to an **instance object** (`flags`, `offset`, `size`, + a pointer
+to its def) and a shared **def** (`type`, `name`, `min`, `max`, `frac_bits`, + the
+string table). Two more facets the engine self-describes, on top of range/length:
+
+- **`ak_get_type`** — `3` = a normal **value** param (inline storage, real range, a
+  byte `size` and `offset`); `2` = an **opaque / by-reference** slot (`size 0`,
+  full-int16 "range"). The 9 type-2 leaves are the build/version (`bver`, `ver`,
+  `bndl`), license vendor (`lcvd`), and visualizer outputs (`vcbg`, `vcbe`, `vnbf`,
+  `vnbg`, `vnbe`) — the engine owns their backing store; the host only reads them
+  (cmd 4 / `ak_get`).
+- **`ak_get_flags`** — the load-bearing bit is **`0x2` = write-protected (read-only)**.
+  The store core checks it first: **public `ak_set`/`ak_set_bulk` store nothing and
+  return `0`** (the unchanged value, not `-4`); only `ak_set_internal`/`ak_set_bulk_internal`
+  (the forcing path the DSP uses for computed slots) bypass it. The **10 write-protected leaves** are
+  `bver ver bndl lcvd vcbg vcbe vnnb vnbf vnbg vnbe`. (`vnnb` is the clean case — a
+  type-3 scalar *with* storage that's still read-only; `vcbg`/`vcbe` are additionally
+  zero-length, so even the internal setter no-ops on them.)
+
+This is **engine-authoritative and different from Java's `isParamSettable`**: Java
+marks 22 names non-settable, but the engine write-protects only 10 of them — `preg`,
+`pstg`, `endp`, `ocf`, `vol`, `vcnb`, … are Java-hidden yet engine-writable (and the
+license `lcmf`/`lcpt` are writable; only the vendor `lcvd` is locked). `ak_set` itself
+returns the **stored (clamped) value** on success, `0` on rejection — a value, not a
+status. `ddp_probe dump types` prints the full type/flags/size/len/offset table plus a
+three-path write probe (public vs internal vs cmd 3) that reports each path's return —
+confirming public `ak_set` returns `0` on a read-only leaf and that the **cmd-3
+protocol path honours the write-protect bit**, so production cannot overwrite one.
 
 ## Two layers: params and framework
 
@@ -174,8 +208,10 @@ is the ground truth, and it disagrees with the hand-transcribed Java table
 
 [`ddp_probe`'s dump](../../tools/ddp_probe/README.md#dumping-the-engines-ak-tree)
 walks the tree for this: `dump tree` emits name · description · length · range ·
-frac_bits, `dump defaults` the power-on values — the exact data a
+frac_bits and `dump defaults` the power-on values — the exact data a
 `parameters.toml` generator should emit, instead of transcribing Java by hand.
+`dump docs` adds the field the others omit: the engine's **long help string**
+(`ak_get_string` idx 2), present on 75 of the 248 defs.
 
 ## Symbol offsets (v8.1 `libdseffect.so`)
 
@@ -186,6 +222,9 @@ ak_resolve 0x19e1c   ak_find    0x1a0b4   ak_enum        0x1a1ec   ak_count_defs
 ak_get     0x1a904   ak_get_bulk 0x1a5a4  ak_set         0x1af58   ak_set_bulk   0x1b070
 ak_get_name 0x1a2a0  ak_get_min 0x1a2d4   ak_get_max     0x1a308   ak_get_length 0x1a424
 ak_get_type 0x1a26c  ak_get_flags 0x1a574 ak_get_frac_bits 0x1a33c  ak_get_string 0x1a370
+ak_get_size 0x1a3d8  ak_get_offset 0x1a47c ak_set_flags 0x1a4c8  ak_set_internal 0x1afa4  ak_set_bulk_internal 0x1b0a4
 
-clamp+store core 0x1ab7c  (ak_set + ak_set_bulk converge here; saturates to [min,max] then stores)
+clamp+store core 0x1ab7c  (ak_set/ak_set_bulk converge here; a write-protected leaf bails with
+internal status -4 — the public setters surface that as a 0 return, storing nothing — else
+saturates to [min,max] then stores; the *_internal variants skip the write-protect check)
 ```
