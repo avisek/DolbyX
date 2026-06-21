@@ -1,9 +1,26 @@
 # 03 — Binary Protocol with `libdseffect.so`
 
 The engine's only public surface is the standard Android `AudioEffect`
-HAL: a `process()` for audio and a `command()` for control. Every
-control operation is a single `command()` call with `cmdCode ==
-EFFECT_CMD_SET_PARAM` (5) or `EFFECT_CMD_GET_PARAM` (8).
+HAL: a `process()` for audio and a `command()` for control. Parameter
+traffic is `command()` with `cmdCode == EFFECT_CMD_SET_PARAM` (5) or
+`EFFECT_CMD_GET_PARAM` (8); lifecycle uses the other effect command
+codes — `EFFECT_CMD_INIT` (0), `EFFECT_CMD_SET_CONFIG`
+([1, sample rate / channels](#effect_cmd_set_config-effect-command-1)),
+`EFFECT_CMD_ENABLE` / `DISABLE` (3 / 4).
+
+> **Two numbered namespaces.** The *effect command code* (the `cmdCode`
+> argument: 0 INIT, 1 SET_CONFIG, 3 ENABLE …) is distinct from the
+> *`DS_PARAM_*` selector* (the first int32 of a SET_PARAM payload: 1
+> DEFINE_SETTINGS, 2 ALL_VALUES, 3 SINGLE_DEVICE_VALUE …). Section titles
+> like "Command 1" below mean the `DS_PARAM_*` selector unless prefixed
+> `EFFECT_CMD_`.
+>
+> **v2 note.** DolbyX v2 drives params through the AK accessors directly
+> (no DEFINE_PARAMS / DEFINE_SETTINGS handshake, no cmd 2 / 3), keeping the
+> cmd protocol for lifecycle — the AK-direct binding
+> ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)). This doc
+> stays the reference for the cmd path the engine accepts; [07](07-ak-api.md)
+> covers the AK path that supersedes it for params.
 
 This document describes the exact byte layouts. All multi-byte integers
 are **little-endian** (the ARM32 native order) and unsigned unless
@@ -374,11 +391,12 @@ For DolbyX v2 it's the daemon's in-memory state plus the persisted
 > reading the zero-fill from that buffer, not the engine's `vcbg`
 > values. The fix is to use cmd 4 instead.
 
-> **Implication for DolbyX v2**: the daemon's
-> `engine.get_visualizer_data(session)` Engine-trait method should
-> implement using cmd 4 directly. There is no fallback via cmd 3 — but
-> the engine subprocess can offer a *real* GET via `ak_get` (next
-> section), which it can surface to the daemon as a new opcode.
+> **Implication for DolbyX v2**: there's no cmd 3 GET, but v2's AK-direct
+> binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md))
+> provides a *real* per-param GET via `ak_get` (next section), surfaced as
+> the `GetParam` / `GetParams` opcodes. The visualizer leaves `vcbg`/`vcbe`
+> are read through that same path (`get_params`), not cmd 4 — so v2 doesn't
+> use cmd 4 at all.
 
 ## The AK registry read path
 
@@ -424,10 +442,11 @@ What it establishes (see [ddp_probe](../../tools/ddp_probe/README.md) #9):
   idempotent same-value rewrite, so this bounds what *changes*, not every
   slot the DSP writes.)
 
-The engine subprocess can expose this to the daemon as a GET opcode over
-the [binary protocol](../REARCHITECTURE_PLAN.md), giving the daemon a true
-read-back (verification, defaults, engine-computed state) on top of its
-own write mirror. Caveat: it only works where `libdseffect.so` is
+v2 exposes this to the daemon as the `GetParam` opcode over the
+[binary protocol](../REARCHITECTURE_PLAN.md) (the AK-direct binding,
+[ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)), giving a true
+read-back (verification, defaults, engine-computed state) on top of the
+daemon's own state model. Caveat: it only works where `libdseffect.so` is
 in-process — the cross-process Android HAL can't reach the engine heap —
 and the offsets are pinned to this EOL build.
 
@@ -444,6 +463,13 @@ dispatcher returns reply 0 for tuning per legacy AK convention) but
 there's no observable behavior associated with it. Skip it.
 
 ## The mandatory init handshake
+
+> **v2 note.** This is the **cmd-protocol** setup. DolbyX v2's AK-direct
+> binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) skips
+> DEFINE_PARAMS / DEFINE_SETTINGS entirely — it resolves refs with `ak_find`
+> and writes via `ak_set`, needing only the lifecycle commands (INIT,
+> optionally SET_CONFIG, ENABLE). The sequence below is what the engine
+> accepts and what v1 sends.
 
 To bring the engine into a usable state, the host must perform this
 sequence:
@@ -554,6 +580,67 @@ correctly sized when DEFINE_SETTINGS runs. If you replicate this design
 in DolbyX, you can keep the XML parse approach; if you go a different
 route, just make sure constant params get pushed before DEFINE_SETTINGS
 runs.
+
+## `EFFECT_CMD_SET_CONFIG` (effect command 1)
+
+Sets the audio I/O config — sample rate, channel count, PCM format. In
+Android this is **framework-driven**: AudioFlinger emits it when the effect
+attaches to an output thread, so `DsEffect.java` has no caller and
+`DsConfigParser.java` has no rate logic. v1 instead changed rate by hand via
+the `Ds1ap::New` hot-swap; cmd 1 does the same thing correctly and
+**supersedes** it (proven in
+[`setconfig_probe`](../../tools/ddp_probe/README.md)).
+
+**Payload** is the real AOSP `effect_config_t` — two 32-byte
+`buffer_config_t` (input, then output), little-endian:
+
+```
+buffer_config_t (32 B):
+  [u32 frameCount][ptr raw][u32 samplingRate][u32 channels]  // channels mask: stereo=3 (only usable value)
+  [ptr getBuffer][ptr releaseBuffer][ptr cookie]             // 12-byte buffer_provider (unused; NULL)
+  [u8 format][u8 accessMode][u16 mask]                       // format PCM16=1 ; accessMode 0=WRITE/2=ACCUMULATE ; mask ignored
+```
+
+(The simplified struct in `arm/audio_effect_defs.h` is corrected to this;
+`setconfig_probe.c`'s `cfg_t` is the authoritative layout.)
+
+**Mechanism** (the `Effect_command` cmd-1 branch): validate → if rate +
+channels are unchanged, no-op (reply 0) → else cache the config, then
+`Effect_reinit` deletes the old `Ds1ap` and builds a new one at the requested
+rate (`Ds1ap::New` → `ak_open` → `ak_set_input_config` → `ak_rate_code`),
+`Effect_setConfig` re-applies the cached AK params, and the audio buffer is
+re-inited → reply 0.
+
+**Validation is three-tiered** — envelope, then fields, then the reconfig
+itself — and where the error surfaces differs per tier:
+
+| Tier / case                                                       | `command()` | `*pReplyData` | handle              |
+| ----------------------------------------------------------------- | ----------- | ------------- | ------------------- |
+| valid; rate or channels changed                                   | 0           | 0             | reconfigured        |
+| valid; unchanged                                                  | 0 (no-op)   | 0             | unchanged           |
+| **envelope**: `cmdSize ≠ 64`, null, or `*replySize ≠ 4`           | **−22**     | untouched     | intact              |
+| **field**: `in ≠ out`, `fmt ≠ PCM16`, `ch` mask `∉ {1,3}`, `acc ∉ {0,2}` | 0    | **−22**       | intact              |
+| **reconfig**: rate `∉ {44100,48000,32000}`                        | 0           | 0             | falls back to 44100 |
+| **reconfig**: channels = mono                                     | 0           | **−22**       | **poisoned**        |
+
+A field reject returns 0 — **always check `*pReplyData`, not just the return**.
+The two reconfig rows are the surprises (`setconfig_probe` Sc5/Sc6):
+
+- **Silent rate fallback.** `Effect_reinit` gates the rate to **{44100, 48000,
+  32000}**; any other rate **silently falls back to 44100 and still replies 0
+  (success)**. Validate the rate host-side (or read it back via
+  `ak_bus_get_rate` on bus 0).
+- **Mono poisons the handle.** A mono mask (1) *passes* the field check, but
+  `Effect_reinit` only accepts channel counts {2, 6, 8} — and it tears down the
+  old graph *before* that check. So mono leaves `Ds1ap` NULL: reply −22 and the
+  handle is unusable. **Stereo (mask 3) is the only working value** — the effect
+  layer is hard-limited to stereo even though the `Ds1ap` core supports 6/8.
+
+**accessMode is a real knob, not hard-wired.** The engine honours **WRITE (0)**
+(`out[i] = processed`) and **ACCUMULATE (2)** (`out[i] += processed`) —
+`setconfig_probe` Sc7 proves it behaviourally. v1/AudioFlinger pick ACCUMULATE,
+which is why `process()` needs the pre-`memset` (below); WRITE would overwrite
+and need none — so DolbyX v2 picks **WRITE** and drops the per-block zeroing.
 
 ## Endianness, types, and memory layout
 
@@ -729,14 +816,23 @@ The bucket classification lives in
 
 ## Practical reminders
 
-- The engine processes in **ACCUMULATE mode**: `process()` adds to the
-  output buffer rather than overwriting it. Always `memset(out, 0,
-out_bytes)` before calling.
+- `process()` deposits per the output **accessMode** chosen at SET_CONFIG:
+  ACCUMULATE (2) **adds** to the output buffer (v1/AudioFlinger default — so
+  `memset(out, 0, out_bytes)` before every call), WRITE (0) **overwrites** it
+  (no memset needed; DolbyX v2 uses WRITE). See
+  [SET_CONFIG](#effect_cmd_set_config-effect-command-1).
+- A **disabled** effect still deposits per accessMode: `EFFECT_CMD_DISABLE`
+  crossfades wet→dry over ≈120 ms (blocks return `0`), then bypassed blocks
+  return `-ENODATA` and write the **dry input** — WRITE gives `OUT == IN`,
+  ACCUMULATE adds it (`setconfig_probe` Sc9; a never-enabled effect skips the
+  crossfade and bypasses from the first block). A WRITE host thus needs no
+  passthrough copy of its own.
 - `process()` also **clobbers its own input buffer** (enabled or
   disabled). Pass a scratch copy if you still need the original PCM.
-- The default sample rate is 44100 Hz. To run at 48000 Hz you have to
-  use the `Ds1ap::New` hot-swap technique that DolbyX already
-  implements (see `arm/ddp_processor.c`).
+- The default sample rate is 44100 Hz. To run at 48000 or 32000 Hz, send
+  `EFFECT_CMD_SET_CONFIG` ([above](#effect_cmd_set_config-effect-command-1)) —
+  it rebuilds the engine at the new rate and supersedes v1's manual
+  `Ds1ap::New` hot-swap. Other rates silently fall back to 44100.
 - The audio session ID for global mixing is **0**. This is the
   documented behaviour: session 0 = system output.
 - `EffectCreate` returns -EINVAL if you pass anything other than the

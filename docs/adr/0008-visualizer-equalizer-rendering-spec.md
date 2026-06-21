@@ -3,7 +3,8 @@
 The Visualizer / Equalizer overlay is the most visible piece of DDP and
 must feel identical to the original. The pump runs at a fixed 50 ms
 cadence (`VISUALIZER_PUMP_INTERVAL`, matches `DsService` in the original
-Android app), reads from the oldest session via cmd 4, and emits
+Android app), reads from the oldest session via `get_params`
+(`vcbg`/`vcbe`, [ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)), and emits
 `vis` / `vis_suspended` events with 10-tick hysteresis
 (`VISUALIZER_SUSPENDED_THRESHOLD`). The SVG layer stack renders a
 radial-gradient background, 1-px grid, a 20×48 spectrum brick field

@@ -427,7 +427,7 @@ below for the exclusion list):
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly** — `vcbg`, `vcbe`                                                          | Engine **write-protects** both (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing and returns `0`; cmd 3 too), not clobbered. The DSP fills them each block; read via cmd 4. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
+| **ReadOnly** — `vcbg`, `vcbe`                                                          | Engine **write-protects** both (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing and returns `0`; cmd 3 too), not clobbered. The DSP fills them each block; the original reads them via cmd 4, v2 via `ak_get`. | no in Java's setup; included by DolbyX v2 (`ak_get`/`get_params` reads them) |
 | **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
 The remaining 10 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
@@ -480,19 +480,24 @@ but they are there.
 
 ## Recommendation for DolbyX v2
 
+> v2 binds these **AK-direct** — `ak_find`/`ak_get`/`ak_set`, no
+> DEFINE_PARAMS/DEFINE_SETTINGS handshake and no settings cache
+> ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)). The buckets
+> below classify *which* params v2 surfaces; the binding is AK throughout.
+
 The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a three-bucket classification of the **54 params that get
-surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
+above into a three-bucket classification of the **54 params DolbyX v2
+surfaces** in its metadata table and the Advanced UI:
 
 - **Settable** (42 params) — every param with `settable = yes` above.
   Daemon validates against metadata; engine accepts the forwarded
   write into both the settings cache and AK registry.
 - **ReadOnly** (2 params) — `vcbg`, `vcbe`. The engine **write-protects**
   both (flag bit `0x2`), so host writes are rejected, not clobbered; the DSP
-  fills them each block. Readable from outside via cmd 4
-  (`DS_PARAM_VISUALIZER_DATA`), which returns `vcbg ‖ vcbe` as 40
-  int16s. Rendered as live read-only displays driven by the visualizer
-  pump.
+  fills them each block. Readable via cmd 4 (`DS_PARAM_VISUALIZER_DATA`) in
+  the original; DolbyX v2's pump reads them in-process via
+  `get_params`/`ak_get` (`vcbg ‖ vcbe`, 40 int16s). Rendered as live
+  read-only displays.
 - **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
   `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
   a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —
@@ -515,6 +520,6 @@ The remaining 10 AK slots are dropped entirely:
   own band config, so they carry nothing the `vcb*` channel doesn't
   already deliver. Dropped as redundant.
 
-This brings DEFINE_SETTINGS to **~422 cache slots (~844 bytes,
-≈0.8 KB per device)**, a clean ~58 % reduction from the all-64 baseline
-without losing anything user-visible.
+The 54-param surface expands to **~422 addressable leaf elements
+(~844 bytes, ≈0.8 KB)**, a clean ~58 % reduction from the all-64
+baseline without losing anything user-visible.

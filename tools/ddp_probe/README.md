@@ -109,6 +109,51 @@ defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
 `ngon=2`, `vmon=2`, `vmb=144`, `plmd=4`, `dvli=dvlo=-320`, `arbl=-192×40`,
 `artp=16`, `scpe=2`.
 
+## Companion probes
+
+Two focused probes sit alongside `ddp_probe`, sharing the same build (`arm/`
+staging, `qemu-arm-static`, the noisy `liblog_stub`). Both underpin the
+AK-direct binding decision
+([ADR-0010](../../docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
+
+### `akctl_probe` — AK-direct parameter control (`make akctl`)
+
+Can the engine shim drive params through the AK accessors directly, skipping
+the cmd protocol's param surface? It proves:
+
+- **No handshake.** `ak_find` resolves refs by name (no DEFINE_PARAMS) and a
+  full GEQ runs driven only by `ak_set`; `ak_get` reads it back — the real
+  per-param GET the cmd protocol lacks.
+- **cmd 3 ≡ `ak_set`, bit-for-bit.** Two handles on identical histories, one
+  boosted via cmd 3 (cache = 160 / registry = 160), one via bare `ak_set`
+  (cache = 0 / registry = 160), produce byte-identical output — the cmd path's
+  settings-cache write is dead weight; the DSP reads the registry, which
+  `ak_update` recomputes from live every block.
+
+### `setconfig_probe` — `EFFECT_CMD_SET_CONFIG` / sample rate (`make setconfig`)
+
+Reverse-engineers the cmd-1 lifecycle command (see
+[../../docs/ddp/03-binary-protocol.md](../../docs/ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
+Sends real SET_CONFIG and reads the live rate via `ak_bus_get_rate`:
+
+- SET_CONFIG → 48000 / 32000 is honoured in-process (Ds1ap rebuilt via
+  `Ds1ap::New`); the GEQ then processes at the new rate. It supersedes — and
+  replicates for contrast (Sc8) — v1's manual hot-swap.
+- **Silent fallback:** an unsupported rate (e.g. 96000) replies success but
+  falls back to 44100 — the host must validate.
+- **Field sweep (Sc6):** maps each field's accepted set across the three
+  validation tiers (−22 return vs reply −22 vs silent fallback): rate
+  {32000,44100,48000}, **stereo-only** (mono passes the field check then
+  *poisons the handle*), format PCM16, accessMode {0,2}, size exactly 64.
+- **accessMode (Sc7):** WRITE vs ACCUMULATE is a real behavioural knob — WRITE
+  overwrites the output buffer, ACCUMULATE adds; "ACCUMULATE mode" is the host's
+  choice, not hard-wired.
+- **Disabled passthrough (Sc9):** a disabled `process()` still fills the output
+  per accessMode. `EFFECT_CMD_DISABLE` crossfades wet→dry over ~23 blocks
+  (return 0), then bypassed blocks return `-ENODATA` and deposit the **dry
+  input**: WRITE gives `OUT == IN` (512/512, same for a never-enabled session),
+  ACCUMULATE adds it. So a WRITE-mode host needs no passthrough copy of its own.
+
 ## Prerequisites
 
 - `apt install gcc-arm-linux-gnueabihf qemu-user-static`
@@ -123,9 +168,11 @@ stay in lockstep with the production v1 build.
 ## Running it
 
 ```bash
-make            # build the probe + the noisy liblog override
-make run        # run; stdout = summary, stderr = engine log
+make            # build all probes + the noisy liblog override
+make run        # ddp_probe; stdout = summary, stderr = engine log
 make run-log    # like run but stderr -> engine.log for grepping
+make akctl      # akctl_probe — AK-direct param control (see Companion probes)
+make setconfig  # setconfig_probe — EFFECT_CMD_SET_CONFIG / sample rate
 ```
 
 The `liblog_stub.c` here is a verbose drop-in replacement for
@@ -174,6 +221,8 @@ tools/ddp_probe/
 ├── README.md            # this file
 ├── Makefile             # cross-compile + qemu-arm-static invocation
 ├── ddp_probe.c          # the consolidated probe (10 experiments + dump)
+├── akctl_probe.c        # AK-direct param control (cmd 3 ≡ ak_set, no handshake)
+├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 

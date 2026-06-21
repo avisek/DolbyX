@@ -76,18 +76,25 @@ Input Audio (float32, 48kHz, stereo)
 
 | Rate         | Native Support | Notes                                  |
 | ------------ | -------------- | -------------------------------------- |
-| 32000 Hz     | ✅             | Via Ds1ap::New hot-swap                |
+| 32000 Hz     | ✅             | Via `SET_CONFIG` (cmd 1)               |
 | 44100 Hz     | ✅             | Default EffectCreate rate              |
-| **48000 Hz** | ✅             | **Default** (hot-swap technique)       |
+| **48000 Hz** | ✅             | **Default** (via `SET_CONFIG`)         |
 | 96000+ Hz    | ❌             | DSP core lacks filterbank coefficients |
 
 ## Key Technical Solutions
 
-### Native 48kHz (Hot-Swap)
+### Native 48kHz (SET_CONFIG)
 
-`EffectCreate` always initializes at 44100Hz, and `SET_CONFIG` is permanently
-broken. DolbyX creates a fresh `Ds1ap::New(0, 48000, 2, 0)` and patches the
-effect context at runtime (Ds1ap pointer at offset +68, sample rates at +12/+44).
+`EffectCreate` always initializes at 44100 Hz. v1 changes rate with a manual
+hot-swap: a fresh `Ds1ap::New(0, 48000, 2, 0)` plus patching the effect context
+at runtime (Ds1ap pointer at offset +68, sample rates at +12/+44).
+
+> **Correction (RE).** The earlier assumption that `SET_CONFIG` is "permanently
+> broken" is **wrong** — `EFFECT_CMD_SET_CONFIG` (cmd 1) is fully implemented and
+> performs the rate rebuild correctly; v1's manual hot-swap is a partial,
+> order-dependent replica of it. DolbyX v2 uses `SET_CONFIG` instead (see
+> [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)
+> and `tools/ddp_probe/setconfig_probe.c`).
 
 ### Gain Staging
 
@@ -98,7 +105,9 @@ causes constant Peak Limiter activation. Default: -6dB pre-gain, 0dB post-gain.
 ### Output Buffer Zeroing
 
 The DS1 effect uses ACCUMULATE mode — it adds to the output buffer. Without
-zeroing, leftover data creates crackling distortion.
+zeroing, leftover data creates crackling distortion. (accessMode is a
+SET_CONFIG knob, not fixed; v2 selects WRITE instead and drops the per-block
+zeroing — see [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1).)
 
 ### ABI-Compatible Stubs
 

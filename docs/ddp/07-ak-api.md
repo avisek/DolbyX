@@ -14,10 +14,13 @@ The engine exports the AK functions as ordinary symbols, so a process that
 
 > **Scope.** Reverse-engineered from the v8.1 `libdseffect.so` and
 > **version-pinned to that binary** — the symbol behaviour and context offsets
-> below are not a stable ABI. Use AK as an **offline / research tool** (live
-> introspection, generating the metadata table), **not** the production runtime
-> path: production drives the engine through the cmd protocol, which is the
-> contract the engine is designed for. See the
+> below are not a stable ABI. DolbyX v2 drives the **parameter surface** through
+> these AK accessors in production (the AK-direct binding,
+> [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) and keeps the cmd
+> protocol only for **lifecycle** (init / config / enable / `process`); the
+> offset + symbol coupling is pinned to this binary and encapsulated behind the
+> backend FFI boundary. The dump / introspection uses below double as the
+> offline metadata-table generator. See the
 > [AK registry read path](03-binary-protocol.md#the-ak-registry-read-path) in 03.
 
 ## The cmd protocol is AK underneath
@@ -31,7 +34,8 @@ wrapper, AK is the internals it wraps:
 | 3 `SET`             | `ak_set` (+ the raw settings-cache write)     |
 | 4 `VISUALIZER`      | `ak_get_bulk` (×2: `vcbg`, `vcbe`)            |
 | 6 `VERSION`         | `ak_bundle_version_get_bulk`                  |
-| 0/1 `INIT`/`CONFIG` | `ak_open` / `ak_set_input_config`             |
+| 0 `INIT`            | `ak_open`                                     |
+| 1 `CONFIG`          | `ak_set_input_config` → `ak_rate_code` (rebuild via `Ds1ap::New`) |
 | `process()`         | `ak_process` → `ak_update` (coeff recompute)  |
 
 ## Reaching AK in-process
@@ -104,7 +108,10 @@ Two facts worth holding onto:
   [03](03-binary-protocol.md)). What it does *not* do is recompute coefficients:
   that's `ak_update`, inside `ak_process`, which reads the registry **live every
   block** — so a bare `ak_set` still takes effect (matches the cache-poke result
-  in [`ddp_probe` #7](../../tools/ddp_probe/README.md)).
+  in [`ddp_probe` #7](../../tools/ddp_probe/README.md); and
+  [`akctl_probe`](../../tools/ddp_probe/README.md) shows cmd 3 SET ≡ `ak_set`
+  **bit-for-bit** at the DSP — the basis for the AK-direct binding,
+  [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)).
 
 ## Names & descriptions
 
@@ -160,7 +167,9 @@ The param accessors sit on top of the AK **framework runtime**:
 
 - **Lifecycle:** `ak_open` / `ak_close`, `ak_start` / `ak_stop`, `ak_size`, `ak_needs`.
 - **Processing:** `ak_process`, `ak_process_loop`, `ak_update`, `ak_update_step`.
-- **I/O config:** `ak_set_input_config`, `ak_rate_hz` / `ak_rate_code`, `ak_get_output_buffer`.
+- **I/O config:** `ak_set_input_config` → `ak_rate_code` (Hz→code, the set
+  path); `ak_rate_hz` is the inverse code→Hz lookup table (not a handle
+  accessor); `ak_bus_get_rate` reads the live bus-0 rate; `ak_get_output_buffer`.
 - **Object tree & buses:** `ak_obj_*` (open / assign / update / process),
   `ak_parent`, `ak_bus_*` (rate, blksz, channels, data).
 

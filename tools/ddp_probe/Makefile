@@ -15,6 +15,10 @@
 #   make run       — build then run under qemu-arm-static; stdout is
 #                    the test summary, stderr is the engine's own log
 #   make run-log   — like run but redirects engine log to engine.log
+#   make akctl     — run the AK-direct experiment (akctl_probe): drive the
+#                    engine via ak_set/ak_get, skipping the cmd param path
+#   make setconfig — run the EFFECT_CMD_SET_CONFIG experiment (setconfig_probe):
+#                    send cmd 1 to change sample rate / channels at runtime
 #   make dump-tree     — branch-drawn AK tree: full per-param metadata + descriptions
 #   make dump-defaults — print each root param's power-on default (4-CC = value)
 #   make dump-types    — root leaves as a flat table + write-protection probe
@@ -34,6 +38,8 @@ BUILDDIR = build
 LIBDIR   = $(BUILDDIR)/lib
 
 PROBE    = $(BUILDDIR)/ddp_probe
+AKCTL    = $(BUILDDIR)/akctl_probe
+SETCFG   = $(BUILDDIR)/setconfig_probe
 LIBLOG   = $(LIBDIR)/liblog.so
 
 # All other arm libs come from arm/build/lib/ unchanged. We just
@@ -41,11 +47,17 @@ LIBLOG   = $(LIBDIR)/liblog.so
 STAGED_LIBS = libdseffect.so libc.so libcutils.so libdl.so libm.so \
               libstdc++.so libutils.so
 
-.PHONY: all run run-log dump-tree dump-defaults dump-types dump-docs clean
+.PHONY: all run run-log akctl setconfig dump-tree dump-defaults dump-types dump-docs clean
 
-all: $(PROBE) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
+all: $(PROBE) $(AKCTL) $(SETCFG) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
 
 $(PROBE): ddp_probe.c $(ARMHDR) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
+
+$(AKCTL): akctl_probe.c $(ARMHDR) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
+
+$(SETCFG): setconfig_probe.c $(ARMHDR) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
 
 $(LIBLOG): liblog_stub.c | $(LIBDIR)
@@ -69,6 +81,16 @@ run-log: all
 	@echo "Running ddp_probe — engine log → engine.log"
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
 	  $(PROBE) $(LIBDIR)/libdseffect.so 2>engine.log
+
+akctl: all
+	@echo "Running akctl_probe — stdout is the summary, stderr is the engine log."
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(AKCTL) $(LIBDIR)/libdseffect.so
+
+setconfig: all
+	@echo "Running setconfig_probe — stdout is the summary, stderr is the engine log."
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(SETCFG) $(LIBDIR)/libdseffect.so
 
 dump-tree: all
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
