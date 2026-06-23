@@ -350,6 +350,45 @@ parameters.** This is one of the most common debugging traps; see the
 detailed sequence in
 [03-binary-protocol.md](03-binary-protocol.md#the-mandatory-init-handshake).
 
+### Changing them at runtime (the commit protocol)
+
+"Constant" describes how the **host** uses them (set once at init), not an
+engine limit. They are not write-protected, and the engine reshapes its DSP on
+them **live** — through a documented commit: a count or frequency write is
+**inert until the dependent gains/targets array is re-written**, and that write
+re-derives the filterbank. From the engine's own help text (`ddp_probe dump
+docs`, e.g. `genb`: _"If this value is changed, the 'gebf' and 'gebg' settings
+must be updated. The Graphic Equalizer will not update until these parameters
+have been updated."_):
+
+| Feature    | Count         | Frequencies          | Commit (re-write to apply)  |
+| ---------- | ------------- | -------------------- | --------------------------- |
+| GEQ        | `genb`        | `gebf`               | **`gebg`**                  |
+| IEQ        | `ienb`        | `iebf`               | **`iebt`**                  |
+| AO         | `aonb`/`aocc` | `aobf`               | **`aobg`**                  |
+| AR         | `arnb`        | `arbf` (monotonic ↑) | **`arbi`/`arbl`/`arbh`**    |
+| Custom-viz | `vcnb`        | `vcbf`               | **`ven`**                   |
+
+A clean runtime update is **count → full frequency array → re-write the full
+gains array** (the commit) — but that sequence is only convention. What matters
+is **commit *presence*, not order**: empirically all six orderings of the three
+writes land the identical shape (raising or lowering the band count alike), and
+the gains *write* is the trigger — it fires even with unchanged values, while a
+count/frequency change alone never reshapes. Mechanism: each array param's
+`*_preupdate` hook dirties a per-feature validity word, the counts are polled in
+`root_preupdate` each block, and the recompute runs at the next process block off
+the *current* stored state — so write order is unobservable; only the gains write
+sets the commit bit.
+
+The init dance above is just this protocol run once at startup — nothing stops
+a host from re-running it on a live engine. Proven empirically in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape)
+(`make reshape` — also sweeps all six orderings): moving a GEQ band's centre or
+raising the band count is a no-op until `gebg` is re-written, then the boost
+moves / the new band wakes mid-stream. The storage is fixed-capacity
+(40-band) — allocated once at `ak_open`; only the *active* shape is what these
+reshape.
+
 ## Per-parameter visualization dimensions
 
 For UI widgets, here are the natural ranges to expose. Enforce these

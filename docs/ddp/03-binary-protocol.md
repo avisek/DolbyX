@@ -499,13 +499,17 @@ sequence:
 10. command(EFFECT_CMD_ENABLE, 0, NULL, &replySize, &reply)
 ```
 
-Steps 5–8 are the **constant-params dance**. The engine doesn't
-dynamically resize on these — by the time they arrive,
-DEFINE*SETTINGS has already fixed the cache layout from the lens
-the host chose. The point of the dance is to propagate the
-constants into the engine's AK registry so the DSP reads them at
-runtime, and (for safety) to keep them in sync with whatever lens
-the host baked into the DEFINE_SETTINGS payload. The engine's
+Steps 5–8 are the **constant-params dance**. What's fixed up front is
+the host's **cache layout** — by the time these arrive, DEFINE_SETTINGS
+has already sized the flat blob from the lens the host chose, so the cmd
+flow locks in a band count before the dance runs. The engine's *DSP*
+is not so fixed: it reshapes on these live, via the gains-commit protocol
+(re-write `gebg`/`iebt`/`aobg` after a count/frequency change — see
+[02 — Changing them at runtime](02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol)).
+The point of the dance is to propagate the constants into the engine's
+AK registry; a subsequent gains write (`gebg`/`iebt`/`aobg`, via cmd 2/3)
+fires the commit that syncs the DSP to the lens the host baked into the
+DEFINE_SETTINGS payload. The engine's
 own static `akParams*` table has matching defaults
 (`genb=ienb=aonb=20`), which is what the init-time `ak_get`
 pre-population uses; a host that follows the same defaults gets

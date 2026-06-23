@@ -111,8 +111,8 @@ defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
 
 ## Companion probes
 
-Two focused probes sit alongside `ddp_probe`, sharing the same build (`arm/`
-staging, `qemu-arm-static`, the noisy `liblog_stub`). Both underpin the
+Three focused probes sit alongside `ddp_probe`, sharing the same build (`arm/`
+staging, `qemu-arm-static`, the noisy `liblog_stub`). All three underpin the
 AK-direct binding decision
 ([ADR-0010](../../docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
 
@@ -154,6 +154,36 @@ Sends real SET_CONFIG and reads the live rate via `ak_bus_get_rate`:
   input**: WRITE gives `OUT == IN` (512/512, same for a never-enabled session),
   ACCUMULATE adds it. So a WRITE-mode host needs no passthrough copy of its own.
 
+### `reshape_probe` — runtime reshape of structural constants (`make reshape`)
+
+Can the "structural constant" params (`genb`/`gebf`, `ienb`/`iebf`, `aonb`/`aobf`,
+`aocc`) change at runtime, or are they frozen once the graph is built? They aren't
+write-protected, so `ak_set` stores them — the real question is whether a write
+*reshapes* the live DSP. Isolating the GEQ and watching where a band boost lands,
+it proves two things:
+
+- **A. They reshape at runtime — gated by a commit.** A band-count / frequency
+  write is **inert until the band gains are re-written**; that gains write
+  re-derives the filterbank, no `SET_CONFIG`, enable cycle, or rebuild. Moving
+  `gebf[4]` 431→6000 Hz *alone* leaves the boost at 431 (`x1.94`); re-writing
+  `gebg` moves it to 6000 (`x2.60`). Raising `genb` 10→20 *alone* does nothing;
+  re-writing `gebg` wakes band 15 (`x3.16`) — and that gains write triggers the
+  recompute **even with identical values** (presence, not a value delta). The
+  commit matches the engine's **own help text** (`dump docs`): GEQ
+  `genb`→`gebf`→`gebg`; IEQ `ienb`→`iebf`→`iebt`; AO `aocc`/`aonb`→`aobf`→`aobg`.
+- **B. Among the commit writes, order is free.** Driving the GEQ between two
+  orthogonal shapes (band 4 @ 431 Hz ↔ band 15 @ 7063 Hz) in **all six orders**
+  of `genb`/`gebf`/`gebg` lands the *identical* shape (0 % spread), raising or
+  lowering the band count alike — even orders that write the gains **first**. So
+  "commit *order*" isn't a constraint; **commit *presence*** is.
+- **Mechanism, in the binary.** Each freq/gain array has a `*_preupdate` write
+  hook (`gebf_preupdate`/`gebg_preupdate`, …) that only dirties a per-feature
+  validity word; the counts are polled in `root_preupdate` (every block, inside
+  `ak_update`). The `egq` recompute (`dlb_polylog_pow`) runs at the next process
+  block off the *current* stored state — so write order is unobservable, and only
+  the gains write sets the commit bit. See
+  [02 — Changing them at runtime](../../docs/ddp/02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol).
+
 ## Prerequisites
 
 - `apt install gcc-arm-linux-gnueabihf qemu-user-static`
@@ -173,6 +203,7 @@ make run        # ddp_probe; stdout = summary, stderr = engine log
 make run-log    # like run but stderr -> engine.log for grepping
 make akctl      # akctl_probe — AK-direct param control (see Companion probes)
 make setconfig  # setconfig_probe — EFFECT_CMD_SET_CONFIG / sample rate
+make reshape    # reshape_probe — runtime reshape of structural constants (commit gates it; order is free)
 ```
 
 The `liblog_stub.c` here is a verbose drop-in replacement for
@@ -223,6 +254,7 @@ tools/ddp_probe/
 ├── ddp_probe.c          # the consolidated probe (10 experiments + dump)
 ├── akctl_probe.c        # AK-direct param control (cmd 3 ≡ ak_set, no handshake)
 ├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
+├── reshape_probe.c      # runtime reshape of structural constants (gebg commit; order-free)
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 
