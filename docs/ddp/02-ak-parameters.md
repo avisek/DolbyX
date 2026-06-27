@@ -366,27 +366,47 @@ have been updated."_):
 | GEQ        | `genb`        | `gebf`               | **`gebg`**                  |
 | IEQ        | `ienb`        | `iebf`               | **`iebt`**                  |
 | AO         | `aonb`/`aocc` | `aobf`               | **`aobg`**                  |
-| AR         | `arnb`        | `arbf` (monotonic ↑) | **`arbi`/`arbl`/`arbh`**    |
+| AR         | `arnb`        | `arbf` (monotonic ↑) | **`arbh`**                  |
 
-A clean runtime update is **count → full frequency array → re-write the full
-gains array** (the commit) — but that sequence is only convention. What matters
-is **commit *presence*, not order**: empirically all six orderings of the three
-writes land the identical shape (raising or lowering the band count alike), and
-the gains *write* is the trigger — it fires even with unchanged values, while a
+A clean runtime update is **count → full frequency array → re-write the commit
+array** — but that sequence is only convention. What matters is **commit
+*presence*, not order**: empirically all six orderings of the three writes land
+the identical shape (raising or lowering the band count alike), and the commit
+*write* is the trigger — it fires even with unchanged values, while a
 count/frequency change alone never reshapes. Mechanism: each array param's
-`*_preupdate` hook dirties a per-feature validity word, the counts are polled in
-`root_preupdate` each block, and the recompute runs at the next process block off
-the *current* stored state — so write order is unobservable; only the gains write
-sets the commit bit.
+`*_preupdate` hook flips a bit in a per-feature validity word (GEQ `0x5c0`, IEQ
+`0x718`, AO `0x870`, AR `0x9c8`) — stagers set a dirty bit (`gebf`→`0x02`), the
+commit array sets **bit `0x40`**. Counts have no hook; they're polled in
+`root_preupdate` each block and a change only *invalidates* (`bic #0x3d`), never
+sets `0x40`. The recompute runs at the next process block off the *current* stored
+state when `0x40` is present — so write order is unobservable; only the
+commit-array write sets the commit bit.
+
+The commit array is the feature's **last** payload array, not necessarily a
+"gains" array. AR carries three (`arbi` isolates, `arbl`/`arbh` thresholds), and
+only the last, `arbh`, commits — `arbi`/`arbl` are stagers like `arbf`, and the
+threshold values themselves are live-smoothed each block; it's the band
+*structure* the `arbh` write re-derives. (The help text says re-write all three;
+measurement shows one suffices — same overstatement as GEQ's "`gebf` and
+`gebg`", where only `gebg` commits.)
 
 The init dance above is just this protocol run once at startup — nothing stops
 a host from re-running it on a live engine. Proven empirically in
 [tools/ddp_probe/](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape)
-(`make reshape` — also sweeps all six orderings): moving a GEQ band's centre or
-raising the band count is a no-op until `gebg` is re-written, then the boost
-moves / the new band wakes mid-stream. The storage is fixed-capacity
-(40-band) — allocated once at `ak_open`; only the *active* shape is what these
-reshape.
+(`make reshape` — sweeps all six GEQ orderings, then repeats the gate on a
+second, unrelated DSP): moving a GEQ band's centre or raising the band count is a
+no-op until `gebg` is re-written, then the boost moves / the new band wakes
+mid-stream; moving an AR limiting band is likewise inert until `arbh`.
+
+The storage is **fixed-capacity** (40-band) — allocated once at `ak_open`, the
+arrays never resize. Measured (`reshape_probe` finding D): filling every slot then
+shrinking the count leaves the out-of-range slots **untouched** — never zeroed —
+and a commit + a grow re-expose them. So a count change has **no "wrong-sized
+array" transient** to repair; the commit is all it needs. That reduces the host
+rule to: **to update any structural param, write it, then re-write its group's
+commit leaf** — the last array, with its current value if you didn't otherwise
+touch it. (Where that re-write lives in v2 — the engine binding, not the daemon —
+is [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md).)
 
 ## Per-parameter visualization dimensions
 

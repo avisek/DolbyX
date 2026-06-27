@@ -1,7 +1,7 @@
 /*
  * reshape_probe.c — Do the "structural constant" params (genb/gebf, ienb/iebf,
- * aonb/aobf, aocc) reshape the live DSP at RUNTIME, or are they frozen once the
- * graph is built?
+ * aonb/aobf, aocc, arnb/arbf) reshape the live DSP at RUNTIME, or are they
+ * frozen once the graph is built?
  *
  * They aren't write-protected (dump-types: flags 0x1025, no 0x2 bit), so ak_set
  * stores them. The real question is whether a write RESHAPES the running DSP —
@@ -19,7 +19,7 @@
  *   (IEQ ienb/iebf commit via iebt; AO aocc/aonb/aobf via aobg — same pattern.)
  *
  * Method: AK-direct (ak_find/ak_set/ak_get, like akctl_probe). Isolate the GEQ,
- * boost one band, watch a matched test tone to see WHERE the boost lands. Two
+ * boost one band, watch a matched test tone to see WHERE the boost lands. Four
  * findings:
  *
  *   A. The commit GATES the reshape. A count/freq change alone is INERT; the
@@ -33,6 +33,22 @@
  *      identical result, raising or lowering the band count alike — even orders
  *      that write the gains first. So "commit order" is a no-op; commit
  *      PRESENCE (gebg re-written at all) is the only rule.
+ *
+ *   C. The pattern holds on a SECOND, unrelated DSP — the Audio Regulator, a
+ *      multiband distortion limiter (not an EQ) — and PINS the commit leaf.
+ *      Moving a limiting band's centre (arbf) is inert until committed, and of
+ *      its THREE payload arrays (arbi isolates, arbl/arbh thresholds) only the
+ *      LAST, arbh, commits — arbi/arbl are stagers, exactly like genb/gebf. (The
+ *      thresholds are live-smoothed each block; it's the band STRUCTURE that the
+ *      arbh write re-derives.) So "re-write the last array to commit" is the
+ *      general rule, not a GEQ quirk — and a freq-array write alone (gebf, arbf)
+ *      never reshapes.
+ *
+ *   D. The storage is FIXED-CAPACITY and a count change never breaks it. The
+ *      arrays are allocated full (40) at ak_open and never resize; filling every
+ *      slot then shrinking the count leaves the out-of-range slots UNTOUCHED —
+ *      never zeroed — and a commit + grow re-exposes them. So a count change has
+ *      no "wrong-sized array" transient to repair; the commit is all it needs.
  *
  * Mechanism, in the binary: each array's *_preupdate hook only dirties a
  * per-feature validity word; genb is POLLED in root_preupdate every block; the
@@ -104,6 +120,7 @@ static uint32_t R(const char *n) { return ak_find(AK, 1, pack4(n)); }
 static int      get(const char *n, int e) { return ak_get(AK, R(n), e); }
 static void     set(const char *n, int e, int v) { ak_set(AK, R(n), e, v); }
 
+static double g_amp = TEST_AMP;   /* tone amplitude; AR raises it to drive limiting */
 static void fill_sine(double amp, double freq) {
     for (int i = 0; i < FRAMES; ++i) {
         int s = (int)(amp * sin(2.0 * M_PI * freq * (i / RATE)));
@@ -113,7 +130,7 @@ static void fill_sine(double amp, double freq) {
 /* Stream n blocks of a fresh tone (process() clobbers input + ACCUMULATEs). */
 static void run(double freq, int n) {
     for (int i = 0; i < n; ++i) {
-        fill_sine(TEST_AMP, freq);
+        fill_sine(g_amp, freq);
         audio_buffer_t ib = { .frameCount = FRAMES, .s16 = g_in };
         audio_buffer_t ob = { .frameCount = FRAMES, .s16 = g_out };
         memset(g_out, 0, FRAMES * 4);
@@ -247,6 +264,110 @@ static int sweep(const char *label, int src_n, int src_b, int dst_n, int dst_b) 
     return all && (hi - lo) / lo < 0.15;
 }
 
+/* ──────────── C. a 2nd structural group (the limiter): which leaf commits? ── */
+
+/* AR (Audio Regulator) is a multiband distortion limiter, not an EQ — wholly
+ * different DSP, same commit protocol. Its band config carries THREE payload
+ * arrays (arbi isolates, arbl/arbh thresholds), so it nails down WHICH is the
+ * commit. We isolate AR in REGULATED_DISTORTION (plmd=3), make ONE band limit a
+ * loud test tone, move that band's centre off the tone, and watch what applies
+ * the move. Limiting REDUCES output, so "reshaped" = ratio climbs back up. */
+#define AR_AMP    12000.0   /* loud: push the tone above the band's limit ceiling */
+#define AR_TONE   1000.0
+#define AR_SETTLE 260       /* the limiter's gain smoother needs a touch longer   */
+#define AR_LIM    0.70      /* ratio-to-FREE below this = limited                 */
+static const int16_t ARBF3[3] = { 200, 1000, 16000 };  /* band 1 centres the tone */
+
+static void ar_isolate(void) {
+    const char *off[] = { "dvle","dvme","vmon","deon","ieon","aoon",
+                          "vdhe","vspe","ngon","geon", NULL };
+    for (int i = 0; off[i]; i++) set(off[i], 0, 0);
+    set("plmd", 0, 3);     /* REGULATED_DISTORTION: AR limits using band thresholds */
+}
+/* Selective 3-band config: only band 1 (centred at b1 Hz) limits; others free. */
+static void ar_sel(int b1) {
+    set("arnb", 0, 3);
+    set("arbf", 0, ARBF3[0]); set("arbf", 1, b1); set("arbf", 2, ARBF3[2]);
+    for (int e = 0; e < 3; e++) { set("arbi",e,0); set("arbl",e,-480); set("arbh",e, e==1?-320:0); }
+}
+static double ar_meas(void) { run(AR_TONE, AR_SETTLE); return rms_of(g_out); }
+
+static int ar_reshape(void) {
+    printf("=== C: AR (Audio Regulator, a limiter) — 2nd structural group; which leaf commits?\n");
+    g_amp = AR_AMP;
+    ar_isolate();
+    ar_sel(1000);                                   /* band1@1000 limits the tone */
+    for (int e = 0; e < 3; e++) set("arbh", e, 0);  /* lift the ceiling -> no limit */
+    double FREE = ar_meas();
+    ar_sel(1000); double lim = ar_meas();
+    printf("  selective 3-band, band1@1000Hz limits tone:  x%.2f  %s\n",
+           lim/FREE, lim/FREE < AR_LIM ? "LIMITED" : "not limited??");
+
+    set("arbf", 1, 8000); double inert = ar_meas();           /* move band, NO payload */
+    printf("  move band1 1000->8000 Hz (arbf), NO payload:  x%.2f  %s\n",
+           inert/FREE, inert/FREE < AR_LIM ? "still limited -> INERT" : "RESHAPED");
+    for (int e = 0; e < 3; e++) set("arbh", e, e==1?-320:0);  /* identical = commit */
+    double com = ar_meas();
+    printf("  re-write arbh (identical = COMMIT):           x%.2f  %s\n",
+           com/FREE, com/FREE > AR_LIM ? "RESHAPED (tone now in a free band)" : "still limited");
+
+    /* Which payload array commits? Re-stage the move, settle to consume the prior
+     * commit, then write exactly ONE array (identical values). */
+    printf("  which of the 3 payload arrays commits the move? (identical values)\n");
+    int v[3]; const char *nm[3] = { "arbi","arbl","arbh" };
+    for (int k = 0; k < 3; k++) {
+        ar_sel(1000); ar_meas();                 /* committed @1000, commit consumed */
+        set("arbf", 1, 8000); ar_meas();         /* stage move (inert), settle       */
+        for (int e = 0; e < 3; e++)
+            if (k==0) set("arbi",e,0); else if (k==1) set("arbl",e,-480); else set("arbh",e,e==1?-320:0);
+        double r = ar_meas() / FREE;
+        v[k] = r > AR_LIM;
+        printf("     %s : x%.2f  %s\n", nm[k], r, v[k] ? "COMMITS" : "inert");
+    }
+    g_amp = TEST_AMP;
+    return lim/FREE < AR_LIM && inert/FREE < AR_LIM && com/FREE > AR_LIM
+           && !v[0] && !v[1] && v[2];
+}
+
+/* ─────────── D. storage is fixed-capacity; a count change never breaks it ──── */
+
+/* How many of slots [lo..cap) of arrays f and g hold a non-zero value. */
+static int tail_nz(const char *f, const char *g, int lo, int cap) {
+    int nz = 0;
+    for (int e = lo; e < cap; e++) { if (get(f, e)) nz++; if (get(g, e)) nz++; }
+    return nz;
+}
+
+/* Fill every slot, then shrink/grow genb and read the raw storage back. The
+ * out-of-range slots must stay exactly as written (never zeroed), so a count
+ * change has no broken transient to repair — only the commit re-derives the
+ * active shape. */
+static int slots(void) {
+    printf("=== D: storage is fixed-capacity — does shrinking the count zero the tail?\n");
+    geq_only();
+    int cap = ak_get_length(AK, R("gebf"));
+    set("genb", 0, 20);
+    for (int e = 0; e < cap; e++) { set("gebf", e, 100*(e+1)); set("gebg", e, e+1); }
+    int full = tail_nz("gebf", "gebg", 5, cap);                  /* slots 5..cap all set */
+
+    set("genb", 0, 5);                                           /* SHRINK, no array touch */
+    int shrunk = tail_nz("gebf", "gebg", 5, cap);
+    for (int e = 0; e < 5; e++) set("gebg", e, get("gebg", e));  /* commit the smaller shape */
+    run(LO_TONE, 40);                                            /* let the recompute run    */
+    int after = tail_nz("gebf", "gebg", 5, cap);
+    set("genb", 0, 20);                                          /* GROW back, no array touch */
+    int regrown = tail_nz("gebf", "gebg", 5, cap);
+
+    printf("  capacity(len)=%d; filled all slots, tail 5..%d non-zero=%d\n", cap, cap-1, full);
+    printf("  shrink 20->5 (no touch):   tail non-zero %d  %s\n",
+           shrunk, shrunk==full ? "PRESERVED" : "CHANGED");
+    printf("  + commit + 40 blocks:      tail non-zero %d  %s\n",
+           after, after==full ? "PRESERVED (recompute ignores tail)" : "ZEROED/CHANGED");
+    printf("  grow 5->20 back:           tail non-zero %d  %s\n",
+           regrown, regrown==full ? "old values reusable" : "CHANGED");
+    return shrunk==full && after==full && regrown==full;
+}
+
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL); setbuf(stderr, NULL);
     if (argc < 2) { fprintf(stderr, "Usage: %s <libdseffect.so>\n", argv[0]); return 1; }
@@ -282,6 +403,8 @@ int main(int argc, char *argv[]) {
     int a2  = wake_band();
     int inc = sweep("INCREASE", LO_N, LO_BOOST, HI_N, HI_BOOST);
     int dec = sweep("DECREASE", HI_N, HI_BOOST, LO_N, LO_BOOST);
+    int c   = ar_reshape();
+    int d   = slots();
 
     printf("=== SUMMARY ══════════════════════════════════════════════════════\n");
     printf("  Structural constants are RUNTIME-MUTABLE: the engine reshapes its\n");
@@ -293,8 +416,12 @@ int main(int argc, char *argv[]) {
     printf("  B. among the commit writes, order is free:\n");
     printf("     count INCREASE 10->20, all 6 orders   : %s\n", inc ? "same shape" : "DIVERGED");
     printf("     count DECREASE 20->10, all 6 orders   : %s\n", dec ? "same shape" : "DIVERGED");
-    printf("  => commit PRESENCE (gebg re-written at all), not ORDER, is the rule\n");
-    printf("     — the gebg write triggers the recompute even with identical values.\n");
+    printf("  C. same protocol on a 2nd DSP (the limiter), commit leaf pinned:\n");
+    printf("     AR arbf move inert; only arbh commits  : %s\n", c ? "YES (arbi/arbl are stagers)" : "NO");
+    printf("  D. storage is fixed-capacity; a count change never breaks the arrays:\n");
+    printf("     fill 40, shrink, grow — tail preserved : %s\n", d ? "YES (never zeroed)" : "NO");
+    printf("  => commit PRESENCE (re-write the last array), not ORDER, is the rule\n");
+    printf("     — the commit write triggers the recompute even with identical values.\n");
 
     _Exit(0);
 }

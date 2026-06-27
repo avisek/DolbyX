@@ -157,10 +157,10 @@ Sends real SET_CONFIG and reads the live rate via `ak_bus_get_rate`:
 ### `reshape_probe` — runtime reshape of structural constants (`make reshape`)
 
 Can the "structural constant" params (`genb`/`gebf`, `ienb`/`iebf`, `aonb`/`aobf`,
-`aocc`) change at runtime, or are they frozen once the graph is built? They aren't
-write-protected, so `ak_set` stores them — the real question is whether a write
-*reshapes* the live DSP. Isolating the GEQ and watching where a band boost lands,
-it proves two things:
+`aocc`, `arnb`/`arbf`) change at runtime, or are they frozen once the graph is
+built? They aren't write-protected, so `ak_set` stores them — the real question is
+whether a write *reshapes* the live DSP. Isolating a feature and watching where a
+band boost or limit lands, it shows:
 
 - **A. They reshape at runtime — gated by a commit.** A band-count / frequency
   write is **inert until the band gains are re-written**; that gains write
@@ -176,12 +176,31 @@ it proves two things:
   of `genb`/`gebf`/`gebg` lands the *identical* shape (0 % spread), raising or
   lowering the band count alike — even orders that write the gains **first**. So
   "commit *order*" isn't a constraint; **commit *presence*** is.
+- **C. Same protocol on a second, unrelated DSP — and it pins the commit leaf.**
+  The Audio Regulator (a multiband distortion limiter, not an EQ) follows the same
+  gate: moving a limiting band's centre (`arbf`) is inert until committed. Its
+  band config has *three* payload arrays (`arbi` isolates, `arbl`/`arbh`
+  thresholds), and only the **last**, `arbh`, commits (`x0.65`→`x0.96`) —
+  `arbi`/`arbl` are stagers like `gebf`. (The thresholds are live-smoothed; the
+  `arbh` write re-derives the band *structure*.) So "re-write the last array to
+  commit" is general, not a GEQ quirk.
+- **D. Storage is fixed-capacity; a count change never breaks the arrays.** The
+  arrays are allocated full (`ak_get_length` = **40**) at `ak_open` and never
+  resize. Filling all 40 slots, then shrinking `genb` 20→5, leaves the
+  out-of-range slots **untouched** (tail non-zero `70`→`70`); a commit + 40
+  process blocks doesn't zero them either (the recompute reads only the active
+  slots); growing back re-exposes the old values. So a count change has **no
+  "wrong-sized array" transient to repair** — the commit is all it needs. This is
+  why "update a param" stays simple: write it, then touch the group's commit leaf.
 - **Mechanism, in the binary.** Each freq/gain array has a `*_preupdate` write
-  hook (`gebf_preupdate`/`gebg_preupdate`, …) that only dirties a per-feature
-  validity word; the counts are polled in `root_preupdate` (every block, inside
-  `ak_update`). The `egq` recompute (`dlb_polylog_pow`) runs at the next process
-  block off the *current* stored state — so write order is unobservable, and only
-  the gains write sets the commit bit. See
+  hook (`gebf_preupdate`/`gebg_preupdate`, …) that only flips a bit in a
+  per-feature validity word (GEQ `0x5c0`, IEQ `0x718`, AO `0x870`, AR `0x9c8`):
+  stagers set a "dirty" bit (`gebf`→`0x02`), the **commit leaf sets bit `0x40`**.
+  Counts have no hook — they're polled in `root_preupdate` (every block, inside
+  `ak_update`) and a change only *invalidates* (`bic #0x3d`), never sets `0x40`.
+  The `egq` recompute (`dlb_polylog_pow`) runs at the next process block off the
+  *current* stored state when `0x40` is present — so write order is unobservable,
+  and only the commit-array write triggers it. See
   [02 — Changing them at runtime](../../docs/ddp/02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol).
 
 ## Prerequisites
