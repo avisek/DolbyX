@@ -27,7 +27,7 @@ establishes the following facts:
 | 6b  | `process()` **accumulates** into the output and **clobbers its input**. Pre-filling the output yields `prior + input`, so the host must zero it every block (a disabled `-ENODATA` block then passes the input through). The input is overwritten too — enabled leaves that block's output, disabled leaves ~noise — so pass a scratch copy if you need the original PCM | stdout `Test A: … accumulate-match=512/512`; `input after enabled block N` == that block's output; `input after process()` `peak≈394` (disabled) |
 | 7   | **The DSP reads the clamped registry, not the raw cache.** A direct cache poke (registry frozen, verified via `ak_get`) leaves the output unchanged (`0/512`) while the matching `SET` changes `512/512`. Out-of-range sweep pairs collapse because `ak_set` clamps both to the same value: `vmb=240 ≡ vmb=480` (→192), `dvla=10 ≡ dvla=200` (→10). (The leveler/maximizer are stateful, so the cache-poke runs first on a clean path with reproducibility gates — sweep peaks are trends, not exact.) | stdout `POKE cache=160 … 0/512 … DSP READS CLAMPED REGISTRY`; sweep `dvla=10/200 peak=51`, `vmb=240/480 peak≈32764`                                                                                                                                                                                                               |
 | 8   | Cache writes addressing a flat index past `cache_total` are rejected with -22; but the engine only checks `begin` — a `count=20` SET starting at `cache_total - 5` is accepted with reply 0, so writes straddling the cache edge corrupt adjacent memory rather than failing safe (this destructive SET, #8b, runs **last**); bogus 4-CCs in DEFINE_PARAMS are accepted silently                                                       | `setting_index 767 is invalid (number of settings defined is 667)`; stdout "SET flat=662 count=20 ... -> reply=0"; absence of error for `DEFINE_PARAMS [xxxx, dvla, yyyy]`                                                                                                                                                       |
-| 9   | **The engine's own `ak_get` reads the live AK registry** (reachable from fixed context offsets). `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and the 20 excitations (`vcbe`); `vnbg`/`vnbe` have no cmd-4 path but are readable and both **mirror** `vcbg`/`vcbe`; `ak_get_min/max` expose the engine's true ranges, audited for a sample where `vmb` (`[0..192]`) and `vol` (`[-2080..480]`) differ from the Java table; a runtime value-diff shows only the visualizer slots change during `process()`     | stdout `(a) ak_get vs cmd 4: gains 20/20, excitations 20/20 match`, `(b) vnbg == vcbg: 20/20, vnbe == vcbe: 20/20`, `(c) vmb engine[0..192] … <- TABLE WRONG`, `(d) registry slots that CHANGED across runtime: vnbe vcbe`                                                                                                                                                   |
+| 9   | **The engine's own `ak_get` reads the live AK registry** (reachable from fixed context offsets). `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and the 20 excitations (`vcbe`); the native `vnbg`/`vnbe` have no cmd-4 path but are readable and **equal** the custom `vcbg`/`vcbe` here — only because the engine seeds the custom band grid to the native one (`vc*` is `vn*` resampled; `make vis` remaps `vcbf` to prove they diverge); `ak_get_min/max` expose the engine's true ranges, audited for a sample where `vmb` (`[0..192]`) and `vol` (`[-2080..480]`) differ from the Java table; a runtime value-diff shows only the visualizer slots change during `process()`     | stdout `(a) ak_get vs cmd 4: gains 20/20, excitations 20/20 match`, `(b) vnbg == vcbg: 20/20, vnbe == vcbe: 20/20`, `(c) vmb engine[0..192] … <- TABLE WRONG`, `(d) registry slots that CHANGED across runtime: vnbe vcbe`                                                                                                                                                   |
 | 10  | **Java's param set disagrees with the engine's root.** Set-diffs the engine's real root leaves against the host's DEFINE_PARAMS list (`G[]`, verbatim `DsAkSettings`), so it discovers the mismatch rather than asserting it: two **phantoms** (`mxou`/`lcsz`) aren't root leaves — they're node params (nested under DSP nodes in `dump-tree`), so their flat registration gets **ref 0** (dead, the write is dropped) — and two real root leaves (`scpe`/`test`) are omitted. Correct host set = Java's 64 − {`mxou`,`lcsz`} + {`scpe`,`test`}. Full authoritative tree + metadata: `make dump-tree`. | stdout `mxou -> ref 0  (not a root leaf; see dump tree)`, `lcsz -> ref 0 …`, `scpe -> ref 71  [0 .. 2] frac=0`, `test -> ref 139  [0 .. 1] frac=0` |
 
 The DEFINE_SETTINGS pre-population effect (engine fires
@@ -203,6 +203,33 @@ band boost or limit lands, it shows:
   and only the commit-array write triggers it. See
   [02 — Changing them at runtime](../../docs/ddp/02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol).
 
+### `vis_native_probe` — native vs custom visualizer bands (`make vis`)
+
+The visualizer has **two** band families, and they're one source plus a view of
+it — not two measurements (engine help text, `make dump-docs`):
+
+- **Native (`vn*`)** — the engine's own filterbank bands. `vnnb`/`vnbf` *report*
+  the count + centre frequencies (read-only); the DSP fills `vnbg`/`vnbe` each
+  block. The ground truth.
+- **Custom (`vc*`)** — the native data **interpolated onto a host-set grid**.
+  `vcnb`/`vcbf` are **writable**; the engine resamples onto them, filling
+  `vcbg`/`vcbe` (the pair cmd 4 returns).
+
+`ddp_probe` #9 saw `vnbg`/`vnbe` == `vcbg`/`vcbe` only because the engine **seeds
+the custom grid to the native grid** at startup — an identity it never disturbed.
+This probe disturbs it:
+
+- **A. Default config — they coincide.** Untouched, `vcbf` == `vnbf` (0/20 differ),
+  so `vcbg`==`vnbg` and `vcbe`==`vnbe`, 20/20. The "mirror."
+- **B. Remap `vcbf`, they split.** Writing a different grid ([120,240,…,2400] Hz)
+  swings the custom pair by **max |Δ|≈430** (whole bands relocated by frequency)
+  while the native pair holds to **≈8** (smoother noise); `vcbg`==`vnbg` collapses
+  to 1/20. So `vc*` is `vn*` resampled, not a copy.
+
+Neither family is redundant: `vn*` is the zero-config ground truth, `vc*` the
+host-configurable view. See
+[02 — Visualizer bands](../../docs/ddp/02-ak-parameters.md).
+
 ## Prerequisites
 
 - `apt install gcc-arm-linux-gnueabihf qemu-user-static`
@@ -223,6 +250,7 @@ make run-log    # like run but stderr -> engine.log for grepping
 make akctl      # akctl_probe — AK-direct param control (see Companion probes)
 make setconfig  # setconfig_probe — EFFECT_CMD_SET_CONFIG / sample rate
 make reshape    # reshape_probe — runtime reshape of structural constants (commit gates it; order is free)
+make vis        # vis_native_probe — native vs custom visualizer bands (vc* is vn* resampled)
 ```
 
 The `liblog_stub.c` here is a verbose drop-in replacement for
@@ -251,7 +279,7 @@ make run 2>/dev/null | grep -E "40/40 slots differ"                  # cmd 4 vcb
 make run 2>/dev/null | grep -E "cache\(raw\)=210 .*ak_get\(clamped\)=10"  # cache raw vs registry clamp
 make run 2>/dev/null | grep -E "DSP READS CLAMPED REGISTRY"          # DSP reads registry, not cache
 make run 2>/dev/null | grep -E "ak_get vs cmd 4: gains 20/20, excitations 20/20" # ak_get == cmd 4 (both halves)
-make run 2>/dev/null | grep -E "vnbg == vcbg: 20/20, vnbe == vcbe: 20/20"        # vnbg/vnbe are live mirrors
+make run 2>/dev/null | grep -E "vnbg == vcbg: 20/20, vnbe == vcbe: 20/20"        # native==custom (grid seeded to native; see make vis)
 make run 2>/dev/null | grep -E "vmb .*0\.\.192.*TABLE WRONG"         # engine range != Java table
 make run 2>/dev/null | grep -E "accumulate-match=512/512"            # process() ACCUMULATE mode
 make run 2>/dev/null | grep -B1 "begin+count=682" | grep "flat=662"  # begin-only bounds (#8b, last)
@@ -274,6 +302,7 @@ tools/ddp_probe/
 ├── akctl_probe.c        # AK-direct param control (cmd 3 ≡ ak_set, no handshake)
 ├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
 ├── reshape_probe.c      # runtime reshape of structural constants (gebg commit; order-free)
+├── vis_native_probe.c   # native (vn*) vs custom (vc*) visualizer bands — vc* is vn* resampled
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 

@@ -134,11 +134,11 @@ no-op when referenced later — `ak_set` against it will log
 > only sends those 24, and so the engine assigns them indices 0..23. But
 > this means parameters NOT in that list cannot be referenced by index.
 >
-> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with the 54
+> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with the 58
 > surfaced AK names from [02-ak-parameters.md](02-ak-parameters.md)
-> (drops 10 unreadable engine-internal slots: `bver`, `bndl`, `ver`,
-> `lcmf`, `lcvd`, `lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`).
-> Storage cost is ~220 bytes; the gain is symmetry with the metadata
+> (drops only the 6 unreadable engine-internal slots: `bver`, `bndl`,
+> `ver`, `lcmf`, `lcvd`, `lcpt`).
+> Storage cost is ~230 bytes; the gain is symmetry with the metadata
 > table and access to the "Experimental" bucket (`endp`, `preg`,
 > `pstg`, `scpe`, etc.) that the original UI hides.
 
@@ -192,11 +192,11 @@ The exact total depends on `aonb` (which sets `aobf` to length 40 and
 
 > **Recommendation for DolbyX v2**: emit one entry per `(param_idx,
 > offset)` for every offset in every surfaced param's value array,
-> matching the original DDP layout. DolbyX v2 includes all 54 surfaced
-> AK params (drops the 10 unreadable slots — see DEFINE_PARAMS
+> matching the original DDP layout. DolbyX v2 includes all 58 surfaced
+> AK params (drops the 6 unreadable slots — see DEFINE_PARAMS
 > recommendation above and the "DEFINE_SETTINGS scope" subsection
 > below) so every surfaced param has a cache slot — the cost is
-> ~0.8 KB of cache, the gain is access to "Experimental" writes plus
+> ~0.9 KB of cache, the gain is access to "Experimental" writes plus
 > the [pre-population side effect](#settings-cache-lifecycle).
 
 ## Steady-state SET commands
@@ -533,13 +533,12 @@ After step 10 the engine actually starts processing audio when
 
 The original DDP service restricts DEFINE_SETTINGS to the 42 params
 in Java's `DsAkSettings.isParamSettable` whitelist. DolbyX v2's
-research-vehicle goal is better served by **including the 54 surfaced
+research-vehicle goal is better served by **including the 58 surfaced
 params** (everything from
-[02-ak-parameters.md](02-ak-parameters.md) except the 10 unreadable
-engine-internal slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`):
+[02-ak-parameters.md](02-ak-parameters.md) except the 6 unreadable
+engine-internal slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`):
 
-- Cache cost is ~0.8 KB (`~422` slots × 2 bytes) — negligible.
+- Cache cost is ~0.9 KB (`~484` slots × 2 bytes) — negligible.
 - Every surfaced param gets cache pre-population from the engine's
   internal AK state at DEFINE_SETTINGS time (see
   [Settings cache lifecycle](#settings-cache-lifecycle)).
@@ -797,9 +796,9 @@ surfaces three buckets, each derived from observed DSP behaviour:
   DSP ignores; the universal ak_set forwarding in section 5b extends this
   to every Experimental param.
 
-A fourth group of 10 AK slots is **excluded** from DolbyX v2's
-surfaces (DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because
-they share one trait — no host read path:
+A group of 6 AK slots is **excluded** from DolbyX v2's surfaces
+(DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because they share one
+trait — no host read path:
 
 - Engine-internal identity / license slots: `bver`, `bndl`, `ver`,
   `lcmf`, `lcvd`, `lcpt`. DSP doesn't read them at runtime;
@@ -808,12 +807,14 @@ they share one trait — no host read path:
   have no observable effect. The engine version string (`ver`) is
   reachable via cmd 6 and surfaces as `engine.version` on the
   bootstrap rather than as an AK parameter.
-- Native-visualizer slots: `vnnb`, `vnbf`, `vnbg`, `vnbe`. No cmd 4
-  path, but `ak_get` reads them (ddp_probe #9): `vnbg`/`vnbe` **are**
-  live and audio-tracking — yet a byte-for-byte **mirror** of
-  `vcbg`/`vcbe` regardless of `vnbf`/`vnnb`, so they carry nothing extra.
-  Excluded because they duplicate the `vcb*` channel the visualizer
-  already rides.
+
+The native-visualizer slots `vnnb`/`vnbf`/`vnbg`/`vnbe` are **not** excluded:
+`ak_get` reads them (ddp_probe #9), and they're the engine's ground-truth
+filterbank visualizer — the source the custom `vcbg`/`vcbe` channel resamples
+onto its host-set grid. `vc*` mirrors `vn*` only while the custom bands are
+left at their default (native) layout; v2 keeps both (`vc*` for the Visualizer
+element, `vn*` in the Advanced panel). See
+[02-ak-parameters.md](02-ak-parameters.md).
 
 The bucket classification lives in
 [02-ak-parameters.md](02-ak-parameters.md#engine-vs-java-settability).

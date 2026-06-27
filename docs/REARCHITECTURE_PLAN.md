@@ -74,15 +74,16 @@ build a cleaner foundation that:
 5. Custom IEQ presets can be added, edited, renamed, and removed. IEQ
    presets are global — a change to a preset reflects across every profile
    that has it currently selected.
-6. Every AK parameter that the engine surfaces (54 of the engine's 64 real
+6. Every AK parameter that the engine surfaces (58 of the engine's 64 real
    root leaves) is exposed in the Advanced UI section, driven by metadata —
    including ReadOnly ones (for live monitoring) and Experimental ones
    (engine-internal slots the original DDP UI hid; DolbyX is also a research
-   vehicle for `libdseffect.so`). The remaining 10 — 6 static build-version /
-   license slots plus 4 native-visualizer slots (`vnnb`, `vnbf`, `vnbg`,
-   `vnbe`; `ak_get` shows `vnbg`/`vnbe` are a live mirror of `vcbg`/`vcbe`) —
-   carry nothing the host needs and are dropped entirely; the engine version
-   surfaces via cmd 6. (The engine's 64 real root leaves are *not* Java's
+   vehicle for `libdseffect.so`). The remaining 6 — static build-version /
+   license slots — carry nothing the host needs and are dropped entirely; the
+   engine version surfaces via cmd 6. The native-visualizer family `vnnb`/
+   `vnbf`/`vnbg`/`vnbe` is *kept* (ReadOnly): it's the engine's ground-truth
+   filterbank visualizer, the source the custom `vcbg`/`vcbe` channel resamples.
+   (The engine's 64 real root leaves are *not* Java's
    64-name list — Java registers two phantoms and omits two real leaves; see
    [docs/ddp/02](ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves).)
 7. Backend-agnostic engine layer: the QEMU subprocess approach is the
@@ -347,13 +348,14 @@ Visualizer/Equalizer, behind a toggle).
 
 > Persistent record: [ADR-0004 — Parameter metadata as single source of truth](adr/0004-parameter-metadata-as-single-source-of-truth.md).
 
-54 of the engine's 64 real root-leaf AK parameters are declared once in a
-static metadata table. (The other 10 — `bver`, `bndl`, `ver`, `lcmf`,
-`lcvd`, `lcpt` (static engine-internal build-version / license slots) plus
-`vnnb`, `vnbf`, `vnbg`, `vnbe` (native-visualizer slots; `ak_get` shows
-`vnbg`/`vnbe` are a live byte-for-byte mirror of `vcbg`/`vcbe`) — carry
-nothing the host needs and are omitted; the engine version string is
-surfaced via cmd 6 → bootstrap `engine.version` instead.) The 64 real root
+58 of the engine's 64 real root-leaf AK parameters are declared once in a
+static metadata table. (The other 6 — `bver`, `bndl`, `ver`, `lcmf`,
+`lcvd`, `lcpt`, static engine-internal build-version / license slots — carry
+nothing the host needs and are omitted; the engine version string is surfaced
+via cmd 6 → bootstrap `engine.version` instead. The native-visualizer family
+`vnnb`/`vnbf`/`vnbg`/`vnbe` is *kept* as ReadOnly — it's the engine's
+ground-truth filterbank visualizer, the source the custom `vcbg`/`vcbe`
+channel resamples onto a host-set grid.) The 64 real root
 leaves are *not* Java's `DsAkSettings.akParams_` 64-name list: Java
 registers two phantoms (`mxou`, `lcsz` — node params resolving to ref 0)
 and omits two real leaves (`scpe`, `test`); the table seeds from the engine
@@ -448,27 +450,23 @@ engine-level acceptance:
 - **Settable** — every param in Java's `isParamSettable` whitelist
   (42 params). DSP reads the value and produces well-defined
   bounded behaviour. Editable widgets in the Advanced panel.
-- **ReadOnly** — `vcbg`, `vcbe` only. The engine write-protects both
-  (flag `0x2`), so host writes are rejected; the DSP still refreshes the
-  slots every audio block (observed via cmd 4 during RE). v2 reads them through the
-  AK-direct path like any param — the visualizer pump batches both into
-  one `get_params` call (40 int16s, one round-trip); live-updated
-  read-only displays in the UI ride that pump (see Decision 4 and
-  Decision 10).
-  Two families of slots that would naturally fit "ReadOnly" by DSP
-  semantics are excluded from the metadata table entirely: (a)
-  engine-internal build-version / license slots (`bver`, `bndl`, `ver`,
-  `lcmf`, `lcvd`, `lcpt`) — the engine pre-populates them at
-  DEFINE_SETTINGS time and they never change at runtime, so they'd only
-  surface static values; (b) the native-visualizer family (`vnnb`,
-  `vnbf`, `vnbg`, `vnbe`) — no cmd 4 path, and although `ak_get` confirms
-  `vnbg`/`vnbe` are live and audio-tracking, they're a byte-for-byte
-  mirror of `vcbg`/`vcbe` regardless of their own band config, so they
-  carry nothing the visualizer pump doesn't already deliver. Both groups
-  are dropped. The engine version
-  string, which the original DDP UI does display, is exposed via
-  the bootstrap `engine.version` field (sourced from cmd 6) instead
-  of as an AK parameter — see Decision 6.
+- **ReadOnly** — `vcbg`, `vcbe` (custom) + `vnnb`, `vnbf`, `vnbg`, `vnbe`
+  (native). The engine write-protects all six (flag `0x2`), so host writes are
+  rejected. `vcbg`/`vcbe` and `vnbg`/`vnbe` refresh every audio block; `vnnb`/
+  `vnbf` report the fixed native grid. v2 reads them through the AK-direct path
+  like any param — the visualizer pump batches the **custom** pair into one
+  `get_params` call (40 int16s, one round-trip) for the Visualizer element,
+  while the **native** family backs read-only displays in the Advanced panel
+  (see Decision 4 and Decision 10). `vc*` and `vn*` read identical until the
+  custom bands are reconfigured, because the engine seeds the custom grid to the
+  native one — `vc*` is the native data resampled onto host-set `vcnb`/`vcbf`.
+  One family that would naturally fit "ReadOnly" is excluded from the metadata
+  table entirely: the engine-internal build-version / license slots (`bver`,
+  `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`) — the engine pre-populates them at
+  DEFINE_SETTINGS time and they never change at runtime, so they'd only surface
+  static values, with no host read path. The engine version string, which the
+  original DDP UI does display, is exposed via the bootstrap `engine.version`
+  field (sourced from cmd 6) instead of as an AK parameter — see Decision 6.
 - **Experimental** — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test`. Editable behind an
@@ -1393,7 +1391,7 @@ DolbyX/
 │   │   ├── src/profile.rs
 │   │   ├── src/preset.rs
 │   │   ├── src/state.rs             #   State aggregate + all mutations
-│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 54 entries)
+│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 58 entries)
 │   │   └── src/conversion.rs        #   int16 ↔ dB helpers (used by UI tests too)
 │   ├── ddp-persistence/             # TOML load/save — separate from state logic
 │   │   ├── src/lib.rs
@@ -1473,7 +1471,7 @@ entry below passes the deletion test.
 | **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the visualizer pump reads `vcbg`/`vcbe` via `get_params`. | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
 | **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT`, `SET_CONFIG` for a non-default rate, constant params via `ak_set`, `VISUALIZER_ENABLE`, `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), `EngineInfo` caching from cmd 6. `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Profile::selected_eq_preset` always exists; deleting a referenced EQ preset falls profiles back to `"off"`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
-| **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 54 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
+| **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 58 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)`. Errors: `ParseError`, `MigrationFailed`. | `defaults.toml` + `config.toml` overlay, `notify` watcher, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
@@ -1526,7 +1524,7 @@ does not apply. Treat this slice as one-shot setup.
 - `defaults.toml` created from `ds1-default.xml` — each factory profile
   / EQ preset stored as its delta over the `ParameterDef.default` base.
 - AK parameter metadata table (`parameters.toml` + codegen) populated
-  with all 54 surfaced entries, **seeded from the engine tree**
+  with all 58 surfaced entries, **seeded from the engine tree**
   (`make -C tools/ddp_probe dump-tree`) — authoritative names, ranges,
   frac bits, and one-line descriptions straight from the binary — *not*
   transcribed from Java / [02](ddp/02-ak-parameters.md). (The engine also
@@ -1542,10 +1540,10 @@ does not apply. Treat this slice as one-shot setup.
   structural constants (band counts, freq tables, `aocc`) carry their
   host-set 20-band values instead — the engine boots 10-band (see
   Decision 3).
-  (The 10 omitted entries — 6 static engine-internal build-version /
-  license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` plus the 4
-  native-visualizer slots `vnnb`, `vnbf`, `vnbg`, `vnbe` (live via `ak_get`
-  but a mirror of `vcbg`/`vcbe`) — carry nothing the host needs.)
+  (The 6 omitted entries — static engine-internal build-version / license
+  slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` — carry nothing the host
+  needs. The native-visualizer family `vnnb`/`vnbf`/`vnbg`/`vnbe` is kept as
+  ReadOnly: the engine's ground-truth filterbank, which `vcbg`/`vcbe` resample.)
 
 **Progress checklist:**
 
@@ -1554,7 +1552,7 @@ does not apply. Treat this slice as one-shot setup.
 - [ ] GitHub Actions CI green on Linux + Windows runners
 - [ ] UI scaffold builds via `pnpm --prefix ui build`
 - [ ] `defaults.toml` round-trips through TOML parser
-- [ ] `parameters.toml` → codegen `parameters.rs` produces 54 entries
+- [ ] `parameters.toml` → codegen `parameters.rs` produces 58 entries
 - [ ] `parameters.toml` seeded from `make -C tools/ddp_probe dump-tree` (drops `mxou`/`lcsz`, adds `scpe`/`test`)
 - [ ] Settable `ParameterDef.default` values captured via `make -C tools/ddp_probe dump-defaults`
 - [ ] All linters / formatters / type-checkers clean
@@ -1866,7 +1864,7 @@ overrides.
 
 ---
 
-### Slice 8 — Advanced panel auto-generated for all 54 AK parameters
+### Slice 8 — Advanced panel auto-generated for all 58 AK parameters
 
 **Slice goal.** Opening the Advanced section renders every surfaced
 AK parameter as a widget chosen by its `ParamKind` × `ParamAccess`.
@@ -1881,7 +1879,7 @@ CSS-grid layout.
 
 **Behaviors to test:**
 
-1. [ ] Bootstrap delivers all 54 `ParameterDef` entries in stable
+1. [ ] Bootstrap delivers all 58 `ParameterDef` entries in stable
        table order.
 2. [ ] `WidgetFactory` dispatches by `(ParamKind, ParamAccess)`;
        every kind has a matching widget; unknown combos render an
@@ -1900,7 +1898,7 @@ CSS-grid layout.
        first.
 
 **Tracer bullet test.** Render `AdvancedPanel` with a fixture of 54
-params, assert 54 widgets appear in a `data-testid`-matched grid;
+params, assert 58 widgets appear in a `data-testid`-matched grid;
 one Settable Toggle commit fires the expected WS message.
 
 **Mock policy.** Stub (engine side) + real `axum` (HTTP/WS). UI tests
@@ -1933,7 +1931,7 @@ tests against the real engine exercises exactly where the risk lives
 2. [ ] `QemuBackend::start` spawns one `qemu-arm-static` subprocess
        and initializes a session via the AK-direct binding
        ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)):
-       - `EFFECT_CMD_INIT`, then resolve the 54 surfaced 4-CC names to
+       - `EFFECT_CMD_INIT`, then resolve the 58 surfaced 4-CC names to
          refs with `ak_find` — no DEFINE_PARAMS / DEFINE_SETTINGS
          handshake (the engine version still flows via cmd 6 →
          bootstrap `engine.version`).
@@ -2102,7 +2100,7 @@ for both end users and contributors.
 | GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                                                 |
 | Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
 | Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle + cmd 6 version; visualizer (`vcbg`/`vcbe`) rides the same AK read (ADR-0010)|
-| Param coverage            | 24 of 64 AK params                                   | All 54 surfaced AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); Settable / ReadOnly / Experimental per docs/ddp/02; 10 unreadable slots omitted (6 license/build, 4 vnb\*)                                |
+| Param coverage            | 24 of 64 AK params                                   | All 58 surfaced AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); Settable / ReadOnly / Experimental per docs/ddp/02; 6 unreadable slots omitted (license/build only — native-visualizer `vn*` kept)                                |
 | Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build        |
 | Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                                              |
 | External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                                         |

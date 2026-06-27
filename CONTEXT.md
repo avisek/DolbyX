@@ -41,14 +41,19 @@ the AK registry). Returned together by engine cmd 4
 visualizer rides. In-process, the engine's own `ak_get` reads the same
 registry, and most other params' live value too (see
 [docs/ddp/03](docs/ddp/03-binary-protocol.md#the-ak-registry-read-path)).
+These are the *custom* (`vc*`) bands — the engine's *native* (`vn*`)
+per-band visualizer data resampled onto a host-set frequency grid
+(`vcnb`/`vcbf`); they read identical to `vn*` until that grid is
+reconfigured (see [docs/ddp/02](docs/ddp/02-ak-parameters.md)).
 _Avoid_: "visualizer data" alone (ambiguous between the raw cmd-4 bytes
 and the post-processed `vis` event payload).
 
 **Settability bucket**:
 The classification of an AK parameter as `Settable` (Java-whitelisted, DSP
-produces well-defined output), `ReadOnly` (`vcbg`/`vcbe` — DSP overwrites
-every block), or `Experimental` (engine accepts writes but original DDP UI
-hid the slot).
+produces well-defined output), `ReadOnly` (`vcbg`/`vcbe` and the native
+`vn*` family — engine-owned, write-protected; the DSP fills the
+gain/excitation arrays each block), or `Experimental` (engine accepts writes
+but original DDP UI hid the slot).
 _Avoid_: param access, settable flag.
 
 ### UI / state vocabulary

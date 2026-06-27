@@ -186,42 +186,51 @@ is surfaced as `engine.version` on the bootstrap instead. See
 | --: | ------ | --: | ------ | -------- | -------------------------------------------------------------------------------------------------------------- |
 |  16 | `ngon` |   1 | 0..2   | yes      | Next Gen Surround enable. 0 = off, 1 = on, 2 = auto (on when input is stereo, off when input is already 5.1+). |
 
-### Visualizer compensation bands (the visible visualizer data)
+### Visualizer bands — native (`vn*`) source + custom (`vc*`) view
 
-These are the parameters that the visualizer reads. The engine _fills_
-`vcbg` and `vcbe` with the current state of the EQ curve and the
-spectral excitations every block. The values cannot be written; the
-read happens via command 4 (`DS_PARAM_VISUALIZER_DATA`) which returns
-both arrays concatenated as 40 int16s.
+The engine exposes per-band visualization **two ways** — and they aren't two
+measurements, they're one source and a resampled view of it (engine help text,
+`ddp_probe dump docs`):
 
-|   # | 4-CC   | len | bounds    | settable | Description                                                                                                   |
-| --: | ------ | --: | --------- | -------- | ------------------------------------------------------------------------------------------------------------- |
-|  33 | `vcnb` |   1 | 1..40     | no       | Visualizer band count (= 20 in standard config).                                                              |
-|  34 | `vcbf` |  20 | 20..20000 | no       | Visualizer band centre frequencies in Hz.                                                                     |
-|  35 | `vcbg` |  20 | -192..576 | no       | Visualizer band **gains** in 1/16 dB (-12 to +36 dB). The current EQ curve. UI divides by 16 to get float dB. |
-|  36 | `vcbe` |  20 | -192..576 | no       | Visualizer band **excitations** in 1/16 dB. The current per-band audio energy. UI divides by 16.              |
+- **Native (`vn*`)** — the visualizer's **own filterbank bands**, the
+  ground-truth analysis. The engine owns the layout: `vnnb`/`vnbf` *report* the
+  native band count + centre frequencies (read-only), and the DSP fills
+  `vnbg`/`vnbe` every block.
+- **Custom (`vc*`)** — the native data **interpolated onto a host-chosen grid**.
+  `vcnb`/`vcbf` are **writable**: you pick the count + (monotonically
+  increasing) centre frequencies, and the engine resamples the native
+  gains/excitations onto them, filling `vcbg`/`vcbe`. Command 4
+  (`DS_PARAM_VISUALIZER_DATA`) returns `vcbg‖vcbe` as 40 int16s.
 
-The bound `[-192, +576]` is what the engine actually outputs. The UI
-maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel
-grid (1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rendering).
+So **`vc*` = resample(`vn*`, onto `vcbf`)**. The engine **seeds the custom grid
+to the native grid** at startup, so `vc*` reads byte-for-byte identical to `vn*`
+until a host writes `vcnb`/`vcbf` — then `vc*` follows the new grid while `vn*`
+holds steady (proven in [tools/ddp_probe/](../../tools/ddp_probe/README.md),
+`make vis`: a `vcbf` remap swings `vc*` by max |Δ|≈430 while `vn*` stays at the
+noise floor). The whole `vn*` family and the `vcbg`/`vcbe` data arrays are
+read-only (write-protect bit `0x2`); only the custom **layout** — `vcnb`/`vcbf` —
+is host-writable.
 
-### Visualizer "native" bands (separate set, used internally)
+|   # | 4-CC   | len | bounds    | settable | Description                                                                                            |
+| --: | ------ | --: | --------- | -------- | ------------------------------------------------------------------------------------------------------ |
+|  28 | `ven`  |   1 | 0..1      | no       | Visualizer enable (AK-level; parallel to command 7). `vn*`/`vc*` are filled only while on.             |
+|  29 | `vnnb` |   1 | 1..20     | no       | **Native** band count — the engine's intrinsic filterbank (read-only report; = 20 in standard config). |
+|  30 | `vnbf` |  20 | int16     | no       | **Native** band centre frequencies in Hz (read-only).                                                  |
+|  31 | `vnbg` |  20 | int16     | no       | **Native** band gains in 1/16 dB — the engine's ground-truth gain curve.                               |
+|  32 | `vnbe` |  20 | int16     | no       | **Native** band excitations in 1/16 dB — ground-truth per-band energy.                                 |
+|  33 | `vcnb` |   1 | 0..20     | no\*     | **Custom** band count — **host-writable** (engine seeds it to `vnnb`; `0` = no custom bands).          |
+|  34 | `vcbf` |  20 | 20..20000 | no\*     | **Custom** band centre frequencies in Hz — **host-writable**, monotonically increasing.                |
+|  35 | `vcbg` |  20 | -192..576 | no       | **Custom** band **gains** in 1/16 dB (-12 to +36 dB) — `vn*` gains resampled onto `vcbf`. The EQ curve the UI draws; UI ÷ 16. |
+|  36 | `vcbe` |  20 | -192..576 | no       | **Custom** band **excitations** in 1/16 dB — `vn*` excitations resampled onto `vcbf`. UI ÷ 16.         |
 
-These look identical in shape to the `vc*` family and exist alongside
-them. They are not used by the standard UI and exist for the engine's
-own internal monitoring. None of them are read by `DsClient`. `ak_get`
-(ddp_probe #9) shows `vnbg`/`vnbe` are live and audio-tracking but a
-byte-for-byte **mirror** of `vcbg`/`vcbe` regardless of their own band
-config — so DolbyX v2 drops the `vnb*` family entirely (redundant, and no
-cmd 4 path) — see the "Recommendation for DolbyX v2" section below.
+\* `vcnb`/`vcbf` aren't in Java's `isParamSettable` whitelist, but the engine
+accepts host writes (write-protect bit clear) — DolbyX v2 surfaces them as
+**Experimental**. The `vn*` arrays and `vcbg`/`vcbe` are write-protected
+(**ReadOnly**); see [Engine vs Java settability](#engine-vs-java-settability).
 
-|   # | 4-CC   | len | bounds | settable | Description                                                   |
-| --: | ------ | --: | ------ | -------- | ------------------------------------------------------------- |
-|  28 | `ven`  |   1 | 0..1   | no       | Visualizer enable as an AK parameter (parallel to command 7). |
-|  29 | `vnnb` |   1 | 1..20  | no       | Visualizer-native band count.                                 |
-|  30 | `vnbf` |  20 | int16  | no       | Visualizer-native band frequencies.                           |
-|  31 | `vnbg` |  20 | int16  | no       | Visualizer-native band gains.                                 |
-|  32 | `vnbe` |  20 | int16  | no       | Visualizer-native band excitations.                           |
+The bound `[-192, +576]` is what the engine outputs for `vcbg`/`vcbe`. The UI
+maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel grid
+(1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rendering).
 
 ### Endpoint / volume
 
@@ -485,19 +494,19 @@ below for the exclusion list):
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly** — `vcbg`, `vcbe`                                                          | Engine **write-protects** both (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing and returns `0`; cmd 3 too), not clobbered. The DSP fills them each block; the original reads them via cmd 4, v2 via `ak_get`. | no in Java's setup; included by DolbyX v2 (`ak_get`/`get_params` reads them) |
+| **ReadOnly** — `vcbg`, `vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`                          | Engine **write-protects** all six (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. `vcbg`/`vcbe` (custom) + `vnbg`/`vnbe` (native) are DSP-filled each block; `vnnb`/`vnbf` are the engine's static native-grid descriptors. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; included by DolbyX v2 (`ak_get`/`get_params` reads them) |
 | **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
-The remaining 10 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcpt` (engine-internal build-version / license; DSP doesn't read at
-runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`, `vnbf`,
-`vnbg`, `vnbe` (native-visualizer state — `ak_get` shows `vnbg`/`vnbe`
-are live but a byte-for-byte mirror of `vcbg`/`vcbe`) — carry nothing the
-host needs. Only `ver` is reachable over the protocol, via cmd 6, which
-DolbyX v2 surfaces as `engine.version` rather than as an AK parameter.
-DolbyX v2 omits all 10 from DEFINE_PARAMS and DEFINE_SETTINGS. (`lcsz`,
-Java's 7th license/build name, isn't an engine root leaf at all — it's a
-phantom, not a dropped slot; see above.)
+The remaining 6 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`
+(engine-internal build-version / license; DSP doesn't read at runtime,
+pre-populated at DEFINE_SETTINGS time) — carry nothing the host needs. Only
+`ver` is reachable over the protocol, via cmd 6, which DolbyX v2 surfaces as
+`engine.version` rather than as an AK parameter. DolbyX v2 omits all 6 from
+DEFINE_PARAMS and DEFINE_SETTINGS. (`lcsz`, Java's 7th license/build name,
+isn't an engine root leaf at all — it's a phantom, not a dropped slot; see
+above.) The native-visualizer family (`vnnb`, `vnbf`, `vnbg`, `vnbe`) is
+**not** dropped — it's the ground-truth source the custom `vc*` channel
+resamples, surfaced as ReadOnly (see the visualizer-bands section above).
 
 The engine **clamps** a written value in the AK registry (the cache keeps
 the raw value; see
@@ -544,25 +553,26 @@ but they are there.
 > below classify *which* params v2 surfaces; the binding is AK throughout.
 
 The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a three-bucket classification of the **54 params DolbyX v2
+above into a three-bucket classification of the **58 params DolbyX v2
 surfaces** in its metadata table and the Advanced UI:
 
 - **Settable** (42 params) — every param with `settable = yes` above.
   Daemon validates against metadata; engine accepts the forwarded
   write into both the settings cache and AK registry.
-- **ReadOnly** (2 params) — `vcbg`, `vcbe`. The engine **write-protects**
-  both (flag bit `0x2`), so host writes are rejected, not clobbered; the DSP
-  fills them each block. Readable via cmd 4 (`DS_PARAM_VISUALIZER_DATA`) in
-  the original; DolbyX v2's pump reads them in-process via
-  `get_params`/`ak_get` (`vcbg ‖ vcbe`, 40 int16s). Rendered as live
-  read-only displays.
+- **ReadOnly** (6 params) — `vcbg`, `vcbe` (custom) + `vnnb`, `vnbf`, `vnbg`,
+  `vnbe` (native). All write-protected (flag bit `0x2`), so host writes are
+  rejected, not clobbered. `vcbg`/`vcbe` and `vnbg`/`vnbe` are DSP-filled each
+  block; `vnnb`/`vnbf` report the fixed native grid. The Visualizer element
+  rides the **custom** pair via the pump's `get_params`/`ak_get` (`vcbg ‖ vcbe`,
+  40 int16s, as cmd 4 did); the **native** family is surfaced in the Advanced
+  panel. Rendered as live read-only displays.
 - **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
   `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
   a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —
   formerly counted here — is a dead phantom, dropped. See
   [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).)
 
-The remaining 10 AK slots are dropped entirely:
+The remaining 6 AK slots are dropped entirely:
 
 - `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` —
   engine-internal build-version / license slots. DSP doesn't read
@@ -571,13 +581,12 @@ The remaining 10 AK slots are dropped entirely:
   one externally-visible value, the engine version string, comes
   out of cmd 6 and is surfaced as `engine.version` on the bootstrap
   rather than as an AK parameter.
-- `vnnb`, `vnbf`, `vnbg`, `vnbe` — the native-visualizer family.
-  No cmd 4 path and no cmd 3 GET, but in-process `ak_get` reads them
-  (ddp_probe #9): `vnbg`/`vnbe` *are* Dynamic — live and audio-tracking
-  — yet a byte-for-byte **mirror** of `vcbg`/`vcbe` regardless of their
-  own band config, so they carry nothing the `vcb*` channel doesn't
-  already deliver. Dropped as redundant.
 
-The 54-param surface expands to **~422 addressable leaf elements
-(~844 bytes, ≈0.8 KB)**, a clean ~58 % reduction from the all-64
-baseline without losing anything user-visible.
+The native-visualizer family (`vnnb`, `vnbf`, `vnbg`, `vnbe`) is **kept**
+(ReadOnly, above), not dropped: it's the engine's ground-truth filterbank
+output — the source the `vc*` channel interpolates onto its host-set grid —
+so the Advanced panel exposes it alongside the custom view.
+
+The 58-param surface expands to **~484 addressable leaf elements
+(~968 bytes, ≈0.9 KB)** — it drops only the 6 unreadable build-version /
+license slots from the engine's 64 root leaves.

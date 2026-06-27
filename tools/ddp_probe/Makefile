@@ -22,6 +22,8 @@
 #   make reshape   — run the structural-constant experiment (reshape_probe): prove
 #                    genb/gebf reshape the GEQ live via the gebg commit, and that
 #                    among the commit writes order is free (commit presence, not order)
+#   make vis       — run the native-vs-custom visualizer experiment (vis_native_probe):
+#                    prove vc* is the native vn* data resampled onto a host-set band grid
 #   make dump-tree     — branch-drawn AK tree: full per-param metadata + descriptions
 #   make dump-defaults — print each root param's power-on default (4-CC = value)
 #   make dump-types    — root leaves as a flat table + write-protection probe
@@ -44,6 +46,7 @@ PROBE    = $(BUILDDIR)/ddp_probe
 AKCTL    = $(BUILDDIR)/akctl_probe
 SETCFG   = $(BUILDDIR)/setconfig_probe
 RESHAPE  = $(BUILDDIR)/reshape_probe
+VIS      = $(BUILDDIR)/vis_native_probe
 LIBLOG   = $(LIBDIR)/liblog.so
 
 # All other arm libs come from arm/build/lib/ unchanged. We just
@@ -51,9 +54,9 @@ LIBLOG   = $(LIBDIR)/liblog.so
 STAGED_LIBS = libdseffect.so libc.so libcutils.so libdl.so libm.so \
               libstdc++.so libutils.so
 
-.PHONY: all run run-log akctl setconfig reshape dump-tree dump-defaults dump-types dump-docs clean
+.PHONY: all run run-log akctl setconfig reshape vis dump-tree dump-defaults dump-types dump-docs clean
 
-all: $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
+all: $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(VIS) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
 
 $(PROBE): ddp_probe.c $(ARMHDR) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
@@ -65,6 +68,9 @@ $(SETCFG): setconfig_probe.c $(ARMHDR) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
 
 $(RESHAPE): reshape_probe.c $(ARMHDR) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
+
+$(VIS): vis_native_probe.c $(ARMHDR) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
 
 $(LIBLOG): liblog_stub.c | $(LIBDIR)
@@ -103,6 +109,11 @@ reshape: all
 	@echo "Running reshape_probe — stdout is the summary, stderr is the engine log."
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
 	  $(RESHAPE) $(LIBDIR)/libdseffect.so
+
+vis: all
+	@echo "Running vis_native_probe — stdout is the summary, stderr is the engine log."
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(VIS) $(LIBDIR)/libdseffect.so
 
 dump-tree: all
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \

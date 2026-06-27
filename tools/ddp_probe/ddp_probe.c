@@ -47,10 +47,13 @@
  *      checks only `begin` or the full extent), and bogus 4-CC
  *      DEFINE_PARAMS acceptance (proves no name validation).
  *   9. AK registry via the engine's own ak_get: reproduces cmd 4 (both
- *      vcbg gains and vcbe excitations, same source); vnbg/vnbe are live
- *      but mirror vcbg/vcbe; ak_get_min/max expose the engine's true
- *      ranges (vmb, vol differ from the table); a runtime value-diff
- *      shows only the visualizer slots change during process().
+ *      vcbg gains and vcbe excitations, same source); vnbg/vnbe (native)
+ *      equal vcbg/vcbe (custom) only because the engine seeds the custom
+ *      band grid to the native one — vc* is vn* resampled onto vcnb/vcbf;
+ *      see vis_native_probe (make vis) for the reconfigure-and-diverge
+ *      proof. ak_get_min/max expose the engine's true ranges (vmb, vol
+ *      differ from the table); a runtime value-diff shows only the
+ *      visualizer slots change during process().
  *  10. Java param-set discrepancy: set-diff the engine's real root leaves
  *      against the host's DEFINE_PARAMS list (G[], verbatim DsAkSettings) —
  *      surfaces the mismatch without assuming it. Java lists two phantoms
@@ -1122,15 +1125,21 @@ int main(int argc, char *argv[]) {
         printf("    (a) ak_get vs cmd 4: gains %d/20, excitations %d/20 match  "
                "(ak_get_name(vcbg)=\"%s\")\n", mg, me, fc);
 
-        /* (b) vnbg/vnbe have NO cmd 4 path but ARE readable here — and BOTH
-         * mirror vcbg/vcbe (the native visualizer duplicates the current). */
+        /* (b) vnbg/vnbe (NATIVE) have no cmd 4 path but ARE readable here. They
+         * equal vcbg/vcbe (CUSTOM) here only because the engine SEEDS the custom
+         * band grid to the native one — vc* is vn* resampled onto vcnb/vcbf, an
+         * identity until those are reconfigured. The reconfigure-and-diverge
+         * proof (move vcbf, watch vc* shift while vn* holds) is its own
+         * experiment: vis_native_probe (make vis). */
         int mng = 0, mne = 0;
         for (int e = 0; e < 20; e++) {
             if (ak_get_param("vnbg", e) == ak_get_param("vcbg", e)) mng++;
             if (ak_get_param("vnbe", e) == ak_get_param("vcbe", e)) mne++;
         }
         printf("    (b) vnbg == vcbg: %d/20, vnbe == vcbe: %d/20  "
-               "(both live but mirrors of the vcb* channel)\n", mng, mne);
+               "(native == custom: the custom grid defaults to the native grid;\n"
+               "        `make vis` reconfigures vcbf to prove vc* is vn* resampled)\n",
+               mng, mne);
 
         /* (c) engine's true ranges (ak_get_min/max) vs the Java G[] table. */
         printf("    (c) range audit (engine vs G[] table):\n");

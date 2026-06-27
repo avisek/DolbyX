@@ -1,6 +1,6 @@
 # Parameter metadata as single source of truth
 
-The 54 AK parameters that `libdseffect.so` surfaces with a public read or
+The 58 AK parameters that `libdseffect.so` surfaces with a public read or
 write path are declared once in a static metadata table
 (`crates/ddp-state/parameters.toml` → codegen'd `parameters.rs`), seeded
 from the engine tree (`ddp_probe dump`), not transcribed from Java — so it
@@ -14,10 +14,12 @@ this table. Parameters carry a three-bucket settability classification
 UI presentation, not engine-level acceptance: empirical evidence from
 [`tools/ddp_probe/`](../../tools/ddp_probe/README.md) shows the engine
 accepts cmd 3 SET against any declared parameter regardless of Java's
-`isParamSettable` whitelist. The remaining 10 slots (6 engine-internal
-build-version / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcpt`, plus 4 native-visualizer slots `vnnb`, `vnbf`, `vnbg`,
-`vnbe` — `ak_get` shows `vnbg`/`vnbe` are a live mirror of `vcbg`/`vcbe`)
+`isParamSettable` whitelist. The remaining 6 slots — engine-internal
+build-version / license (`bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`) —
 are omitted because they carry nothing the host needs; the engine version
-string is surfaced via cmd 6 → bootstrap `engine.version` instead. Adding a new parameter is a one-line edit; the UI
-auto-discovers it on next page load.
+string is surfaced via cmd 6 → bootstrap `engine.version` instead. (The
+native-visualizer family `vnnb`/`vnbf`/`vnbg`/`vnbe` is **kept** as ReadOnly:
+it's the engine's ground-truth filterbank output, which the custom
+`vcbg`/`vcbe` channel resamples onto a host-set grid — `vc*` mirrors `vn*`
+only until the custom bands are reconfigured.) Adding a new parameter is a
+one-line edit; the UI auto-discovers it on next page load.
