@@ -361,12 +361,12 @@ docs`, e.g. `genb`: _"If this value is changed, the 'gebf' and 'gebg' settings
 must be updated. The Graphic Equalizer will not update until these parameters
 have been updated."_):
 
-| Feature    | Count         | Frequencies          | Commit (re-write to apply)  |
-| ---------- | ------------- | -------------------- | --------------------------- |
-| GEQ        | `genb`        | `gebf`               | **`gebg`**                  |
-| IEQ        | `ienb`        | `iebf`               | **`iebt`**                  |
-| AO         | `aonb`/`aocc` | `aobf`               | **`aobg`**                  |
-| AR         | `arnb`        | `arbf` (monotonic ↑) | **`arbh`**                  |
+| Feature    | Count         | Frequencies | Commit (re-write to apply)  |
+| ---------- | ------------- | ----------- | --------------------------- |
+| GEQ        | `genb`        | `gebf`      | **`gebg`**                  |
+| IEQ        | `ienb`        | `iebf`      | **`iebt`**                  |
+| AO         | `aonb`/`aocc` | `aobf`      | **`aobg`**                  |
+| AR         | `arnb`        | `arbf`      | **`arbh`**                  |
 
 A clean runtime update is **count → full frequency array → re-write the commit
 array** — but that sequence is only convention. What matters is **commit
