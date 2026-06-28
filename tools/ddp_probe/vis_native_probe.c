@@ -15,6 +15,11 @@
  *   B. reconfigure vcbf to a DIFFERENT frequency set (host writes the custom
  *      count+freqs), re-warm, re-read: vc* now DIVERGES from vn*, while vn*
  *      (read-only native) is unchanged. => vc* = interpolate(vn*, vcbf).
+ *   C. reconfigure the SAMPLE RATE (cmd 1) and re-read the native GRID: vnnb/
+ *      vnbf themselves change — 20 bands @48k/44.1k, 19 @32k — tracking the
+ *      engine's rate-indexed .constdata arrays. => the native grid is the
+ *      RATE-DERIVED half of vn* (vnnb/vnbf), distinct from the per-block half
+ *      (vnbg/vnbe). It can't be host-set; the only lever is the rate.
  *
  * Build/run: `make vis` (see Makefile). Standalone — reuses ddp_probe's
  * proven init handshake + ak_get path, trimmed to the visualizer slots.
@@ -52,6 +57,25 @@ static ak_param_t G[] = {
     {"lcmf",2},{"lcvd",2},{"lcsz",1},{"lcpt",168},
 };
 #define NPARAM (int)(sizeof(G)/sizeof(G[0]))
+
+/* Real AOSP effect_config_t — 32-byte halves (see setconfig_probe.c). Used by
+ * section C to drive cmd 1 SET_CONFIG and change the sample rate. */
+typedef struct {
+    uint32_t frameCount; void *raw; uint32_t samplingRate; uint32_t channels;
+    void *bp_get; void *bp_rel; void *bp_cookie;
+    uint8_t format; uint8_t accessMode; uint16_t mask;
+} buf_cfg_t;
+typedef struct { buf_cfg_t in, out; } cfg_t;
+#define CH_STEREO 3
+#define FMT_PCM16 1
+#define ACC_ACCUM 2
+
+/* RE-derived native grids (the engine's rate-indexed .constdata arrays). 44.1k
+ * is `bf` below; 48k/32k here. Section C reads vnnb/vnbf back and compares. */
+static const int16_t EXP_48[20] = {47,141,234,328,469,656,844,1031,1313,1688,
+    2250,3000,3750,4688,5813,7125,9000,11250,13875,19688};
+static const int16_t EXP_32[19] = {31,94,188,313,438,625,875,1125,1375,1750,
+    2250,2875,3625,4500,5750,7250,9000,11125,14125};
 
 static effect_handle_t H;
 static int settings_begin[NPARAM];
@@ -130,6 +154,20 @@ static int define_settings_all(void) {
     cmd_set(DS_PARAM_DEFINE_SETTINGS, buf, 2 + total * 3);
     free(buf);
     return total;
+}
+
+/* cmd 1 SET_CONFIG — change the sample rate (stereo/PCM16/ACCUM). Rebuilds the
+ * graph via Ds1ap::New; the engine re-selects the native grid for the new rate.
+ * Gated to {32000,44100,48000} (see setconfig_probe.c). */
+static void send_config(uint32_t rate) {
+    cfg_t c; memset(&c, 0, sizeof c);
+    c.in.frameCount = c.out.frameCount = 256;
+    c.in.samplingRate = c.out.samplingRate = rate;
+    c.in.channels = c.out.channels = CH_STEREO;
+    c.in.format = c.out.format = FMT_PCM16;
+    c.in.accessMode = c.out.accessMode = ACC_ACCUM;
+    uint32_t rs = 4; int32_t reply = 0;
+    (*H)->command(H, EFFECT_CMD_SET_CONFIG, 64, &c, &rs, &reply);
 }
 
 /* ── audio ───────────────────────────────────────────────────────────── */
@@ -261,10 +299,40 @@ int main(int argc, char *argv[]) {
            "(mirror BROKEN by the custom remap)\n",
            n - diffcount("vnbg","vcbg",n), n, n - diffcount("vnbe","vcbe",n), n);
 
+    /* ── C. change the SAMPLE RATE — the native grid itself moves ──────── */
+    printf("\n=== C. RECONFIGURE RATE — native grid is rate-derived ===\n");
+    printf("    (fresh handle per rate; cmd 1 SET_CONFIG selects the native array)\n");
+    struct { uint32_t hz; const int16_t *exp; int n; } sweep[] = {
+        {48000, EXP_48, 20}, {44100, bf, 20}, {32000, EXP_32, 19} };
+    for (int s = 0; s < 3; s++) {
+        C(&desc.uuid, 200 + s, 200 + s, &H);
+        (*H)->command(H, EFFECT_CMD_INIT, 0, NULL, &rs, &r);
+        send_config(sweep[s].hz);                  /* rebuild graph at this rate */
+        define_params(); define_settings_all(); ak_attach();
+        set_param("genb", 0, &v20, 1); set_param("ienb", 0, &v20, 1);
+        set_param("gebf", 0, bf, 20); set_param("iebf", 0, bf, 20);
+        cmd_set(DS_PARAM_VISUALIZER_ENABLE, &vis_on, 4);
+        set_param("ven", 0, &one, 1);
+        (*H)->command(H, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
+        warm(in, out, frames, 60);
+        int nb = akv("vnnb", 0), fmatch = 1;
+        printf("    %5u Hz: vnnb=%2d (expect %2d)%s  vnbf:", sweep[s].hz, nb,
+               sweep[s].n, nb == sweep[s].n ? "" : "  !!COUNT");
+        for (int e = 0; e < sweep[s].n; e++) {
+            int v = akv("vnbf", e); printf(" %d", v);
+            if (v != sweep[s].exp[e]) fmatch = 0;
+        }
+        printf("   [%s]\n", fmatch ? "matches .constdata array" : "DIFFERS !!");
+    }
+    printf("    => native vnnb/vnbf track the rate (20/20/19 bands @48k/44.1k/32k);\n"
+           "       only the sample rate moves them — they're read-only otherwise.\n");
+
     printf("\n=== VERDICT ===\n");
-    printf("    vn* = engine's NATIVE filterbank visualizer (read-only ground truth).\n");
+    printf("    vn* = engine's NATIVE filterbank visualizer (read-only ground truth),\n");
+    printf("          in two halves: vnnb/vnbf = the RATE-DERIVED band grid (A,C) and\n");
+    printf("          vnbg/vnbe = the per-block measurements taken on it.\n");
     printf("    vc* = that native data INTERPOLATED onto host-set vcnb/vcbf (vc==vn\n");
-    printf("          only when the custom layout matches native). Not redundant —\n");
+    printf("          only when the custom layout matches native, B). Not redundant —\n");
     printf("          vn* is the zero-config source; vc* is the configurable view.\n");
     _Exit(0);
 }

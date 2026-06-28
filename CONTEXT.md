@@ -34,6 +34,15 @@ Created by `Engine::create_session`, destroyed by `destroy_session`. The
 shared engine subprocess multiplexes many sessions.
 _Avoid_: stream, connection, instance.
 
+**Native grid** (`vnnb` / `vnbf`):
+The visualizer's intrinsic band layout — count (`vnnb`) + centre frequencies
+(`vnbf`), read-only and **rate-derived**: the engine selects it from the
+sample rate (20 bands @48k/44.1k, 19 @32k), re-derived on (re)configuration,
+not per block. The custom grid (`vcnb`/`vcbf`) seeds from it; `vnbg`/`vnbe`
+are the per-block measurements taken on it (see
+[docs/ddp/02](docs/ddp/02-ak-parameters.md)).
+_Avoid_: "native bands" (ambiguous with the per-block `vnbg`/`vnbe` data).
+
 **`vcbg` / `vcbe`**:
 The two `ReadOnly` AK parameters the DSP rewrites every audio block (in
 the AK registry). Returned together by engine cmd 4
@@ -51,8 +60,9 @@ and the post-processed `vis` event payload).
 **Settability bucket**:
 The classification of an AK parameter as `Settable` (Java-whitelisted, DSP
 produces well-defined output), `ReadOnly` (`vcbg`/`vcbe` and the native
-`vn*` family — engine-owned, write-protected; the DSP fills the
-gain/excitation arrays each block), or `Experimental` (engine accepts writes
+`vn*` family — engine-owned, write-protected: `vnbg`/`vnbe` the per-block
+gain/excitation arrays the DSP rewrites, `vnnb`/`vnbf` the rate-derived
+native grid), or `Experimental` (engine accepts writes
 but original DDP UI hid the slot).
 _Avoid_: param access, settable flag.
 

@@ -193,9 +193,10 @@ measurements, they're one source and a resampled view of it (engine help text,
 `ddp_probe dump docs`):
 
 - **Native (`vn*`)** — the visualizer's **own filterbank bands**, the
-  ground-truth analysis. The engine owns the layout: `vnnb`/`vnbf` *report* the
-  native band count + centre frequencies (read-only), and the DSP fills
-  `vnbg`/`vnbe` every block.
+  ground-truth analysis, in two halves. `vnnb`/`vnbf` *report* the native band
+  count + centre frequencies — a **rate-derived grid** the engine picks from the
+  sample rate (20 bands @48k/44.1k, **19 @32k**; re-derived on reconfigure, not
+  per block) — while the DSP fills `vnbg`/`vnbe` every block. All read-only.
 - **Custom (`vc*`)** — the native data **interpolated onto a host-chosen grid**.
   `vcnb`/`vcbf` are **writable**: you pick the count + (monotonically
   increasing) centre frequencies, and the engine resamples the native
@@ -207,15 +208,17 @@ to the native grid** at startup, so `vc*` reads byte-for-byte identical to `vn*`
 until a host writes `vcnb`/`vcbf` — then `vc*` follows the new grid while `vn*`
 holds steady (proven in [tools/ddp_probe/](../../tools/ddp_probe/README.md),
 `make vis`: a `vcbf` remap swings `vc*` by max |Δ|≈430 while `vn*` stays at the
-noise floor). The whole `vn*` family and the `vcbg`/`vcbe` data arrays are
-read-only (write-protect bit `0x2`); only the custom **layout** — `vcnb`/`vcbf` —
-is host-writable.
+noise floor; its section C then sweeps the **sample rate** and the native count
+itself tracks 20/20/19 @48k/44.1k/32k). The whole `vn*` family and the
+`vcbg`/`vcbe` data arrays are read-only (write-protect bit `0x2`); only the
+custom **layout** — `vcnb`/`vcbf` — is host-writable. The native grid's one
+lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
 
 |   # | 4-CC   | len | bounds    | settable | Description                                                                                            |
 | --: | ------ | --: | --------- | -------- | ------------------------------------------------------------------------------------------------------ |
 |  28 | `ven`  |   1 | 0..1      | no       | Visualizer enable (AK-level; parallel to command 7). `vn*`/`vc*` are filled only while on.             |
-|  29 | `vnnb` |   1 | 1..20     | no       | **Native** band count — the engine's intrinsic filterbank (read-only report; = 20 in standard config). |
-|  30 | `vnbf` |  20 | int16     | no       | **Native** band centre frequencies in Hz (read-only).                                                  |
+|  29 | `vnnb` |   1 | 1..20     | no       | **Native** band count — rate-derived (20 @48k/44.1k, 19 @32k); read-only report.                       |
+|  30 | `vnbf` |  20 | int16     | no       | **Native** band centre frequencies in Hz — rate-derived, read-only.                                    |
 |  31 | `vnbg` |  20 | int16     | no       | **Native** band gains in 1/16 dB — the engine's ground-truth gain curve.                               |
 |  32 | `vnbe` |  20 | int16     | no       | **Native** band excitations in 1/16 dB — ground-truth per-band energy.                                 |
 |  33 | `vcnb` |   1 | 0..20     | no\*     | **Custom** band count — **host-writable** (engine seeds it to `vnnb`; `0` = no custom bands).          |

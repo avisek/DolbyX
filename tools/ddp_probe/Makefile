@@ -23,7 +23,8 @@
 #                    genb/gebf reshape the GEQ live via the gebg commit, and that
 #                    among the commit writes order is free (commit presence, not order)
 #   make vis       — run the native-vs-custom visualizer experiment (vis_native_probe):
-#                    prove vc* is the native vn* data resampled onto a host-set band grid
+#                    prove vc* is the native vn* data resampled onto a host-set band grid,
+#                    and that the native grid (vnnb/vnbf) is itself rate-derived (sec C)
 #   make dump-tree     — branch-drawn AK tree: full per-param metadata + descriptions
 #   make dump-defaults — print each root param's power-on default (4-CC = value)
 #   make dump-types    — root leaves as a flat table + write-protection probe

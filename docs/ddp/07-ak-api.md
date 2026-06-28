@@ -151,6 +151,16 @@ string table). Two more facets the engine self-describes, on top of range/length
   type-3 scalar *with* storage that's still read-only; `vcbg`/`vcbe` are additionally
   zero-length, so even the internal setter no-ops on them.)
 
+**How the visualizer outputs are sourced.** These by-ref leaves hold no data —
+each has a get-bulk accessor, and they split the native `vn*` family in two.
+`vnnb`/`vnbf` are the **rate-derived grid**: `vnbf_get_bulk` returns the native
+centre-freq array for the live bus rate (one per supported rate — 20 bands
+@48k/44.1k, 19 @32k), and `root_preupdate` writes the count `vnnb` from that rate
+on each (re)config (dirty-gated, not per block). `vnbg`/`vnbe` are the **per-block
+measurements**: their accessors (`vnbg_get_bulk`/`vnbe_get_bulk`) forward to the
+`visq` node the DSP rewrites every block. So the grid moves only with the sample
+rate; the measurements move every block.
+
 This is **engine-authoritative and different from Java's `isParamSettable`**: Java
 marks 22 names non-settable, but the engine write-protects only 10 of them — `preg`,
 `pstg`, `endp`, `ocf`, `vol`, `vcnb`, … are Java-hidden yet engine-writable (and the

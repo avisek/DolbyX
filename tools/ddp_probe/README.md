@@ -208,9 +208,9 @@ band boost or limit lands, it shows:
 The visualizer has **two** band families, and they're one source plus a view of
 it — not two measurements (engine help text, `make dump-docs`):
 
-- **Native (`vn*`)** — the engine's own filterbank bands. `vnnb`/`vnbf` *report*
-  the count + centre frequencies (read-only); the DSP fills `vnbg`/`vnbe` each
-  block. The ground truth.
+- **Native (`vn*`)** — the engine's own filterbank bands, the ground truth, in
+  two halves. `vnnb`/`vnbf` *report* the count + centre frequencies — a
+  **rate-derived grid** (read-only); the DSP fills `vnbg`/`vnbe` each block.
 - **Custom (`vc*`)** — the native data **interpolated onto a host-set grid**.
   `vcnb`/`vcbf` are **writable**; the engine resamples onto them, filling
   `vcbg`/`vcbe` (the pair cmd 4 returns).
@@ -225,6 +225,9 @@ This probe disturbs it:
   swings the custom pair by **max |Δ|≈430** (whole bands relocated by frequency)
   while the native pair holds to **≈8** (smoother noise); `vcbg`==`vnbg` collapses
   to 1/20. So `vc*` is `vn*` resampled, not a copy.
+- **C. Change the rate, the native grid moves.** `SET_CONFIG` to 48k/44.1k/32k
+  and re-read: `vnnb`/`vnbf` flip to the engine's rate-indexed array — **20/20/19**
+  bands — proving the native grid is rate-derived, not host-set and not per-block.
 
 Neither family is redundant: `vn*` is the zero-config ground truth, `vc*` the
 host-configurable view. See
@@ -250,7 +253,7 @@ make run-log    # like run but stderr -> engine.log for grepping
 make akctl      # akctl_probe — AK-direct param control (see Companion probes)
 make setconfig  # setconfig_probe — EFFECT_CMD_SET_CONFIG / sample rate
 make reshape    # reshape_probe — runtime reshape of structural constants (commit gates it; order is free)
-make vis        # vis_native_probe — native vs custom visualizer bands (vc* is vn* resampled)
+make vis        # vis_native_probe — native vs custom bands (vc* is vn* resampled; native grid rate-derived)
 ```
 
 The `liblog_stub.c` here is a verbose drop-in replacement for
@@ -302,7 +305,7 @@ tools/ddp_probe/
 ├── akctl_probe.c        # AK-direct param control (cmd 3 ≡ ak_set, no handshake)
 ├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
 ├── reshape_probe.c      # runtime reshape of structural constants (gebg commit; order-free)
-├── vis_native_probe.c   # native (vn*) vs custom (vc*) visualizer bands — vc* is vn* resampled
+├── vis_native_probe.c   # native (vn*) vs custom (vc*) bands — vc* is vn* resampled; native grid rate-derived
 └── liblog_stub.c        # verbose __android_log_print → stderr
 ```
 
