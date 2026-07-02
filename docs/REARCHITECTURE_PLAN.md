@@ -339,7 +339,7 @@ User-visible consequences:
   effect immediately for every profile that currently has Rich selected.
 - Adding a new EQ preset makes it available across every profile.
 - Removing an EQ preset: any profile that had it selected falls back to
-  `None` — its own EQ params (there is no "Off" preset).
+  `None` — its own EQ params (there is no Off preset).
 
 Factory EQ presets are `Open`, `Rich`, `Focused`; "off" is `None`, not a
 preset. Factory profiles are `Movie`, `Music`, `Game`, `Voice`. Factory
@@ -515,7 +515,7 @@ preserve the IEQ-preset abstraction. The engine accepts iebt writes
 via `setSingleSetting`, and DolbyX plans to support direct editing
 behind a toggle (see Decision 2).
 
-**Metadata delivery.** No codegen. The table ships as a runtime file —
+**Metadata delivery.** No generated code. The table ships as a runtime file —
 `parameters.toml`, engine-seeded, hand-editable, living next to the
 daemon binary alongside `defaults.toml` — parsed and validated at
 startup only (never watched); malformed → the daemon refuses to start
@@ -616,7 +616,7 @@ via the bootstrap `engine` field on page load — see Decision 6.
 
 _Daemon-side_ (the only layer that does value validation): every
 `set_param` is checked against the `ParameterDef` metadata — 4-CC
-declared, length matches, value within `range`. Failures
+declared, length matches, value within `min`/`max`. Failures
 short-circuit with
 `{ "type": "error", "code": "INVALID_PARAM", "request_id": "...",
 "message": "..." }` and the engine is never called.
@@ -1561,7 +1561,7 @@ does not apply. Treat this slice as one-shot setup.
   / EQ preset stored as its delta over the `ParameterDef.default` base,
   plus the top-level 20-band operational block (Decision 7).
 - AK parameter metadata file (`parameters.toml`, runtime-loaded — no
-  codegen) populated with all 64 entries, **seeded from the engine tree**
+  build step) populated with all 64 entries, **seeded from the engine tree**
   (`make -C tools/ddp_probe dump-tree`) — authoritative names, lengths,
   ranges, frac bits, and one-line descriptions straight from the binary —
   *not* transcribed from Java / [02](ddp/02-ak-parameters.md). (The engine
@@ -2103,11 +2103,10 @@ for invertible conversions (dB ↔ 1/16 dB, dB-clamp ↔ engine-clamp).
 The daemon's command-dispatch integration tests use the `StubBackend`
 engine impl for speed and determinism; the daemon's real-engine integration
 test (`ddp-daemon/tests/e2e_qemu.rs`, gated by the `qemu` cargo
-feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU
-
-- `libdseffect.so` path. UI E2E (Playwright) drives the real daemon
-  with the real engine so the binary protocol and the AK-direct engine
-  binding are covered end-to-end.
+feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU +
+`libdseffect.so` path. UI E2E (Playwright) drives the real daemon
+with the real engine so the binary protocol and the AK-direct engine
+binding are covered end-to-end.
 
 **TypeScript**: `strict: true`, `noUncheckedIndexedAccess: true`,
 `exactOptionalPropertyTypes: true`. ESLint with
