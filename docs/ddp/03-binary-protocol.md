@@ -186,7 +186,7 @@ The exact total depends on `aonb` (which sets `aobf` to length 40 and
 >
 > Read-back via cmd 3 GET fails — but **the root cause is that
 > cmd 3 GET doesn't exist in the engine at all** (see
-> [Cmd 3 GET](#cmd-3-get-unimplemented) below), not slot-allocation.
+> [Cmd 3 GET](#cmd-3-get--unimplemented) below), not slot-allocation.
 
 > **DolbyX v2** never sends DEFINE_SETTINGS either (AK-direct). A
 > cmd-path host should emit one entry per `(param_idx, offset)` for

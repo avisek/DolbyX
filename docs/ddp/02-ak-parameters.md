@@ -540,7 +540,7 @@ one `ak_get(idx/name, offset)` line per slot. Collapsed by param
 
 These values then live in the cache. You can't read them back via
 cmd 3 GET (that command is unimplemented; see
-[03-binary-protocol.md](03-binary-protocol.md#cmd-3-get-unimplemented)),
+[03-binary-protocol.md](03-binary-protocol.md#cmd-3-get--unimplemented)),
 but they are there.
 
 ## Recommendation for DolbyX v2

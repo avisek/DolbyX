@@ -6,7 +6,7 @@ daemon binary, loaded at startup, hand-editable — seeded from the engine
 tree (`ddp_probe dump-tree` / `dump-docs` / `dump-defaults`), not
 transcribed from Java: it excludes Java's two phantom names (`mxou`,
 `lcsz`, which resolve to ref 0) and includes the leaves Java's list
-omits (`scpe`, `test`, the six build/license readouts); see
+omits (`scpe`, `test`); see
 [docs/ddp/02](../ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves).
 Everything else — wire protocol, engine init payload, persistence
 serialization, UI widget generation, range validation, display scaling
