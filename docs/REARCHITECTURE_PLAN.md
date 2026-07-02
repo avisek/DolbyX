@@ -429,18 +429,17 @@ plain integers carry 0. The UI never hardcodes the conversion — each
 widget reads it from the injected bootstrap metadata. `Decibel { lkfs }`
 switches the unit label from `dB` to `LKFS` for `dvli`/`dvlo`.
 
-**Parameter defaults.** For settable params, `default` is the engine's
-intrinsic power-on value — what a freshly-created engine reports before
-any profile is pushed, captured by probe (`make -C tools/ddp_probe
-dump`). It's the base layer of the persistence overlay (Decision 7):
-`defaults.toml` and `config.toml` store only divergences from it, so the
-table is the single home for the per-param defaults the original DDP
-repeated in full in every profile. The structural **constants** (band
-counts / freq tables / channel count — `genb`, `ienb`, `aonb`, `aocc`,
-`gebf`, …) are the exception: the engine powers on **10-band / `aocc=1`**,
-but the host rewrites them to the standard **20-band stereo** config in
-the init constant-params dance, so their `default` is that operational
-value, not the boot state — and they sit outside the profile overlay.
+**Parameter defaults.** `default` is the engine's intrinsic power-on
+value — what a freshly-created engine reports before any profile is
+pushed, captured by probe (`make -C tools/ddp_probe dump-defaults`) and
+CI-gated against drift (see metadata delivery below). Engine-honest with
+no exceptions: the engine boots **10-band**, so `genb` defaults to 10
+and `gebf` to the 10 ISO octave centres (32 Hz–16 kHz) zero-padded; the
+standard **20-band stereo** config is not a table default — it lives
+once at `defaults.toml` top level (Decision 7). `default` is the base
+layer of the persistence cascade: `defaults.toml` and `config.toml`
+store only divergences from it, so the table is the single home for the
+per-param defaults the original DDP repeated in full in every profile.
 
 **Four-bucket settability classification.** This is a deliberate
 deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
@@ -515,11 +514,27 @@ preserve the IEQ-preset abstraction. The engine accepts iebt writes
 via `setSingleSetting`, and DolbyX plans to support direct editing
 behind a toggle (see Decision 2).
 
+**Metadata delivery.** No codegen. The table ships as a runtime file —
+`parameters.toml`, engine-seeded, hand-editable, living next to the
+daemon binary alongside `defaults.toml` — parsed and validated at
+startup only (never watched); malformed → the daemon refuses to start
+rather than run against a wrong table. Crate seams: `ddp-state` owns the
+pure parser/validator (`&str → Vec<ParameterDef>`, defs own their
+`String`s); `ddp-persistence` reads the file.
+
+A committed twin, `parameters.engine.toml`, is regenerated straight from
+the probe (`dump-tree` + `dump-docs` + `dump-defaults`; `just
+param-twin`) and never loaded — it exists so CI can diff
+`parameters.toml`'s **engine-fact fields** (`name`, `length`, `min`,
+`max`, `frac_bits`, `default`) against engine ground truth and fail on
+drift. The product fields (`kind`, `category`, `access`, `label`,
+`help`, `basic`) are free to edit.
+
 Wire and storage are name-based (4-CC string). Saved configs are
 stable under reordering the table. Adding a new parameter to the
-Advanced section is a one-line edit: append to the table; the UI
-auto-discovers it on next page load (the daemon re-serializes the
-metadata into `window.__BOOTSTRAP__` on every `GET /`).
+Advanced section is an edit to `parameters.toml` plus a daemon restart;
+the UI auto-discovers it on next page load (the daemon re-serializes
+the metadata into `window.__BOOTSTRAP__` on every `GET /`).
 
 **Advanced-panel layout.** A CSS Grid with
 `grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))` and
@@ -967,33 +982,46 @@ Two TOML files in distinct locations:
   Windows: `%PROGRAMDATA%\DolbyX\config.toml`. Linux:
   `/var/lib/dolbyx/config.toml`.
 - `defaults.toml` — factory defaults, user-editable, in the **same directory
-  as the daemon binary**.
+  as the daemon binary** (beside `parameters.toml`, Decision 3 — metadata,
+  not state, and outside this cascade).
 
-`defaults.toml` and `config.toml` both store **only deltas** over the
-`ParameterDef.default` base (Decision 3) — `defaults.toml` each factory
-profile / EQ preset's divergence from the per-param defaults,
-`config.toml` the user's edits on top. A param absent from both
-resolves to its `ParameterDef.default`; resolution is
-`ParameterDef.default → defaults.toml → config.toml`. The two TOML
-files mirror the original's `ds1-default.xml` / `ds1-current.xml` pair;
-the `ParameterDef.default` base is a v2 refinement — the original
+Both store **only deltas** over the `ParameterDef.default` base
+(Decision 3), in **two namespaces** each: top-level 4-CC keys apply to
+*every profile* — the shared operational config (the 20-band setup,
+`ven`, …) is stated here exactly once — and keys in the bare
+`[eq_preset]` table apply to *every EQ preset*. A param may live in both
+namespaces (`genb` is part of each profile's band structure *and* each
+preset's). A param resolves through five layers, later shadowing
+earlier:
+
+```
+ParameterDef.default → defaults.toml top → defaults.toml [item]
+                     →  config.toml  top →  config.toml  [item]
+```
+
+("top" = the namespace's shared layer — root keys for profiles, bare
+`[eq_preset]` for presets; `[item]` = the `[profile.<id>]` /
+`[eq_preset.<id>]` table.) The two files mirror the original's
+`ds1-default.xml` / `ds1-current.xml` pair; the `ParameterDef.default`
+base and the shared top layers are v2 refinements — the original
 repeated the factory defaults in full in every profile, DolbyX factors
-them out. The overlay is resolved at
-load, so each in-memory profile is complete — a profile switch then
-pushes it via Decision 4's `SetParams` batch, with no per-param
-fallback. `defaults.toml` also drives
+them out. The cascade is resolved at load, so each in-memory profile
+and preset is complete — a profile switch pushes one `SetParams` batch
+(Decision 4), with no per-param fallback. `defaults.toml` also drives
 `reset_profile` and `reset_eq_preset` actions (reset = remove the
-user's overrides).
+user's overrides). Write-back is **always per-item**: the daemon writes
+params under `[profile.<id>]` / `[eq_preset.<id>]`, never to a top
+layer — the top layers are a hand-edit affordance.
 
-Both files are first-class state for the daemon. A `notify`-based
-file watcher subscribes to changes on both paths; on an external
-edit the daemon debounces for 500 ms (matching the write-side
-debounce), re-overlays the two files, and broadcasts a fresh state
-snapshot to every connected client. Users can hand-edit either
-file and watch the UI catch up. To avoid the watcher firing on the
-daemon's own writes, the daemon records each `(path, mtime)` it
-flushed and suppresses watcher events that match within a 1 s
-quiet window.
+A `notify`-based file watcher subscribes to **`config.toml` only**;
+`defaults.toml` and `parameters.toml` are read once at startup — an
+edit there takes a daemon restart. On an external `config.toml` edit
+the daemon debounces for 500 ms (matching the write-side debounce),
+re-resolves the cascade, and broadcasts a fresh state snapshot to every
+connected client. Users can hand-edit the file and watch the UI catch
+up. To avoid the watcher firing on the daemon's own writes, the daemon
+records each mtime it flushed and suppresses watcher events that match
+within a 1 s quiet window.
 
 `is_factory` is not stored on disk. It is derived at load time: any
 id present in `defaults.toml` is a factory item; any id present only
@@ -1001,15 +1029,17 @@ in `config.toml` is custom.
 
 Schema notes:
 
-- No `[state]` table header; `power` and `selected_profile` live at
-  top level for ergonomics.
+- No `[state]` table header; `power`, `selected_profile`, and the
+  all-profiles 4-CC keys share the top level — every non-reserved key
+  is a param.
 - Profiles and EQ presets are keyed by id using table-per-id syntax
   (`[profile.music]`, `[eq_preset.rich]`), not array-of-tables. The id
   becomes the table key.
-- AK param overrides (4-CC keys) live directly under
-  `[profile.<id>]` or `[eq_preset.<id>]` — no `[profile.params]`
-  sub-table. Serde uses `#[serde(flatten)] params: HashMap<String,
-ParamValue>` to collect unknown keys.
+- AK param overrides (4-CC keys) live directly in the namespace they
+  modify — top level, `[eq_preset]`, `[profile.<id>]`,
+  `[eq_preset.<id>]` — no `params` sub-tables. Serde uses
+  `#[serde(flatten)] params: HashMap<String, ParamValue>` to collect
+  unknown keys.
 
 `defaults.toml` (lives next to the daemon binary) — abbreviated:
 
@@ -1017,9 +1047,20 @@ ParamValue>` to collect unknown keys.
 power = true
 selected_profile = "music"
 
-[eq_preset.off]
-name = "Off"
-# no deltas — resolves to ParameterDef.default (flat: IEQ + GEQ both off)
+# → every profile: the standard 20-band stereo config, stated once
+genb = 20
+ienb = 20
+aonb = 20
+aocc = 2
+gebf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550,
+        2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
+# iebf = the same grid; … arnb, leveler calibration, speaker-tuning tables
+ven = 1              # visualizer feed on (v1's cmd-7 VISUALIZER_ENABLE, retired)
+
+[eq_preset]          # → every EQ preset: band structure, so presets resolve standalone
+genb = 20
+ienb = 20
+# gebf / iebf as above
 
 [eq_preset.open]
 name = "Open"
@@ -1080,9 +1121,8 @@ dea = 6
 [eq_preset.user_91c2]
 name = "Vocal Forward"
 ieon = 1
-iebt = [...]
 geon = 1
-gebg = [...]
+# iebt / gebg = the user's 20-band curves
 ```
 
 Persistence write semantics:
@@ -1289,6 +1329,7 @@ dolbyx/
 ├── dolbyx-daemon          # the Rust binary (UI embedded)
 ├── dolbyx-engine-arm      # the ARM-side engine binary (statically built)
 ├── libdseffect.so         # bundled
+├── parameters.toml        # AK metadata table, runtime-loaded (Decision 3)
 ├── defaults.toml          # factory profiles + EQ presets, user-inspectable
 └── README.txt
 ```
@@ -1370,7 +1411,7 @@ back to `None` (their own EQ params).
 ```
 DolbyX/
 ├── Cargo.toml                       # Cargo workspace
-├── Justfile                         # `just dev`, `just build-release`, …
+├── Justfile                         # `just dev`, `just build-release`, `just param-twin`, …
 ├── rust-toolchain.toml              # pin a stable Rust version
 ├── flake.nix                        # Nix shell + NixOS module (Linux)
 ├── crates/
@@ -1383,23 +1424,23 @@ DolbyX/
 │   │   ├── src/backend_sbt/         #   future, scaffolded empty
 │   │   └── tests/qemu_smoke.rs
 │   ├── ddp-state/                   # Pure state model — no I/O
-│   │   ├── build.rs                 #   codegen: parameters.toml → parameters.rs
-│   │   ├── parameters.toml          #   source for the AK metadata codegen
 │   │   ├── src/lib.rs
 │   │   ├── src/profile.rs
 │   │   ├── src/preset.rs
 │   │   ├── src/state.rs             #   State aggregate + all mutations
-│   │   ├── src/parameters.rs        #   AK metadata table (codegen'd, 58 entries)
+│   │   ├── src/param_def.rs         #   ParameterDef + pure TOML parser/validator
 │   │   └── src/conversion.rs        #   int16 ↔ dB helpers (used by UI tests too)
 │   ├── ddp-persistence/             # TOML load/save — separate from state logic
 │   │   ├── src/lib.rs
 │   │   ├── src/schema.rs            #   serde structs matching the TOML
 │   │   ├── src/factory.rs           #   loads defaults.toml from $(daemon-dir)
-│   │   ├── src/file_watcher.rs      #   notify-rs watcher on both TOML files
+│   │   ├── src/file_watcher.rs      #   notify-rs watcher on config.toml
 │   │   └── src/debounce.rs          #   write debouncing (500 ms uniform)
 │   ├── ddp-daemon/                  # The dolbyx-daemon binary
-│   │   ├── build.rs                 #   copies defaults.toml next to the binary
+│   │   ├── build.rs                 #   copies both TOMLs next to the binary
 │   │   ├── defaults.toml            #   factory profiles + EQ presets (source-of-truth)
+│   │   ├── parameters.toml          #   AK metadata table, runtime-loaded (source-of-truth)
+│   │   ├── parameters.engine.toml   #   probe-generated twin — CI diff gate, never loaded
 │   │   ├── src/main.rs
 │   │   ├── src/http_server.rs       #   axum routes + rust-embed UI serving
 │   │   ├── src/ws_server.rs         #   WebSocket session handling
@@ -1469,15 +1510,15 @@ entry below passes the deletion test.
 | **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the visualizer pump reads `vcbg`/`vcbe` via `get_params`. | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
 | **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT`, `SET_CONFIG` for a non-default rate, constant params via `ak_set`, `VISUALIZER_ENABLE`, `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), `EngineInfo` caching from cmd 6. `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
-| **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 58 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
-| **`Persistence`** (`ddp-persistence`) | `load(defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)`. Errors: `ParseError`, `MigrationFailed`. | `defaults.toml` + `config.toml` overlay, `notify` watcher, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
+| **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`, `basic`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
+| **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
 | **`VisualizerPump`** (`ddp-daemon`) | `start(supervisor, broadcaster)` → `JoinHandle` · `stop()`. Constants: `VISUALIZER_PUMP_INTERVAL = 50 ms`, `VISUALIZER_SUSPENDED_THRESHOLD = 10` ticks. | 50 ms cadence loop, 10-tick `vis_suspended` hysteresis on an idle source session (no audio processed), oldest-session source-of-truth rule, `vis` / `vis_suspended` event emission. | Slice 5 |
 | **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/tmp/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
 | **UI `GainSmoother`** (`ui/src/lib/gain_smoother.ts`) | `enqueue(band, dB)` · `tick() → Option<[i16; 20]>` (returns smoothed, clamped 20-band write, or `None` if nothing pending). | 5-cell thick-brush splat, τ=0.3 s exponential decay toward clamps, kernel convolution (`Mobile` / `Soft` / `Direct`), 60 ms drain throttle, 20×20 pseudoinverse on preset-change broadcasts for drag continuity. | Slice 6 |
 
-`is_factory`, the three-bucket settability classification, and the
+`is_factory`, the four-bucket settability classification, and the
 debounce-shared write semantics are not free-floating concepts — they
 live behind specific module interfaces above and are documented there.
 
@@ -1520,28 +1561,27 @@ does not apply. Treat this slice as one-shot setup.
   `@solidjs/testing-library`, and `eslint-plugin-solid` pinned. No
   Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
 - `defaults.toml` created from `ds1-default.xml` — each factory profile
-  / EQ preset stored as its delta over the `ParameterDef.default` base.
-- AK parameter metadata table (`parameters.toml` + codegen) populated
-  with all 58 surfaced entries, **seeded from the engine tree**
-  (`make -C tools/ddp_probe dump-tree`) — authoritative names, ranges,
-  frac bits, and one-line descriptions straight from the binary — *not*
-  transcribed from Java / [02](ddp/02-ak-parameters.md). (The engine also
-  carries a long per-param help string, `make -C tools/ddp_probe dump-docs`,
-  available for UI tooltips.) Seeding from the
+  / EQ preset stored as its delta over the `ParameterDef.default` base,
+  plus the top-level 20-band operational block (Decision 7).
+- AK parameter metadata file (`parameters.toml`, runtime-loaded — no
+  codegen) populated with all 64 entries, **seeded from the engine tree**
+  (`make -C tools/ddp_probe dump-tree`) — authoritative names, lengths,
+  ranges, frac bits, and one-line descriptions straight from the binary —
+  *not* transcribed from Java / [02](ddp/02-ak-parameters.md). (The engine
+  also carries a long per-param help string, `make -C tools/ddp_probe
+  dump-docs`, available for UI tooltips.) Seeding from the
   engine corrects Java's param-set bug for free: it drops the `mxou`/`lcsz`
   phantoms (node params that resolve to ref 0) and picks up the real leaves
-  Java omits, `scpe`/`test` (both Experimental). Three-bucket Settable /
-  ReadOnly / Experimental classification per
+  Java omits, `scpe`/`test` (both Experimental). Four-bucket access
+  classification per
   [ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md).
-  Each settable entry's `default` is the engine's power-on value
-  (`make -C tools/ddp_probe dump-defaults`), not 02's Music-profile column;
-  structural constants (band counts, freq tables, `aocc`) carry their
-  host-set 20-band values instead — the engine boots 10-band (see
-  Decision 3).
-  (The 6 omitted entries — static engine-internal build-version / license
-  slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` — carry nothing the host
-  needs. The native-visualizer family `vnnb`/`vnbf`/`vnbg`/`vnbe` is kept as
-  ReadOnly: the engine's ground-truth filterbank, which `vcbg`/`vcbe` resample.)
+  Every entry's `default` is the engine's power-on value
+  (`make -C tools/ddp_probe dump-defaults`), not 02's Music-profile
+  column — engine-honest, 10-band boot, no structural-constant
+  exception (the 20-band block lives in `defaults.toml`, Decision 7).
+- `parameters.engine.toml` twin generated from the same probe dumps
+  (`just param-twin`) and committed; CI diffs its engine-fact fields
+  against `parameters.toml` and fails on drift (Decision 3).
 
 **Progress checklist:**
 
@@ -1550,9 +1590,10 @@ does not apply. Treat this slice as one-shot setup.
 - [ ] GitHub Actions CI green on Linux + Windows runners
 - [ ] UI scaffold builds via `pnpm --prefix ui build`
 - [ ] `defaults.toml` round-trips through TOML parser
-- [ ] `parameters.toml` → codegen `parameters.rs` produces 58 entries
+- [ ] `parameters.toml` parses to 64 `ParameterDef`s at daemon startup
 - [ ] `parameters.toml` seeded from `make -C tools/ddp_probe dump-tree` (drops `mxou`/`lcsz`, adds `scpe`/`test`)
-- [ ] Settable `ParameterDef.default` values captured via `make -C tools/ddp_probe dump-defaults`
+- [ ] `ParameterDef.default` values captured via `make -C tools/ddp_probe dump-defaults`
+- [ ] `parameters.engine.toml` twin committed; CI diff gate on engine-fact fields wired
 - [ ] All linters / formatters / type-checkers clean
 
 **HITL/AFK:** HITL — module layout warrants a human review pass before
@@ -2104,8 +2145,8 @@ for both end users and contributors.
 | Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle + cmd 6 version; visualizer (`vcbg`/`vcbe`) rides the same AK read (ADR-0010)|
 | Param coverage            | 24 of 64 AK params                                   | All 64 AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); four buckets: Settable / Experimental / ReadOnly-Dynamic / ReadOnly-Static (incl. the build/license readouts — `ver` is the version readout)                                |
 | Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build        |
-| Persistence               | Multi-file XML                                       | Two TOML files: `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; overlay semantics; 500 ms debounce                                              |
-| External edits            | Not supported                                        | `notify`-based watcher on both TOML files; debounced reload + state-snapshot broadcast                                                                                                         |
+| Persistence               | Multi-file XML                                       | Runtime `parameters.toml` + `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; 5-layer cascade; 500 ms debounce                                    |
+| External edits            | Not supported                                        | `notify`-based watcher on `config.toml` only (the binary-side TOMLs load at startup); debounced reload + state-snapshot broadcast                                                              |
 | Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                                            |
 | Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                        |
 | Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                               |
