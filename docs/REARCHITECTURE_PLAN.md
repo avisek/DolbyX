@@ -26,7 +26,7 @@ values: `not started`, `in progress`, `done`, `blocked`.
 | 2     | Factory profile selection applies AK overrides| not started   |                                                    |
 | 3     | Factory EQ presets apply as overlays          | not started   |                                                    |
 | 4     | Master controls (VL / DE / SV)                | not started   | the signature DDP main-screen controls             |
-| 5     | Visualizer pump + suspended-state detection   | not started   |                                                    |
+| 5     | Event-driven visualizer                       | not started   |                                                    |
 | 6     | GEQ editing with smoother + inverse           | not started   | HITL — golden snapshots                            |
 | 7     | Custom profiles & EQ presets (full CRUD)      | not started   |                                                    |
 | 8     | Advanced panel auto-generated                 | not started   |                                                    |
@@ -137,7 +137,7 @@ build a cleaner foundation that:
 │  ┌────────────────▼──────────────────┐    ┌────────────────────────────┐  │
 │  │ Engine (trait Engine + impl):     │    │ Audio plugin server        │  │
 │  │  - sessions: HashMap<u32, Handle> │    │  Win: \\.\pipe\DolbyX      │  │
-│  │  - visualizer pump (50 ms)        │    │  Unix: /tmp/dolbyx.sock    │  │
+│  │  - vis tail on each Process reply │    │  Unix: /tmp/dolbyx.sock    │  │
 │  └────────────────┬──────────────────┘    └────────────┬───────────────┘  │
 │                   │                                    │                  │
 │                   │ now:  QEMU subprocess              │                  │
@@ -180,7 +180,8 @@ pub trait Engine: Send + Sync {
     fn set_params(&self, id: SessionId, params: &[(&str, &[i16])]) -> Result<()>;
     fn get_param(&self, id: SessionId, name: &str) -> Result<Vec<i16>>;
     fn get_params(&self, id: SessionId, names: &[&str]) -> Result<Vec<Vec<i16>>>;
-    fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<()>;
+    fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<VisFrame>;
+    // VisFrame: the four ReadOnly-Dynamic arrays (vcbg vcbe vnbg vnbe), 4 × 20 i16
 }
 ```
 
@@ -210,10 +211,10 @@ broadcast (and serves the WebSocket state snapshot from it), but
 `get_param` gives an authoritative read-back for verification and
 engine-computed slots. `get_params` batch-reads N params in one
 round-trip (the shim loops `ak_get` / `ak_get_bulk`, mirroring
-`set_params` on the write side) — used for session restore, bulk
-read-back, and the visualizer: `vcbg`/`vcbe` are just two ReadOnly leaves
-the DSP refreshes every block, so the pump reads them with
-`get_params(["vcbg", "vcbe"])` — no dedicated visualizer call.
+`set_params` on the write side) — used for session restore and bulk
+read-back. The visualizer needs no read call at all: every `process`
+returns a `VisFrame` — the four ReadOnly-Dynamic arrays the DSP
+rewrites each block — riding the `Process` reply (Decision 10).
 
 The `i16` values throughout this trait are the engine's native 1/16-dB
 units. The trait is the canonical boundary where this format stays
@@ -568,7 +569,7 @@ state-change broadcasts.
 at handshake, and broadcasts state changes to all clients _except_ the
 originator — preventing echo loops in multi-tab/multi-client scenarios (see
 [docs/ddp/04-ui-data-flow.md](ddp/04-ui-data-flow.md#originator-handle-echo-suppression)).
-The visualizer pump broadcasts unconditionally to all clients.
+`vis` events broadcast unconditionally to all clients.
 
 Commands (client → daemon):
 
@@ -597,8 +598,7 @@ Events (daemon → client):
 
 ```jsonc
 { "type": "state", "snapshot": { /* full state */ } }
-{ "type": "vis", "gains": [...], "excitations": [...] }
-{ "type": "vis_suspended", "suspended": true }
+{ "type": "vis", "gains": [...], "excitations": [...], "native_gains": [...], "native_excitations": [...] }
 { "type": "ack", "request_id": "...", "ok": true }
 { "type": "error", "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
 { "type": "error", "request_id": "...", "code": "ENGINE_REJECTED", "status": -22, "message": "..." }
@@ -649,14 +649,14 @@ predictable, inspectable behaviour rather than relying on a hidden clamp
 (probe section 7: `vmb=240` and `vmb=480` both clamp to 192; #2 reads the
 clamped values back via `ak_get`).
 
-**Visualizer source.** The daemon always reads the `vis` event's data
-from the **oldest session** (the first entry in the session list),
-regardless of its suspended state. If that session has no audio
-flowing, `vis_suspended: true` is broadcast. The source does not
-switch when the oldest session goes silent — it only changes when
-that session ends, at which point the next-oldest becomes the source.
-This keeps the visualiser predictable and avoids flicker between
-sources.
+**Visualizer source.** `vis` events source from the **oldest session**
+(the first entry in the session list): its `Process` replies carry the
+vis frame the daemon broadcasts (Decision 10). If that session has no
+audio flowing there are simply no events — no suspended flag; idle is
+client-derived. The source does not switch when the oldest session goes
+silent — it only changes when that session ends, at which point the
+next-oldest becomes the source. This keeps the visualiser predictable
+and avoids flicker between sources.
 
 **ReadOnly param updates.** The four ReadOnly-Dynamic params (`vcbg`,
 `vcbe`, `vnbg`, `vnbe`) ride the `vis` event, refreshed per audio block
@@ -694,7 +694,7 @@ Each message is `[u32 length][u32 opcode][payload]`. Replies are
 | 0x11 | `SetParams`      | `[u32 session_id][u16 n]( [4-CC name][u16 count][i16 × count] × n )` | empty                      |
 | 0x12 | `GetParam`       | `[u32 session_id][4-CC name]`                         | `[u16 count][i16 × count]`               |
 | 0x13 | `GetParams`      | `[u32 session_id][u16 n]( [4-CC name] × n )`          | `[u16 n]( [u16 count][i16 × count] × n )` |
-| 0x30 | `Process`        | `[u32 session_id][u32 frames][i16 × frames × 2 pcm]`  | `[i16 × frames × 2 pcm]`                 |
+| 0x30 | `Process`        | `[u32 session_id][u32 frames][i16 × frames × 2 pcm]`  | `[i16 × frames × 2 pcm][i16 × 80 vis tail]` |
 
 `SetParam` / `SetParams` / `GetParam` / `GetParams` are served in the shim
 by the AK accessors (`ak_set` / `ak_set_bulk` / `ak_get` / `ak_get_bulk`),
@@ -706,12 +706,14 @@ getter (see
 [docs/ddp/03 → The AK registry read path](ddp/03-binary-protocol.md#the-ak-registry-read-path)).
 The daemon still keeps its state model for persistence and broadcast, but
 these give an authoritative read-back for verification and engine-computed
-slots. The visualizer pump uses `GetParams` for `vcbg`/`vcbe` — two
-ReadOnly leaves the DSP refreshes every block — so there's no dedicated
-visualizer opcode.
+slots.
 
 The `Process` opcode wraps `libdseffect.so`'s `process()` (see
-[ddp_probe](ddp/03-binary-protocol.md#practical-reminders)). v2 configures
+[ddp_probe](ddp/03-binary-protocol.md#practical-reminders)). Its reply
+carries a fixed 160-byte **vis tail**: the ARM shim appends
+`vcbg ‖ vcbe ‖ vnbg ‖ vnbe` (4 × 20 i16) after each block via local
+`ak_get` — the visualizer data arrives with the audio, no extra
+round-trip, no dedicated opcode (Decision 10). v2 configures
 the output for **WRITE** mode in `SET_CONFIG`, so `process()` overwrites the
 output buffer — **no per-block zeroing** (v1 used ACCUMULATE, which required
 a `memset` before every call). It still **clobbers its own input buffer**
@@ -760,7 +762,7 @@ kernel transitions. Defer until measured latency motivates the work.
 Rust gives us:
 
 - Strict type safety across many concurrent threads (HTTP, WebSocket,
-  audio I/O, visualizer pump, engine subprocess management).
+  audio I/O, engine subprocess management).
 - `tokio` handles cross-platform async I/O uniformly, including Windows
   named pipes (`tokio::net::windows::named_pipe`) and Unix domain sockets.
 - `axum` + `tokio-tungstenite` give HTTP and WebSocket for essentially free.
@@ -1169,30 +1171,27 @@ circular thumbs riding a soft-glow cyan polyline over 20×48 spectrum
 bricks. All constants and rules below are transcribed from
 `decompiled/DsUI.apk/sources/com/dolby/ds1appUI/`.
 
-**Pump.** Fixed 50 ms cadence, matching DDP's `DsService` loop:
+**Event-driven feed — no pump.** v1 copied DDP's `DsService` 50 ms
+polling loop; v2 drops the daemon-side cadence entirely — the
+visualizer is a pure event stream:
 
-```rust
-// crates/ddp-daemon/src/visualizer_pump.rs
-pub const VISUALIZER_PUMP_INTERVAL: Duration = Duration::from_millis(50);
-pub const VISUALIZER_SUSPENDED_THRESHOLD: u32 = 10; // matches
-                                                    // DsService.COUNTER_THRESHOLD; ≈500 ms
-```
+- **Data.** The ARM shim appends the four ReadOnly-Dynamic arrays
+  (`vcbg ‖ vcbe ‖ vnbg ‖ vnbe`, 4 × 20 i16) to every `Process` reply
+  via local `ak_get` — no separate `get_params`, no round-trip, no
+  pump thread (Decision 4 protocol table).
+- **Broadcast.** The daemon emits one `vis` event per oldest-session
+  block (Decision 4), all four arrays as raw int16 1/16-dB. No
+  coalescing, no timer: no audio → no events.
+- **Render.** The client draws every `rAF` (~60 fps) from the latest
+  event, applying fast-attack / slow-decay per-band ballistics —
+  smooth at any host block rate.
+- **Idle.** Client-derived: no event for ~200 ms → freeze the last
+  frame, then fade the spectrum to the floor over ~500 ms. (Distinct
+  from the EQ overlay's 5 s input-driven auto-hide below, which
+  stays.)
 
-The pump reads from the **oldest session** (Decision 4) via
-`get_params(["vcbg", "vcbe"])` — two ReadOnly leaves the DSP refreshes
-every block, 40 int16s in one round-trip (`gains ‖ excitations`).
-Suspend/resume is **daemon-side**: AK-direct reads always return the
-registry slots (no "empty reply" signal as cmd 4 had), so the pump tracks
-when the source session last processed an audio block and latches on idle —
-10 ticks (≈500 ms) with no new audio enters suspended, 10 ticks of audio
-flowing again leaves it (symmetric hysteresis, matching
-`DsService.visualizerUpdate`'s counter threshold). Entering broadcasts
-`{ "type": "vis_suspended", "suspended": true }` and suppresses
-`vis` events; leaving broadcasts `{ ..., "suspended": false }` and
-resumes them. While not suspended the pump broadcasts
-`{ "type": "vis", "gains": [...], "excitations": [...] }` with raw
-int16 1/16-dB values. `vcbg`/`vcbe` are the only ReadOnly params in the
-metadata table and they already ride this event.
+The `vc*` pair drives the spectrum and EQ curve here; the `vn*` pair
+feeds the Advanced panel's ReadOnly-Dynamic live cards (Decision 3).
 
 **SVG layer stack** (z-order, top of stack = drawn last):
 
@@ -1235,14 +1234,14 @@ between the two adjacent integer band gains
 
 **Curve source.** The polyline reads from the latest `vis` event's
 `gains` array (= `vcbg`) during steady state, and falls back
-to the locally smoothed user buffer while `vis_suspended == true`.
+to the locally smoothed user buffer while idle (no `vis` events).
 `vcbg ≠ gebg`: `gebg` is the user's GEQ input parameter, while
 `vcbg` is the composed EQ curve the engine is actually applying
 (`gebg` blended with `iebt` per `ieon`). The overlay must reflect
 what the engine produces, so `vcbg` is the only correct source —
-rendering from stored `gebg` would hide the IEQ contribution. A
-~50 ms drag lag is the structural consequence of the 50 ms vis pump
-round-trip; the original DDP wears the same lag for the same reason
+rendering from stored `gebg` would hide the IEQ contribution. Drag
+lag is one audio block — the next `Process` reply carries the new
+curve — versus the original DDP's structural ~50 ms pump lag
 (`GraphicEqualizerPainter.onDraw` line 349 sources from `mGainsUi`,
 the vcbg buffer).
 
@@ -1269,11 +1268,11 @@ smoothed, clamped 20-band `gebg` regardless of UI prefs.
 **Touch/mouse pipeline.** A drag enqueues `(band, dB)` events into a
 per-instance ring buffer (cap 20); consecutive events for the same
 band overwrite. A `rAF`-throttled recalc loop drains the queue every
-**60 ms** (30 ms while `vis_suspended`):
+**60 ms** (30 ms while idle):
 
 1. **handleNewTouchEvents** — for each event, compute
    `newUserGain = touchGain - (uiGain[b] - smooth[b])` (when not
-   suspended; raw `touchGain` when suspended), then splat into
+   idle; raw `touchGain` while idle), then splat into
    the inclusive (2L+1)-cell window `temp[b ..= b+2L]` (every cell
    gets the same value — the "thick-brush" feel).
 2. **smoothenCurve** — for each `temp` cell _outside_ `[minEditGain,
@@ -1447,7 +1446,6 @@ DolbyX/
 │   │   ├── src/ws_commands.rs       #   command dispatch
 │   │   ├── src/audio_server.rs      #   plugin socket accept loop
 │   │   ├── src/engine_supervisor.rs #   owns the Engine instance + session map
-│   │   ├── src/visualizer_pump.rs   #   50 ms broadcast loop
 │   │   ├── src/platform/
 │   │   │   ├── windows.rs           #   named pipe accept
 │   │   │   └── unix.rs              #   AF_UNIX accept
@@ -1507,14 +1505,13 @@ entry below passes the deletion test.
 
 | Module | Interface | What's hidden | Introduced in |
 |---|---|---|---|
-| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the visualizer pump reads `vcbg`/`vcbe` via `get_params`. | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
-| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT`, `SET_CONFIG` for a non-default rate, constant params via `ak_set`, `VISUALIZER_ENABLE`, `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), `EngineInfo` caching from cmd 6. `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
+| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output) → VisFrame`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); every `process` reply carries the four ReadOnly-Dynamic arrays as its `VisFrame` (Decision 10). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf), the vis-tail append (local `ak_get` per block). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
+| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT` → `SET_CONFIG` → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` refresh after `SET_CONFIG`, the vis fan-out (oldest-session `Process` replies → `vis` events, Decision 10). `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`, `basic`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
-| **`VisualizerPump`** (`ddp-daemon`) | `start(supervisor, broadcaster)` → `JoinHandle` · `stop()`. Constants: `VISUALIZER_PUMP_INTERVAL = 50 ms`, `VISUALIZER_SUSPENDED_THRESHOLD = 10` ticks. | 50 ms cadence loop, 10-tick `vis_suspended` hysteresis on an idle source session (no audio processed), oldest-session source-of-truth rule, `vis` / `vis_suspended` event emission. | Slice 5 |
 | **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/tmp/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
 | **UI `GainSmoother`** (`ui/src/lib/gain_smoother.ts`) | `enqueue(band, dB)` · `tick() → Option<[i16; 20]>` (returns smoothed, clamped 20-band write, or `None` if nothing pending). | 5-cell thick-brush splat, τ=0.3 s exponential decay toward clamps, kernel convolution (`Mobile` / `Soft` / `Direct`), 60 ms drain throttle, 20×20 pseudoinverse on preset-change broadcasts for drag continuity. | Slice 6 |
 
@@ -1778,42 +1775,47 @@ WebSocket ([ADR-0006](adr/0006-solid-ui-with-bootstrap-injection-no-api.md)).
 
 ---
 
-### Slice 5 — Visualizer pump + suspended-state detection
+### Slice 5 — Event-driven visualizer
 
 **Slice goal.** With the daemon running, the UI shows a 20×48 SVG
-spectrum brick field driven by `vis` events at 50 ms. When audio
-stops, `vis_suspended: true` is broadcast and the spectrum freezes.
+spectrum brick field driven by per-block `vis` events. When audio
+stops, the client freezes and fades the spectrum on its own — no
+suspend protocol.
 
-**Modules introduced.** `VisualizerPump` (50 ms cadence, 10-tick
-hysteresis), `Visualizer.tsx` SVG component, `vis` event handling in
-`ws.ts`, StubBackend canned `vcbg`/`vcbe` data for tests.
+**Modules introduced.** Vis fan-out in `EngineSupervisor`
+(oldest-session `Process` replies → `vis` events), `Visualizer.tsx`
+SVG component with per-band ballistics + idle detection, `vis` event
+handling in `ws.ts`, StubBackend fabricated `VisFrame`s for tests.
 
 **Behaviors to test:**
 
-1. [ ] `VisualizerPump::start` polls `Engine::get_params(["vcbg", "vcbe"])`
-       every 50 ms ± 5 ms.
-2. [ ] Each tick with audio flowing broadcasts a `vis` event with both
-       `gains[20]` and `excitations[20]` as raw int16 1/16-dB.
-3. [ ] 10 consecutive ticks with the source session idle (no audio
-       processed) latch `vis_suspended: true`; `vis` emission stops.
-4. [ ] 10 consecutive ticks with audio flowing latch
-       `vis_suspended: false`; `vis` emission resumes.
-5. [ ] Pump reads from the oldest session; when that session ends,
-       source switches to the next-oldest (Decision 4).
-6. [ ] SVG renders 20 columns × 48 rows; brick colour matches the
+1. [ ] Every `process()` on the source session broadcasts one `vis`
+       event carrying the reply's four arrays verbatim (`gains`,
+       `excitations`, `native_gains`, `native_excitations` — raw
+       int16 1/16-dB).
+2. [ ] `process()` on a non-source session emits nothing.
+3. [ ] No audio → no `vis` events; no timer fires, no suspend flag
+       exists.
+4. [ ] Source is the oldest session; when it ends, the next-oldest
+       takes over (Decision 4).
+5. [ ] Client ballistics: fast attack / slow decay per band, smooth
+       at any block rate.
+6. [ ] Client idle: no event for ~200 ms → freeze last frame; fade
+       spectrum to the floor over ~500 ms.
+7. [ ] SVG renders 20 columns × 48 rows; brick colour matches the
        `r<12` / `12≤r<18` / `r≥18` rule from
        [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
-7. [ ] dB mapping is asymmetric `[-12, +36]` per
+8. [ ] dB mapping is asymmetric `[-12, +36]` per
        [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
 
-**Tracer bullet test.** Start daemon with `StubBackend` programmed to
-return fixed canned `vcbg`/`vcbe`, with the source session kept active via
-periodic `process()` calls (no audio path until Slice 10); subscribe via
-WS; assert ≥ 18 of the next 20 `vis` events arrive within 50 ms ± 10 ms of
-each other carrying the canned data verbatim.
+**Tracer bullet test.** Start daemon with `StubBackend` fabricating
+fixed `VisFrame`s; keep the source session live via periodic
+`process()` calls (no audio path until Slice 10); subscribe via WS;
+assert one `vis` event per `process()` carrying the fabricated arrays
+verbatim, and zero events after the calls stop.
 
-**Mock policy.** Stub canned data only. The real engine's AK-direct
-`vcbg`/`vcbe` read is verified independently in Slice 9.
+**Mock policy.** Stub fabricated frames only. The real engine's vis
+tail (shim `ak_get` append) is verified in Slice 9.
 
 **HITL/AFK:** AFK.
 
@@ -1840,7 +1842,7 @@ pipeline.
 3. [ ] Out-of-range values decay toward the violated clamp with
        `α = 0.5^(Δt / 0.3s)`.
 4. [ ] `tick()` emits at most one write per 60 ms (30 ms while
-       `vis_suspended`).
+       idle).
 5. [ ] On `state` broadcast updating active `gebg`, the
        inverse-smoother repopulates `temp` so the next touch stays
        continuous.
@@ -2142,12 +2144,12 @@ for both end users and contributors.
 | EQ preset model           | Per-profile static array                             | Global *optional* overlay of the 9 EQ params; `None` valid; edits affect every profile selecting it                                                                                            |
 | GEQ model                 | 6 × 4 × 20 matrix                                    | Profile-owned; a selected EQ preset's overlay shadows it                                                                                                                                       |
 | Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
-| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle + cmd 6 version; visualizer (`vcbg`/`vcbe`) rides the same AK read (ADR-0010)|
+| Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle; the vis frame (`vc*` + `vn*`) rides every `Process` reply (ADR-0010)|
 | Param coverage            | 24 of 64 AK params                                   | All 64 AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); four buckets: Settable / Experimental / ReadOnly-Dynamic / ReadOnly-Static (incl. the build/license readouts — `ver` is the version readout)                                |
 | Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build        |
 | Persistence               | Multi-file XML                                       | Runtime `parameters.toml` + `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; 5-layer cascade; 500 ms debounce                                    |
 | External edits            | Not supported                                        | `notify`-based watcher on `config.toml` only (the binary-side TOMLs load at startup); debounced reload + state-snapshot broadcast                                                              |
-| Visualizer                | Gains only                                           | Gains + excitations; suspended-state detection (len==0 for N ticks)                                                                                                                            |
+| Visualizer                | Gains only                                           | Per-block `vis` events riding `Process` replies (`vc*` gains/excitations + `vn*` native); client ballistics + idle fade — no pump, no suspend protocol                                         |
 | Power off                 | Zero-out the OFF profile                             | `EFFECT_CMD_DISABLE` on the engine; engine performs graceful crossfade; idempotent; parameter state survives the toggle                                                                        |
 | Custom profile categories | Labelled (Movie / Music / Game / Voice / Customized) | Removed; custom profiles are just named profiles                                                                                                                                               |
 | First-run defaults        | Undefined                                            | Music profile + power on, matching original DDP out-of-box                                                                                                                                     |

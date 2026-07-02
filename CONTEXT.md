@@ -44,18 +44,19 @@ are the per-block measurements taken on it (see
 _Avoid_: "native bands" (ambiguous with the per-block `vnbg`/`vnbe` data).
 
 **`vcbg` / `vcbe`**:
-The two `ReadOnly` AK parameters the DSP rewrites every audio block (in
-the AK registry). Returned together by engine cmd 4
-(`DS_PARAM_VISUALIZER_DATA`) as 40 int16s — the *protocol* read path the
-visualizer rides. In-process, the engine's own `ak_get` reads the same
-registry, and most other params' live value too (see
+Two of the four `ReadOnly-Dynamic` AK parameters the DSP rewrites every
+audio block (in the AK registry). Engine cmd 4 (`DS_PARAM_VISUALIZER_DATA`)
+returns the pair as 40 int16s — the original service's read path; v2 instead
+ferries all four dynamic arrays on each `Process` reply (see `vis` event).
+In-process, the engine's own `ak_get` reads the same registry, and most
+other params' live value too (see
 [docs/ddp/03](docs/ddp/03-binary-protocol.md#the-ak-registry-read-path)).
 These are the *custom* (`vc*`) bands — the engine's *native* (`vn*`)
 per-band visualizer data resampled onto a host-set frequency grid
 (`vcnb`/`vcbf`); they read identical to `vn*` until that grid is
 reconfigured (see [docs/ddp/02](docs/ddp/02-ak-parameters.md)).
-_Avoid_: "visualizer data" alone (ambiguous between the raw cmd-4 bytes
-and the post-processed `vis` event payload).
+_Avoid_: "visualizer data" alone (ambiguous between the raw arrays and the
+post-processed `vis` event payload).
 
 **Settability bucket**:
 The classification of an AK parameter into one of four:
@@ -115,11 +116,15 @@ first frame, with no pre-paint network round-trip. (Engine version is not
 a bootstrap field — it's the `ver` param, a ReadOnly-Static readout.)
 _Avoid_: config, init payload, manifest.
 
-**`vis_suspended`**:
-The pump-emitted flag indicating audio is idle. Latches on after 10
-consecutive empty cmd-4 reads (`VISUALIZER_SUSPENDED_THRESHOLD`) and
-latches off symmetrically. While suspended, `vis` events are suppressed.
-_Avoid_: idle, paused, off (those overload other concepts).
+**`vis` event**:
+The visualizer broadcast — `vc*` gains/excitations (main spectrum + EQ
+curve) plus native `vn*` bands (Advanced live display), emitted once per
+oldest-session `process()` block (the ARM shim piggybacks the arrays on the
+`Process` reply). A pure event stream: no audio → no events. The client
+renders at 60 fps from the latest event and detects idle itself (no event
+for ~200 ms → freeze + fade). No daemon-side pump, cadence, or suspend latch.
+_Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
+(removed — idle is client-side).
 
 **Slice** (architectural):
 A vertical tracer bullet through every layer DolbyX uses (UI · WS ·
