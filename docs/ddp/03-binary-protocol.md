@@ -134,13 +134,11 @@ no-op when referenced later — `ak_set` against it will log
 > only sends those 24, and so the engine assigns them indices 0..23. But
 > this means parameters NOT in that list cannot be referenced by index.
 >
-> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with the 58
-> surfaced AK names from [02-ak-parameters.md](02-ak-parameters.md)
-> (drops only the 6 unreadable engine-internal slots: `bver`, `bndl`,
-> `ver`, `lcmf`, `lcvd`, `lcpt`).
-> Storage cost is ~230 bytes; the gain is symmetry with the metadata
-> table and access to the "Experimental" bucket (`endp`, `preg`,
-> `pstg`, `scpe`, etc.) that the original UI hides.
+> **DolbyX v2** never sends DEFINE_PARAMS — it resolves refs with
+> `ak_find` (v2 note above). A cmd-path host should register all 64
+> names, as the probe harness does (`DEFINE_PARAMS count:64`): storage
+> is a few hundred bytes, and a param left out can't be referenced by
+> index at all.
 
 ### Command 1 — `DS_PARAM_DEFINE_SETTINGS`
 
@@ -190,14 +188,14 @@ The exact total depends on `aonb` (which sets `aobf` to length 40 and
 > cmd 3 GET doesn't exist in the engine at all** (see
 > [Cmd 3 GET](#cmd-3-get-unimplemented) below), not slot-allocation.
 
-> **Recommendation for DolbyX v2**: emit one entry per `(param_idx,
-> offset)` for every offset in every surfaced param's value array,
-> matching the original DDP layout. DolbyX v2 includes all 58 surfaced
-> AK params (drops the 6 unreadable slots — see DEFINE_PARAMS
-> recommendation above and the "DEFINE_SETTINGS scope" subsection
-> below) so every surfaced param has a cache slot — the cost is
-> ~0.9 KB of cache, the gain is access to "Experimental" writes plus
-> the [pre-population side effect](#settings-cache-lifecycle).
+> **DolbyX v2** never sends DEFINE_SETTINGS either (AK-direct). A
+> cmd-path host should emit one entry per `(param_idx, offset)` for
+> every offset in every param's value array, matching the original DDP
+> layout — per-offset entries are what make multi-element SETs land
+> correctly (above). Full coverage is what the probe harness runs
+> (`DEFINE_SETTINGS count:667`, ~1.3 KB of cache); the gain is
+> "Experimental" writes plus the
+> [pre-population side effect](#settings-cache-lifecycle).
 
 ## Steady-state SET commands
 
@@ -394,9 +392,9 @@ For DolbyX v2 it's the daemon's in-memory state plus the persisted
 > **Implication for DolbyX v2**: there's no cmd 3 GET, but v2's AK-direct
 > binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md))
 > provides a *real* per-param GET via `ak_get` (next section), surfaced as
-> the `GetParam` / `GetParams` opcodes. The visualizer leaves `vcbg`/`vcbe`
-> are read through that same path (`get_params`), not cmd 4 — so v2 doesn't
-> use cmd 4 at all.
+> the `GetParam` / `GetParams` opcodes. The visualizer arrays ride every
+> `Process` reply (a shim-local `ak_get` per block), not cmd 4 — so v2
+> doesn't use cmd 4 at all.
 
 ## The AK registry read path
 
@@ -532,29 +530,26 @@ After step 10 the engine actually starts processing audio when
 ### A note on DEFINE_SETTINGS scope
 
 The original DDP service restricts DEFINE_SETTINGS to the 42 params
-in Java's `DsAkSettings.isParamSettable` whitelist. DolbyX v2's
-research-vehicle goal is better served by **including the 58 surfaced
-params** (everything from
-[02-ak-parameters.md](02-ak-parameters.md) except the 6 unreadable
-engine-internal slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`):
+in Java's `DsAkSettings.isParamSettable` whitelist. That's a host-side
+choice, not an engine limit — a cmd-path host going wider gains:
 
-- Cache cost is ~0.9 KB (`~484` slots × 2 bytes) — negligible.
-- Every surfaced param gets cache pre-population from the engine's
-  internal AK state at DEFINE_SETTINGS time (see
+- Cache pre-population from the engine's internal AK state at
+  DEFINE_SETTINGS time for every registered param (see
   [Settings cache lifecycle](#settings-cache-lifecycle)).
-- The "Experimental" bucket (`endp`, `preg`, `pstg`, `vol`, `ven`,
-  `vcnb`, `vcbf`, `ocf`, `scpe`, `test`) becomes addressable via cmd 3 SET.
-- The "ReadOnly" bucket (`vcbg`, `vcbe`) gets cache slots too, which
-  doesn't hurt anything (the DSP overwrites them every block; the
-  host reads them out-of-band via cmd 4).
-- The 10 excluded slots are skipped because they have no host read
-  path — the engine version surfaces via cmd 6 → bootstrap
-  `engine.version`, and the rest carry no DolbyX-visible state.
+- cmd 3 SET access to the "Experimental" bucket (`endp`, `preg`, `pstg`,
+  `vol`, `ven`, `vcnb`, `vcbf`, `ocf`, `scpe`, `test`).
+- Harmless cache slots for the write-protected slots (the DSP overwrites
+  the registry, not the cache; the host reads `vcbg`/`vcbe` out-of-band
+  via cmd 4 — cmd 3 GET doesn't exist).
 
 The empirical evidence that the all-cache variant works is in
-[tools/ddp_probe/](../../tools/ddp_probe/README.md) — the harness
-runs with all-64 DEFINE_SETTINGS and the engine emits `reply=0` for
-every write; subsetting to 54 is purely a host-side choice.
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) — the harness runs
+with all-64 DEFINE_SETTINGS (`count:667`, ~1.3 KB of cache — negligible)
+and the engine emits `reply=0` for every write; subsetting is purely a
+host-side choice. (DolbyX v2 sends neither DEFINE_PARAMS nor
+DEFINE_SETTINGS — AK-direct, v2 note at top — and reads everything,
+build/license slots included, via `ak_get`; the engine version is also
+reachable via [cmd 6](#command-6-get--ds_param_version).)
 
 ### What the original service does
 
@@ -783,36 +778,37 @@ during DEFINE_SETTINGS show three things:
    the cache is a raw host-side record, not the engine's DSP-input state.
 
 What the DSP does with that state then depends on the param. DolbyX v2
-surfaces three buckets, each derived from observed DSP behaviour:
+surfaces four buckets, each derived from observed DSP behaviour:
 
-- **Settable params** — the DSP reads them from the clamped registry
-  each block.
-- **ReadOnly** (`vcbg`, `vcbe`) — the DSP overwrites the **registry**
-  slot every block with its own computed value (the cache slot is never
-  touched). The host reads them via cmd 4 or `ak_get`.
+- **Settable** — the DSP reads them from the clamped registry each
+  block.
+- **ReadOnly-Dynamic** (`vcbg`, `vcbe`, `vnbg`, `vnbe`) — the DSP
+  overwrites the **registry** slot every block with its own computed value
+  (the cache slot is never touched). The host reads them via cmd 4
+  (`vc*` only) or `ak_get`.
+- **ReadOnly-Static** (`vnnb`, `vnbf` + the build/license six) — filled
+  by the engine (rate-derived grid / engine identity), not by the DSP
+  loop. Read via `ak_get`.
 - **Experimental** (`endp`, `preg`, `scpe`, etc.) — read from the
   registry on the same audio block. Probe section 7 shows the clamped
   registry (not the raw cache) drives the DSP, proven by a cache poke the
   DSP ignores; the universal ak_set forwarding in section 5b extends this
   to every Experimental param.
 
-A group of 6 AK slots is **excluded** from DolbyX v2's surfaces
-(DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because they share one
-trait — no host read path:
+DolbyX v2 excludes nothing — all 64 root leaves surface
+([02](02-ak-parameters.md#recommendation-for-dolbyx-v2)). The engine-internal
+identity / license slots (`bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`) are
+the least alive: the DSP doesn't read them at runtime, the engine
+pre-populates them from its internal AK registry at DEFINE_SETTINGS time,
+and writes succeed at the protocol level with no observable effect. v2 reads
+them via `ak_get` as ReadOnly-Static readouts; `ver` is the engine-version
+readout (also reachable via cmd 6 — an engine fact v2 doesn't use).
 
-- Engine-internal identity / license slots: `bver`, `bndl`, `ver`,
-  `lcmf`, `lcvd`, `lcpt`. DSP doesn't read them at runtime;
-  the engine pre-populates them from its internal AK registry at
-  DEFINE_SETTINGS time. Writes succeed at the protocol level but
-  have no observable effect. The engine version string (`ver`) is
-  reachable via cmd 6 and surfaces as `engine.version` on the
-  bootstrap rather than as an AK parameter.
-
-The native-visualizer slots `vnnb`/`vnbf`/`vnbg`/`vnbe` are **not** excluded:
-`ak_get` reads them (ddp_probe #9), and they're the engine's ground-truth
-filterbank visualizer — the source the custom `vcbg`/`vcbe` channel resamples
-onto its host-set grid. `vc*` mirrors `vn*` only while the custom bands are
-left at their default (native) layout; v2 keeps both (`vc*` for the Visualizer
+The native-visualizer slots (`vnnb`/`vnbf`/`vnbg`/`vnbe`) are the engine's
+ground-truth filterbank visualizer — `ak_get` reads them (ddp_probe #9), and
+they're the source the custom `vcbg`/`vcbe` channel resamples onto its
+host-set grid. `vc*` mirrors `vn*` only while the custom bands are left at
+their default (native) layout; v2 keeps both (`vc*` for the Visualizer
 element, `vn*` in the Advanced panel). See
 [02-ak-parameters.md](02-ak-parameters.md).
 

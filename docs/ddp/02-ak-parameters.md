@@ -64,10 +64,10 @@ or 3, not by 4-CC. (See [03-binary-protocol.md](03-binary-protocol.md).)
 
 ### Build / version (read-only)
 
-These slots have no host read path (cmd 3 GET is unimplemented). DolbyX v2
-drops all three from the metadata table — `ver` is reachable via cmd 6 and
-is surfaced as `engine.version` on the bootstrap instead. See
-"Recommendation for DolbyX v2" below.
+These slots have no cmd-path read (cmd 3 GET is unimplemented), but
+`ak_get` reads them fine — DolbyX v2 surfaces all three as
+**ReadOnly-Static** readouts, with `ver` as the engine-version readout.
+See "Recommendation for DolbyX v2" below.
 
 |   # | 4-CC   | len | bounds      | settable | Description                                                            |
 | --: | ------ | --: | ----------- | -------- | ---------------------------------------------------------------------- |
@@ -228,8 +228,10 @@ lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
 
 \* `vcnb`/`vcbf` aren't in Java's `isParamSettable` whitelist, but the engine
 accepts host writes (write-protect bit clear) — DolbyX v2 surfaces them as
-**Experimental**. The `vn*` arrays and `vcbg`/`vcbe` are write-protected
-(**ReadOnly**); see [Engine vs Java settability](#engine-vs-java-settability).
+**Experimental**. The `vn*` slots and `vcbg`/`vcbe` are write-protected —
+**ReadOnly-Dynamic** (`vcbg` `vcbe` `vnbg` `vnbe`, DSP-filled each block) and
+**ReadOnly-Static** (`vnnb` `vnbf`) in v2's buckets; see
+[Engine vs Java settability](#engine-vs-java-settability).
 
 The bound `[-192, +576]` is what the engine outputs for `vcbg`/`vcbe`. The UI
 maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel grid
@@ -247,8 +249,8 @@ maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel grid
 
 These exist to gate features behind an SKU. In the v8.1 build all features
 are enabled (`<authorized_technologies>` in `ds1-default.xml`). DolbyX v2
-drops all four from the metadata table — no host read path, opaque
-payloads.
+surfaces `lcmf`/`lcvd`/`lcpt` as **ReadOnly-Static** readouts — `ak_get` is
+the read path; the payloads stay opaque. (`lcsz` is a phantom — see its row.)
 
 |   # | 4-CC   | len | bounds    | settable | Description                                    |
 | --: | ------ | --: | --------- | -------- | ---------------------------------------------- |
@@ -488,28 +490,21 @@ see [07 — Per-param type & flags](07-ak-api.md#per-param-type--flags) and
 `ddp_probe dump types`.
 
 What differs across "non-settable" params is **whether the DSP uses
-the value afterwards** and, separately, **whether there is a host read
-path**. DolbyX v2 collapses this into three buckets, each of which is
-surfaced in the UI; engine-internal slots with no read path are dropped
-from the metadata table entirely (see "Recommendation for DolbyX v2"
-below for the exclusion list):
+the value afterwards** and, separately, **whether it changes at
+runtime**. DolbyX v2 surfaces all 64 in a four-bucket classification
+(see "Recommendation for DolbyX v2" below):
 
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly** — `vcbg`, `vcbe`, `vnnb`, `vnbf`, `vnbg`, `vnbe`                          | Engine **write-protects** all six (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. `vcbg`/`vcbe` (custom) + `vnbg`/`vnbe` (native) are DSP-filled each block; `vnnb`/`vnbf` are the engine's static native-grid descriptors. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; included by DolbyX v2 (`ak_get`/`get_params` reads them) |
+| **ReadOnly-Dynamic** — `vcbg`, `vcbe` (custom), `vnbg`, `vnbe` (native)                | Engine **write-protects** them (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. DSP-filled each block. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; v2 reads them per block ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) |
+| **ReadOnly-Static** — `vnnb`, `vnbf` + `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`   | `vnnb`/`vnbf` are the engine's rate-derived native-grid descriptors, write-protected like the dynamic four. The build/license six hold engine identity the DSP doesn't read at runtime (write-protect covers `bver`/`ver`/`bndl`/`lcvd`; `lcmf`/`lcpt` accept writes with no observable effect). Read via `ak_get`. | no in Java's setup; v2 reads them once after SET_CONFIG      |
 | **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
-The remaining 6 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`
-(engine-internal build-version / license; DSP doesn't read at runtime,
-pre-populated at DEFINE_SETTINGS time) — carry nothing the host needs. Only
-`ver` is reachable over the protocol, via cmd 6, which DolbyX v2 surfaces as
-`engine.version` rather than as an AK parameter. DolbyX v2 omits all 6 from
-DEFINE_PARAMS and DEFINE_SETTINGS. (`lcsz`, Java's 7th license/build name,
-isn't an engine root leaf at all — it's a phantom, not a dropped slot; see
-above.) The native-visualizer family (`vnnb`, `vnbf`, `vnbg`, `vnbe`) is
-**not** dropped — it's the ground-truth source the custom `vc*` channel
-resamples, surfaced as ReadOnly (see the visualizer-bands section above).
+(`ver` is also reachable over the cmd protocol via cmd 6 — an engine fact
+v2 doesn't use: it reads the param. `lcsz`, Java's 7th license/build name,
+isn't an engine root leaf at all — a phantom, not a surfaced slot; see
+above.)
 
 The engine **clamps** a written value in the AK registry (the cache keeps
 the raw value; see
@@ -556,40 +551,24 @@ but they are there.
 > below classify *which* params v2 surfaces; the binding is AK throughout.
 
 The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a three-bucket classification of the **58 params DolbyX v2
-surfaces** in its metadata table and the Advanced UI:
+above into a four-bucket classification of the **64 params DolbyX v2
+surfaces** — every engine root leaf, nothing dropped:
 
 - **Settable** (42 params) — every param with `settable = yes` above.
-  Daemon validates against metadata; engine accepts the forwarded
-  write into both the settings cache and AK registry.
-- **ReadOnly** (6 params) — `vcbg`, `vcbe` (custom) + `vnnb`, `vnbf`, `vnbg`,
-  `vnbe` (native). All write-protected (flag bit `0x2`), so host writes are
-  rejected, not clobbered. `vcbg`/`vcbe` and `vnbg`/`vnbe` are DSP-filled each
-  block; `vnnb`/`vnbf` report the fixed native grid. The Visualizer element
-  rides the **custom** pair via the pump's `get_params`/`ak_get` (`vcbg ‖ vcbe`,
-  40 int16s, as cmd 4 did); the **native** family is surfaced in the Advanced
-  panel. Rendered as live read-only displays.
+  Daemon validates against metadata; the shim writes via `ak_set`.
 - **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
   `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
   a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —
   formerly counted here — is a dead phantom, dropped. See
   [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).)
-
-The remaining 6 AK slots are dropped entirely:
-
-- `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt` —
-  engine-internal build-version / license slots. DSP doesn't read
-  them at runtime; the engine pre-populates them at DEFINE_SETTINGS
-  time via internal `ak_get` but there is no host read path. The
-  one externally-visible value, the engine version string, comes
-  out of cmd 6 and is surfaced as `engine.version` on the bootstrap
-  rather than as an AK parameter.
-
-The native-visualizer family (`vnnb`, `vnbf`, `vnbg`, `vnbe`) is **kept**
-(ReadOnly, above), not dropped: it's the engine's ground-truth filterbank
-output — the source the `vc*` channel interpolates onto its host-set grid —
-so the Advanced panel exposes it alongside the custom view.
-
-The 58-param surface expands to **~484 addressable leaf elements
-(~968 bytes, ≈0.9 KB)** — it drops only the 6 unreadable build-version /
-license slots from the engine's 64 root leaves.
+- **ReadOnly-Dynamic** (4 params) — `vcbg`, `vcbe` (custom) + `vnbg`,
+  `vnbe` (the native ground truth the `vc*` pair resamples). Write-protected,
+  DSP-filled each block. The engine shim appends all four to every `Process`
+  reply (a local `ak_get` per block) — the visualizer frame rides the audio,
+  no cmd 4, no polling. `vcbg`/`vcbe` drive the Visualizer element; the
+  native pair shows live in the Advanced panel.
+- **ReadOnly-Static** (8 params) — `vnnb`, `vnbf` (the rate-derived native
+  grid; re-read after SET_CONFIG) + `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+  `lcpt` (build/license identity, read once via `ak_get`). Plain readout
+  cards in the Advanced panel; `ver` is the engine-version readout, which
+  the UI formats as "2.0.4.0" — no cmd 6 in v2.
