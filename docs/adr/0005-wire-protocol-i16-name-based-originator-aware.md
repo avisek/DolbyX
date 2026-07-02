@@ -8,7 +8,7 @@ name, not by positional index, so configs survive reordering of the
 metadata table. The daemon assigns each WebSocket connection a serial
 originator id at handshake and broadcasts state changes to all clients
 **except** the originator, preventing echo loops in multi-tab scenarios.
-The visualizer pump broadcasts unconditionally. Validation is asymmetric
+`vis` events broadcast unconditionally. Validation is asymmetric
 by design: the daemon owns range validation up front. The engine *does*
 silently clamp an out-of-range write — but only in its AK registry, to its
 own bounds (which differ from the published table for some params), while

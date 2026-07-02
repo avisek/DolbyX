@@ -1,8 +1,8 @@
 # Solid.js UI with bootstrap injection, no `/api/*` routes
 
 The Web UI uses Solid.js + TypeScript built by Vite. Parameter metadata,
-the initial state snapshot, and immutable engine info (version, backend)
-are injected into `index.html` at request time as a single
+the initial state snapshot, and immutable engine info (backend) are
+injected into `index.html` at request time as a single
 `window.__BOOTSTRAP__` global. The UI reads it synchronously at module
 init so the page paints fully populated on the first frame with no
 pre-paint network round-trip. There are intentionally **no `/api/*`

@@ -5,7 +5,8 @@ The ARM engine shim binds to `libdseffect.so` two ways, split by surface.
 accessors — `ak_find` (4-CC → ref), `ak_set` / `ak_set_bulk` (write),
 `ak_get` / `ak_get_bulk` (read) — *not* the cmd protocol's DEFINE_PARAMS +
 DEFINE_SETTINGS handshake and cmd 2 / 3 / 4. **Lifecycle** (EffectCreate, INIT,
-SET_CONFIG, ENABLE / DISABLE, `process`, version) stays on the cmd protocol.
+SET_CONFIG, ENABLE / DISABLE, `process`) stays on the cmd protocol; the
+engine version is the `ver` param, read via the same AK path.
 
 The cmd param path is a thin wrapper over AK. `tools/ddp_probe/akctl_probe.c`
 (`make -C tools/ddp_probe akctl`) shows cmd 3 SET ≡ `ak_set` **bit-for-bit** at
@@ -32,8 +33,10 @@ ARM entry points, no `effect_param_t` marshalling). The blast radius is the shim
 only — the `Engine` trait and the daemon↔subprocess protocol stay name-based,
 gaining `get_param` / `get_params` (and the `GetParam` / `GetParams` opcodes)
 now that a read is a single `ak_get` / `ak_get_bulk`. This also folds the
-visualizer in: `vcbg`/`vcbe` are two ReadOnly leaves read by that same
-`get_params` path, so v2 needs no cmd-4 visualizer call.
+visualizer in: the shim appends the four ReadOnly-Dynamic arrays
+(`vcbg vcbe vnbg vnbe`, a local `ak_get` per block) to every `Process`
+reply, so v2 needs no cmd-4 visualizer call — the vis frame rides the
+audio.
 
 Lifecycle stays on cmd because it has no host-side wrapper complexity to remove —
 its complexity is engine-internal orchestration the cmd handler already

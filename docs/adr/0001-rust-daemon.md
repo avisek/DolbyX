@@ -2,7 +2,7 @@
 
 The v2 daemon is written in Rust, replacing the v1 C implementation. Rust
 gives us strict typing across the daemon's concurrent threads (HTTP,
-WebSocket, audio I/O, visualizer pump, engine subprocess management),
+WebSocket, audio I/O, engine subprocess management),
 `tokio`-based cross-platform async I/O including Windows named pipes,
 `axum` + `tokio-tungstenite` for HTTP and WebSocket with minimal glue,
 `serde` + `toml` for persistence, and a Cargo workspace that scales as
