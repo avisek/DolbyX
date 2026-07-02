@@ -24,7 +24,7 @@ values: `not started`, `in progress`, `done`, `blocked`.
 | 0     | Workspace bootstrap                           | not started   | scaffold-only, no TDD                              |
 | 1     | Power toggle, persisted end-to-end            | not started   | **tracer bullet** — first vertical slice           |
 | 2     | Factory profile selection applies AK overrides| not started   |                                                    |
-| 3     | Factory EQ presets apply IEQ curves           | not started   |                                                    |
+| 3     | Factory EQ presets apply as overlays          | not started   |                                                    |
 | 4     | Master controls (VL / DE / SV)                | not started   | the signature DDP main-screen controls             |
 | 5     | Visualizer pump + suspended-state detection   | not started   |                                                    |
 | 6     | GEQ editing with smoother + inverse           | not started   | HITL — golden snapshots                            |
@@ -49,7 +49,7 @@ understanding of how the original DDP module works internally, we can now
 build a cleaner foundation that:
 
 - Faithfully reproduces the original DDP's defaults, behaviour, look, and feel.
-- Cleanly extends DDP's capabilities — custom profiles, custom IEQ presets,
+- Cleanly extends DDP's capabilities — custom profiles, custom EQ presets,
   and every `libdseffect.so` parameter exposed via an Advanced section.
 - Is easier to develop and maintain — a single source of truth for parameters,
   no positional indices to break under refactoring, no shared-state foot-guns.
@@ -71,9 +71,10 @@ build a cleaner foundation that:
 3. Same persistence semantics as the original: per-profile parameter
    overrides, per-profile GEQ, master state, all survive restarts.
 4. Custom profiles can be added, edited, renamed, and removed.
-5. Custom IEQ presets can be added, edited, renamed, and removed. IEQ
+5. Custom EQ presets can be added, edited, renamed, and removed. EQ
    presets are global — a change to a preset reflects across every profile
-   that has it currently selected.
+   that has it currently selected — and optional: `None` is a valid
+   selection, leaving the profile's own EQ params in effect.
 6. Every one of the engine's 64 real root-leaf AK parameters is exposed in
    the Advanced UI section, driven by metadata — none dropped. Four access
    buckets: Settable (42), Experimental (10 — engine-internal slots the
@@ -277,9 +278,9 @@ per-stream memory duplication compared to the current code.
 When the Unicorn or static-binary backend lands, the daemon configuration
 swaps the trait impl and nothing else changes.
 
-### Decision 2 — IEQ presets are global, decoupled from profiles, generalized as EQ presets
+### Decision 2 — Profiles are canonical; EQ presets are an optional overlay
 
-> Persistent record: [ADR-0003 — Global EQ presets, GEQ owned by preset](adr/0003-global-eq-presets-and-geq-per-preset.md).
+> Persistent record: [ADR-0003 — Global EQ presets](adr/0003-global-eq-presets-and-geq-per-preset.md).
 
 A clean simplification over the original DDP model.
 
@@ -287,33 +288,34 @@ A clean simplification over the original DDP model.
 backing GEQ curve. The matrix was `profiles × presets × bands` = 6 × 4 × 20.
 Adding a preset to one profile didn't add it to others.
 
-**DolbyX v2**: IEQ preset terminology changed to EQ preset. EQ presets are
-top-level objects like profiles. Each preset holds an `iebt[20]` curve and a
-`gebg[20]` curve. A profile stores only the **id of its currently selected
-EQ preset**, not its own copy of `iebt[20]` or `gebg[20]` values.
+**DolbyX v2**: the profile is the canonical home for *every* non-readonly
+AK param — all 52 Settable + Experimental, structural constants (`genb`,
+`aonb`, band frequencies, …) included, no special cases. IEQ preset
+terminology changes to **EQ preset**: a top-level object like a profile,
+now an *optional* overlay carrying exactly the 9 EQ params —
+`genb`/`gebf`/`geon`/`gebg` (GEQ) + `ienb`/`iebf`/`ieon`/`iebt`/`iea`
+(IEQ). Preset eligibility is derived, not declared: a param is
+preset-carried ⟺ `category ∈ {Ieq, Geq}` — no `scope` field.
 
 ```rust
 struct State {
     power: bool,
     selected_profile: ProfileId,
     profiles: Vec<Profile>,               // factory + custom
-    eq_presets: Vec<EqPreset>,            // factory + custom, applies to all profiles
+    eq_presets: Vec<EqPreset>,            // factory + custom, global across profiles
 }
 
 struct Profile {
     id: ProfileId,                        // stable string id, e.g. "music", "user_a3f1"
     name: String,                         // display name, user-editable
-    selected_eq_preset: PresetId,         // points into State.eq_presets
-    params: HashMap<String, Vec<i16>>,    // AK param overrides keyed by 4-CC
+    selected_eq_preset: Option<PresetId>, // None → the profile's own EQ params apply
+    params: HashMap<String, Vec<i16>>,    // overrides keyed by 4-CC — any of the 52
 }
 
 struct EqPreset {
-    id: PresetId,                         // e.g. "off", "rich", "user_91c2"
+    id: PresetId,                         // e.g. "rich", "user_91c2"
     name: String,                         // display name, user-editable
-    is_ieq_on: bool,                      // ieon
-    ieq_band_targets: [i16; 20],          // iebt
-    is_geq_on: bool,                      // geon
-    geq_band_gains: [i16; 20],            // gebg
+    params: HashMap<String, Vec<i16>>,    // overrides keyed by 4-CC — the 9 EQ params only
 }
 ```
 
@@ -321,20 +323,36 @@ struct EqPreset {
 checking whether the id exists in `defaults.toml`. Factory items can
 be reset (overrides cleared) but not deleted or renamed.
 
+**Resolution.** A selected preset's 9 EQ params shadow the profile's own
+*entirely* — the preset resolves complete through its own defaults cascade
+(Decision 7), so it never half-applies. With `None` selected, the
+profile's own EQ params are effective.
+
+**Edit routing.** While a preset is selected, EQ edits land on the preset
+and propagate to every profile currently selecting it; with `None`, they
+land on the profile.
+
 User-visible consequences:
 
 - Editing the "Rich" preset (e.g. tweaking the `gebg` or `iebt` curve) takes
   effect immediately for every profile that currently has Rich selected.
-- Adding a new IEQ preset makes it available across every profile.
-- Removing an IEQ preset: any profile that had it selected falls back to
-  the "Off" preset.
-- GEQ edits are owned by the current IEQ preset, and can be used across profiles.
-  (This is a deliberate simplification from the original, where GEQ was
-  per-(profile, preset).)
+- Adding a new EQ preset makes it available across every profile.
+- Removing an EQ preset: any profile that had it selected falls back to
+  `None` — its own EQ params (there is no "Off" preset).
 
-Factory EQ presets are `Off`, `Open`, `Rich`, `Focused`. Factory
-profiles are `Movie`, `Music`, `Game`, `Voice`. Factory items cannot
-be deleted; they can be reset to their bundled defaults.
+Factory EQ presets are `Open`, `Rich`, `Focused`; "off" is `None`, not a
+preset. Factory profiles are `Movie`, `Music`, `Game`, `Voice`. Factory
+items cannot be deleted; they can be reset to their bundled defaults.
+
+**Session init collapses too.** With structural constants profile-owned,
+v1's separate constant-params init step dies: session init is
+`create_session` plus one `set_params` of the resolved active profile
+(+ selected preset). The shim's commit-leaf touch
+([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)) reshapes the
+engine's 10-band power-on state to the 20-band config in that same write —
+and reshaping stays a live operation, so the UI is reactive to band
+structure. Band arrays are allocated at engine capacity (40); the
+effective count is the group's `*nb` value.
 
 Note:
 Original DDP only allowed `gebg` curves to be edited through the
@@ -546,7 +564,7 @@ Commands (client → daemon):
 { "cmd": "set_param", "name": "dvla", "value": 4 }
 { "cmd": "set_param", "name": "iebt", "values": [67, 95, ...] }
 { "cmd": "set_param", "name": "gebg", "values": [24, -8, ...] }
-{ "cmd": "set_eq_preset", "id": "rich" }
+{ "cmd": "set_eq_preset", "id": "rich" }   // "id": null → profile's own EQ params
 
 { "cmd": "add_profile", "from": "music", "name": "My Music" }
 { "cmd": "rename_profile", "id": "user_a3f1", "name": "Late Night" }
@@ -1314,17 +1332,14 @@ pub struct State {
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
-    pub selected_eq_preset: PresetId,
-    pub params: HashMap<String, Vec<i16>>, // AK param overrides keyed by 4-CC
+    pub selected_eq_preset: Option<PresetId>, // None → profile's own EQ params apply
+    pub params: HashMap<String, Vec<i16>>,    // overrides keyed by 4-CC — any of the 52
 }
 
 pub struct EqPreset {
     pub id: PresetId,
     pub name: String,
-    pub is_ieq_on: bool,
-    pub ieq_band_targets: [i16; 20],
-    pub is_geq_on: bool,
-    pub geq_band_gains: [i16; 20],
+    pub params: HashMap<String, Vec<i16>>,    // overrides keyed by 4-CC — the 9 EQ params only
 }
 
 // Runtime engine facts — not part of persistent State.
@@ -1343,12 +1358,12 @@ custom.
 
 - **Factory profiles**: `movie`, `music`, `game`, `voice`. Cannot be
   deleted or renamed. Can be reset to bundled defaults.
-- **Factory EQ presets**: `off`, `open`, `rich`, `focused`. Cannot be
+- **Factory EQ presets**: `open`, `rich`, `focused`. Cannot be
   deleted or renamed. Can be reset to bundled defaults.
 
 Custom items can be freely renamed, edited, or deleted. Removing a
 custom EQ preset that some profile has selected: those profiles fall
-back to the `Off` preset.
+back to `None` (their own EQ params).
 
 ## Module structure
 
@@ -1453,7 +1468,7 @@ entry below passes the deletion test.
 |---|---|---|---|
 | **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output)` · `version() → String`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the visualizer pump reads `vcbg`/`vcbe` via `get_params`. | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
 | **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{version, backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT`, `SET_CONFIG` for a non-default rate, constant params via `ak_set`, `VISUALIZER_ENABLE`, `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), `EngineInfo` caching from cmd 6. `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
-| **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Profile::selected_eq_preset` always exists; deleting a referenced EQ preset falls profiles back to `"off"`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
+| **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `range`, `default`, `kind`, `category`, `access`, `label`, `help`, `basic`. | 58 entries × ~10 fields each, codegen'd at build time from `parameters.toml`. The three-bucket Settable / ReadOnly / Experimental classification (see ADR-0004). | Slice 0 (codegen), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)`. Errors: `ParseError`, `MigrationFailed`. | `defaults.toml` + `config.toml` overlay, `notify` watcher, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
@@ -1644,31 +1659,35 @@ Movie's full parameter set.
 
 ---
 
-### Slice 3 — Factory EQ presets apply IEQ curves
+### Slice 3 — Factory EQ presets apply as overlays
 
-**Slice goal.** Selecting an EQ preset (Off / Open / Rich / Focused)
-writes the preset's `iebt[20]` and `ieon` to the engine; the active
-profile records the selected preset id.
+**Slice goal.** Selecting an EQ preset (Open / Rich / Focused) writes
+the preset's resolved 9 EQ params to the engine; the active profile
+records the selection; `id: null` detaches — the profile's own EQ
+params apply.
 
-**Modules introduced.** `State.eq_presets`, `Profile.selected_eq_preset`,
-`WsCommands(set_eq_preset, reset_eq_preset)`, EQ-preset picker UI.
+**Modules introduced.** `State.eq_presets`, `Profile.selected_eq_preset`
+(`Option`), `WsCommands(set_eq_preset, reset_eq_preset)`, EQ-preset
+picker UI.
 
 **Behaviors to test:**
 
 1. [ ] Factory EQ presets load from `defaults.toml` per
        [ADR-0003](adr/0003-global-eq-presets-and-geq-per-preset.md).
 2. [ ] On `set_eq_preset { id: "rich" }` the engine receives the
-       preset's `iebt[20]` and `ieon=1` in one atomic `set_params`; the
+       preset's resolved 9 EQ params in one atomic `set_params`; the
        preset id is stored on the active profile.
-3. [ ] Switching to `"off"` writes `ieon=0` and zero `iebt`.
+3. [ ] `set_eq_preset { id: null }` detaches: the engine receives the
+       profile's own EQ params in one `set_params`.
 4. [ ] Editing a preset's `iebt` via `edit_eq_preset` immediately
        affects *every* profile currently selecting that preset
        ([ADR-0003](adr/0003-global-eq-presets-and-geq-per-preset.md)).
-5. [ ] `selected_eq_preset` persists per-profile across restart.
+5. [ ] `selected_eq_preset` persists per-profile across restart as an
+       `Option`.
 
 **Tracer bullet test.** WS `set_eq_preset { id: "rich" }`, assert
-`StubBackend` recorded one `set_params` carrying `iebt = [67, 95, …, -235]`
-and `ieon = 1`.
+`StubBackend` recorded one `set_params` carrying all 9 EQ params —
+`iebt = [67, 95, …, -235]` and `ieon = 1` among them.
 
 **Mock policy.** Stub only.
 
@@ -1828,7 +1847,7 @@ remove_eq_preset)`, derived `is_factory`, CRUD UI affordances.
 4. [ ] Factory items cannot be deleted or renamed — daemon returns
        `INVALID_PARAM`.
 5. [ ] Deleting a custom EQ preset that N profiles select falls all
-       of them back to `"off"`.
+       of them back to `None` (their own EQ params).
 6. [ ] Deleting a custom profile currently selected falls back to
        `"music"`.
 7. [ ] `reset_profile` / `reset_eq_preset` clears `config.toml`
@@ -1902,8 +1921,8 @@ default daemon configuration; the integration test suite from Slices
 
 This is the **swap-and-replay** slice. Reusing the same integration
 tests against the real engine exercises exactly where the risk lives
-(binary protocol, the AK-direct param binding, constant-params setup,
-`SET_CONFIG`) — [tests.md](../.agents/skills/tdd/tests.md)
+(binary protocol, the AK-direct param binding, the resolved-profile
+apply, `SET_CONFIG`) — [tests.md](../.agents/skills/tdd/tests.md)
 ("integration tests survive refactors") makes this approach load-bearing.
 
 **Modules introduced.** `QemuBackend` (`ddp-engine`),
@@ -1916,14 +1935,13 @@ tests against the real engine exercises exactly where the risk lives
 2. [ ] `QemuBackend::start` spawns one `qemu-arm-static` subprocess
        and initializes a session via the AK-direct binding
        ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)):
-       - `EFFECT_CMD_INIT`, then resolve the 58 surfaced 4-CC names to
-         refs with `ak_find` — no DEFINE_PARAMS / DEFINE_SETTINGS
-         handshake (the engine version still flows via cmd 6 →
-         bootstrap `engine.version`).
-       - Constant params (`genb=20`, `ienb=20`, `aonb=20`, `gebf[…]`,
-         …) via `ak_set` — the engine powers on 10-band, so this
-         establishes the 20-band stereo config.
-       - `VISUALIZER_ENABLE` SET (cmd 7).
+       - `EFFECT_CMD_INIT`, then resolve all 64 4-CC names to refs
+         with `ak_find` — no DEFINE_PARAMS / DEFINE_SETTINGS handshake.
+       - One `set_params` of the resolved active profile (+ selected
+         EQ preset); the shim's commit-leaf touch reshapes the 10-band
+         power-on state into the 20-band stereo config — no separate
+         constant-params step, and no `VISUALIZER_ENABLE` cmd 7
+         (`ven = 1` rides the profile apply).
        - `EFFECT_CMD_ENABLE`.
 3. [ ] All Slices 1–8 integration tests pass under
        `cargo test --features qemu`.
@@ -1934,9 +1952,8 @@ tests against the real engine exercises exactly where the risk lives
        sample crossfade).
 5. [ ] `EngineSupervisor` respawns the subprocess on crash; the
        session map is reconstructed transparently.
-6. [ ] `QemuBackend::version()` returns `"APPv1 version 2.0.4.0"`
-       (cmd 6); the value reaches
-       `window.__BOOTSTRAP__.engine.version`.
+6. [ ] `get_param("ver")` fills the snapshot `readouts`; the UI
+       About/footer shows `Engine: QEMU · 2.0.4.0`.
 
 **Tracer bullet test.** `cargo test --features qemu -p ddp-daemon
 power_toggle_persists` — the Slice-1 tracer bullet test, now against
@@ -2081,8 +2098,8 @@ for both end users and contributors.
 | Daemon language           | C                                                    | Rust                                                                                                                                                                                           |
 | Engine integration        | Per-stream QEMU subprocess                           | One shared QEMU subprocess, all sessions multiplexed; swappable Engine trait                                                                                                                   |
 | Profile model             | Fixed 6-slot array                                   | Dynamic `Vec<Profile>` with factory + custom                                                                                                                                                   |
-| EQ preset model           | Per-profile static array                             | Global `Vec<EqPreset>`; edits affect all profiles uniformly                                                                                                                                    |
-| GEQ model                 | 6 × 4 × 20 matrix                                    | One GEQ per EQ preset (decoupled from profile)                                                                                                                                                 |
+| EQ preset model           | Per-profile static array                             | Global *optional* overlay of the 9 EQ params; `None` valid; edits affect every profile selecting it                                                                                            |
+| GEQ model                 | 6 × 4 × 20 matrix                                    | Profile-owned; a selected EQ preset's overlay shadows it                                                                                                                                       |
 | Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
 | Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle + cmd 6 version; visualizer (`vcbg`/`vcbe`) rides the same AK read (ADR-0010)|
 | Param coverage            | 24 of 64 AK params                                   | All 64 AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); four buckets: Settable / Experimental / ReadOnly-Dynamic / ReadOnly-Static (incl. the build/license readouts — `ver` is the version readout)                                |

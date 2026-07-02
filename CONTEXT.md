@@ -72,18 +72,22 @@ _Avoid_: param access, settable flag.
 ### UI / state vocabulary
 
 **Profile**:
-A user-selectable group of AK parameter overrides plus a selected EQ
-preset id. Factory: Movie, Music, Game, Voice. Custom profiles have no
-category. Exactly one profile is selected at any time.
+The canonical persistence unit — the home for *every* non-readonly AK param
+(the 52 Settable + Experimental), no special cases (structural constants
+included). Stores deltas over `ParameterDef.default`, plus an *optional*
+selected EQ preset. Factory: Movie, Music, Game, Voice; custom profiles have
+no category. Exactly one profile is selected at any time.
 _Avoid_: preset (overloaded with EQ preset), mode.
 
 **EQ preset**:
-A user-selectable IEQ + GEQ curve, global across profiles. Factory: Off,
-Open, Rich, Focused. Each profile stores only the *id* of its currently
-selected EQ preset, not its own copy of the curves.
-_Avoid_: IEQ preset (legacy DDP term — DolbyX generalised IEQ presets to
-own both `iebt` and `gebg`), preset (without "EQ" qualifier — ambiguous
-with Profile).
+An *optional* EQ overlay on top of a profile, global across profiles. Carries
+the full EQ param set — band structure (`genb`/`gebf`/`ienb`/`iebf`), curves
+(`gebg`/`iebt`), enables (`geon`/`ieon`), amount (`iea`). When a profile
+selects one, the preset's EQ params shadow the profile's own; with `None`
+selected, the profile's own EQ params are effective. Editing a preset
+propagates to every profile currently using it. Factory: Open, Rich, Focused.
+_Avoid_: IEQ preset (legacy DDP term), preset (without "EQ" — ambiguous with
+Profile), "Off" preset (replaced by `None`).
 
 **IEQ**:
 "Intelligent EQ" — the engine-driven target curve. Backed by AK params
