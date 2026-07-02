@@ -58,12 +58,15 @@ _Avoid_: "visualizer data" alone (ambiguous between the raw cmd-4 bytes
 and the post-processed `vis` event payload).
 
 **Settability bucket**:
-The classification of an AK parameter as `Settable` (Java-whitelisted, DSP
-produces well-defined output), `ReadOnly` (`vcbg`/`vcbe` and the native
-`vn*` family — engine-owned, write-protected: `vnbg`/`vnbe` the per-block
-gain/excitation arrays the DSP rewrites, `vnnb`/`vnbf` the rate-derived
-native grid), or `Experimental` (engine accepts writes
-but original DDP UI hid the slot).
+The classification of an AK parameter into one of four:
+`Settable` (Java-whitelisted, DSP produces well-defined output),
+`Experimental` (engine accepts writes, original DDP UI hid the slot),
+`ReadOnly-Dynamic` (`vcbg`/`vcbe`/`vnbg`/`vnbe` — write-protected, the DSP
+rewrites them every audio block), or `ReadOnly-Static` (`vnnb`/`vnbf` the
+rate-derived native grid + `bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`
+build-version / license — read once at session config via `ak_get`, never
+per block). All 64 engine root leaves fall in exactly one bucket; none are
+dropped.
 _Avoid_: param access, settable flag.
 
 ### UI / state vocabulary
@@ -102,9 +105,10 @@ semantics).
 **Bootstrap**:
 `window.__BOOTSTRAP__` — a JSON blob the daemon injects into `index.html`
 at request time. Carries the full `ParameterDef[]` metadata table, the
-initial `State` snapshot, and immutable engine info (version, backend).
-The UI reads it synchronously at module init so the page paints fully
-populated on the first frame, with no pre-paint network round-trip.
+initial `State` snapshot, and the engine backend name. The UI reads it
+synchronously at module init so the page paints fully populated on the
+first frame, with no pre-paint network round-trip. (Engine version is not
+a bootstrap field — it's the `ver` param, a ReadOnly-Static readout.)
 _Avoid_: config, init payload, manifest.
 
 **`vis_suspended`**:
