@@ -1,12 +1,13 @@
 # Visualizer / Equalizer rendering spec
 
 The Visualizer / Equalizer overlay is the most visible piece of DDP and
-must feel identical to the original. The pump runs at a fixed 50 ms
-cadence (`VISUALIZER_PUMP_INTERVAL`, matches `DsService` in the original
-Android app), reads from the oldest session via `get_params`
-(`vcbg`/`vcbe`, [ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)), and emits
-`vis` / `vis_suspended` events with 10-tick hysteresis
-(`VISUALIZER_SUSPENDED_THRESHOLD`). The SVG layer stack renders a
+must feel identical to the original. The feed is event-driven — no pump:
+each oldest-session `Process` reply carries the four ReadOnly-Dynamic
+arrays ([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)), which the
+daemon broadcasts as one `vis` event per block. The client draws every
+rAF from the latest frame with fast-attack / slow-decay per-band
+ballistics and derives idle itself: no event for ~200 ms → freeze, then
+fade to the floor over ~500 ms. The SVG layer stack renders a
 radial-gradient background, 1-px grid, a 20×48 spectrum brick field
 coloured `r<12` red / `12≤r<18` yellow / `r≥18` blue, per-column level
 pips, and an EQ overlay group (glow polyline + sharp polyline + thumbs).
