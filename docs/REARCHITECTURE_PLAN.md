@@ -253,19 +253,18 @@ state-only and lands on each future session at init (`set_power`
 likewise performs no engine call). The **main session** — the oldest
 live one — sources `vis` events and the readouts (Decision 4).
 
-**Sample rate.** `libdseffect.so` runs at 44100 Hz by default. A
-`create_session` at any other rate (e.g. a 32000 or 48000 Hz host) is
-handled by one `EFFECT_CMD_SET_CONFIG` (cmd 1) call — the engine
-validates, rebuilds its `Ds1ap` at the new rate, and re-applies the
-params (see [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
+**Sample rate.** Every session init sends one `EFFECT_CMD_SET_CONFIG`
+(cmd 1) after `INIT`, explicitly setting the session's rate — DolbyX
+never relies on the engine's 44100 Hz power-on default. The engine validates,
+rebuilds its `Ds1ap` at the requested rate, and re-applies the params (see
+[docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
 This is a lifecycle command, so it stays on the cmd path and supersedes
 v1's manual `Ds1ap::New` hot-swap. The rate arrives in the plugin's
 `Hello` and is immutable for the session's lifetime — a rate change is
 destroy + re-create — so a session sees exactly one `SET_CONFIG`, at
-init; the daemon carries no default rate of its own. The backend
-always sends that `SET_CONFIG` after `INIT` (the engine no-ops if the
-config is unchanged), pinning stereo + PCM16 + **WRITE** output mode
-(so `process()` overwrites, no per-block `memset`). It validates
+init; the daemon carries no default rate of its own. The same
+`SET_CONFIG` pins stereo + PCM16 + **WRITE** output mode (so
+`process()` overwrites, no per-block `memset`). The backend validates
 host-side first, because the engine's
 field checks have two footguns: a rate outside {44100, 48000, 32000}
 **silently falls back to 44100** (still replying success), and a **mono**
@@ -482,8 +481,6 @@ engine-level acceptance:
   `ak_get` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
   rate-derived, so the readouts re-read when the main session changes
   (Decision 4). Plain read-only cards in the Advanced panel;
-  `ver` doubles as the engine-version readout (the UI formats its 4×i16 as
-  "2.0.4.0" — see Decision 6).
 - **Experimental** (10) — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test`. Editable behind an
@@ -634,8 +631,7 @@ file edit reload). At DolbyX's state scale (hundreds of bytes) full
 snapshots are preferable to partial diffs. The snapshot carries user-state
 plus a read-only `readouts` map — the 8 ReadOnly-Static values keyed by
 4-CC, read from the main session (`ParameterDef.default` values while no
-session exists). The engine backend name is delivered once
-via the bootstrap `engine` field on page load — see Decision 6.
+session exists).
 
 **Validation: two layers, asymmetric responsibilities.**
 
@@ -850,31 +846,23 @@ qemu-user-static` on the Linux image; `libdseffect.so` is bundled in
   `eslint-plugin-solid`, **Prettier**.
 
 **Bootstrap injection.** The daemon templates `index.html` at request
-time and injects parameter metadata, the initial state snapshot, and
-runtime engine info as a single `window.__BOOTSTRAP__` global:
+time and injects parameter metadata and the initial state snapshot as
+a single `window.__BOOTSTRAP__` global:
 
 ```ts
 window.__BOOTSTRAP__: {
   params: ParameterDef[],            // full metadata table — no /api/parameters
   state: StateSnapshot,              // user-state — mirrors the WebSocket "state" event
-  engine: {                          // engine-info — bootstrap-only, immutable for session
-    backend: "qemu" | "unicorn" | "sbt",
-  },
 }
 ```
 
 The bootstrap shape is intentionally wider than the WS `state` event:
-`engine` is sent once on page load and never re-broadcast (the backend
-cannot change for the lifetime of the daemon). The daemon reads `state`
-from the shared state lock and `engine` from `EngineSupervisor::info()`
-when serializing the bootstrap. The UI reads `window.__BOOTSTRAP__`
-synchronously at module init, hydrates the Solid store, and paints the
-full UI on the first frame. (The engine *version* is not an `engine`
-field — it's the `ver` param, a ReadOnly-Static readout in the snapshot;
-the About/footer formats its 4×i16 as "2.0.4.0".) The WebSocket then
-connects in the background; its `state` event reconciles any drift
-between HTML render time and WS connect time (and handles reconnects)
-without needing to re-deliver `engine`.
+`params` is delivered once on page load and never re-broadcast (the
+metadata table cannot change for the lifetime of the daemon). The UI
+reads `window.__BOOTSTRAP__` synchronously at module init, hydrates
+the Solid store, and paints the full UI on the first frame. The
+WebSocket then connects in the background; its `state` event reconciles
+any drift between HTML render time and WS connect time (and handles reconnects).
 
 There is intentionally no `/api/*` endpoint in dev or prod. Bootstrap
 injection is the only mechanism.
@@ -1427,14 +1415,6 @@ pub struct EqPreset {
     pub params: HashMap<String, Vec<i16>>,    // overrides keyed by 4-CC — the 9 EQ params only
 }
 
-// Runtime engine facts — not part of persistent State.
-// Owned by EngineSupervisor; the configured backend name. Surfaced to
-// the UI via the bootstrap `engine` field (Decision 6); never broadcast
-// over the WebSocket. (Engine version is the `ver` param — a
-// ReadOnly-Static readout, not an EngineInfo field.)
-pub struct EngineInfo {
-    pub backend: &'static str, // "qemu" | "unicorn" | "sbt"
-}
 ```
 
 `is_factory` is derived at load time, not stored: any id present in
@@ -1556,11 +1536,11 @@ entry below passes the deletion test.
 | Module | Interface | What's hidden | Introduced in |
 |---|---|---|---|
 | **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_params(id, &[(name, &[i16])])` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output) → VisFrame`. All values are `i16` 1/16-dB; the param surface is batch-only (a single edit = 1-entry batch). `get_params` reads the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); every `process` reply carries the four ReadOnly-Dynamic arrays as its `VisFrame` (Decision 10). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf), the vis-tail append (local `ak_get` per block). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
-| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, the creation-ordered session list (**main session** = oldest = index 0, Decision 4), session init (`EFFECT_CMD_INIT` → `SET_CONFIG` at the plugin's rate → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` re-read when the main session changes (`ParameterDef.default` with zero sessions), the vis fan-out (main-session `Process` replies → `vis` events, Decision 10). Param writes and `set_enabled` fan out to every live session (AK registries are per-handle); with zero sessions, no engine call. A session created while power is off starts disabled. | Slice 1 |
+| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<()>` · `shutdown()` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, the creation-ordered session list (**main session** = oldest = index 0, Decision 4), session init (`EFFECT_CMD_INIT` → `SET_CONFIG` at the plugin's rate → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` re-read when the main session changes (`ParameterDef.default` with zero sessions), the vis fan-out (main-session `Process` replies → `vis` events, Decision 10). Param writes and `set_enabled` fan out to every live session (AK registries are per-handle); with zero sessions, no engine call. A session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
-| **`HttpServer`** (`ddp-daemon`) | Two routes: `GET /` → bootstrap-injected HTML · `GET /ws` → WebSocket upgrade (handled by `WsServer`). Port from the `--port` CLI flag (default 9876) — not config.toml. | Disk read of the UI HTML (`$(daemon-dir)/index.html`; dev flag points at the checked-in `ui/dev.html`), the `<!--BOOTSTRAP-->` string-replace, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`, refuse-to-start on a missing/unreadable file. | Slice 1 |
+| **`HttpServer`** (`ddp-daemon`) | Two routes: `GET /` → bootstrap-injected HTML · `GET /ws` → WebSocket upgrade (handled by `WsServer`). Port from the `--port` CLI flag (default 9876) — not config.toml. | Disk read of the UI HTML (`$(daemon-dir)/index.html`; dev flag points at the checked-in `ui/dev.html`), the `<!--BOOTSTRAP-->` string-replace, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state`, refuse-to-start on a missing/unreadable file. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_REQUEST` (any daemon-side rejection — malformed JSON, unknown ids, param validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, `request_id` echo in ack/error, command validation against `ParameterDef`, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
 | **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/run/dolbyx/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
 | **UI `GainSmoother`** (`ui/src/lib/gain_smoother.ts`) | `enqueue(band, dB)` · `tick() → Option<[i16; 20]>` (returns smoothed, clamped 20-band write, or `None` if nothing pending). | 5-cell thick-brush splat, τ=0.3 s exponential decay toward clamps, kernel convolution (`Mobile` / `Soft` / `Direct`), 60 ms drain throttle, 20×20 pseudoinverse on preset-change broadcasts for drag continuity. | Slice 6 |
@@ -1679,13 +1659,13 @@ persistence). Once green, every later slice extends one axis.
 `power` and `selected_profile = "music"`), `Persistence`,
 `HttpServer`, `WsServer + WsCommands(get_state, set_power)`,
 `EngineSupervisor` (just enough to drive Stub). UI shell: the
-auto-reconnecting WebSocket client (`ws.ts`), `ConnectionBadge.tsx`,
-and an About/footer surface that renders `window.__BOOTSTRAP__.engine`.
+auto-reconnecting WebSocket client (`ws.ts`), `PowerToggle.tsx`, and
+`ConnectionBadge.tsx`.
 
 **Behaviors to test (red → green order):**
 
 1. [ ] Daemon binds `:9876`; `GET /` returns HTML carrying a valid
-       `window.__BOOTSTRAP__` JSON payload (params, state, engine).
+       `window.__BOOTSTRAP__` JSON payload (params, state).
 2. [ ] WS `/ws` connects; first frame is a `state` event matching the
        current `State`.
 3. [ ] WS `set_power { on: false }` flips `State.power`; daemon
@@ -1708,10 +1688,9 @@ and an About/footer surface that renders `window.__BOOTSTRAP__.engine`.
        or the socket drops; on reconnect it re-issues `get_state` and
        reconciles, and `ConnectionBadge` reflects connected /
        reconnecting (Decision 6).
-10. [ ] The About/footer surface renders `engine.backend` plus the
-       formatted `ver` readout — e.g. `Engine: STUB · 0.0.0.0`, sourced
-       from `ParameterDef.default` (no session exists yet); the real
-       `Engine: QEMU · 2.0.4.0` is verified in Slice 9.
+10. [ ] With zero sessions, the snapshot's `readouts` carry
+       `ParameterDef.default` values; real engine values are verified
+       in Slice 9.
 11. [ ] Refactor pass — extract duplication revealed by 1–10 without
        breaking any green test ([tdd](../.agents/skills/tdd/SKILL.md):
        never refactor while RED).
@@ -2045,6 +2024,8 @@ apply, `SET_CONFIG`) — [tests.md](../.agents/skills/tdd/tests.md)
        ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)):
        - `EFFECT_CMD_INIT`, then resolve all 64 4-CC names to refs
          with `ak_find` — no DEFINE_PARAMS / DEFINE_SETTINGS handshake.
+       - `EFFECT_CMD_SET_CONFIG` at the session's rate — always sent,
+         pinning stereo + PCM16 + WRITE (Decision 1).
        - One `set_params` of the resolved active profile (+ selected
          EQ preset); the shim's commit-leaf touch reshapes the 10-band
          power-on state into the 20-band stereo config — no separate
@@ -2060,8 +2041,8 @@ apply, `SET_CONFIG`) — [tests.md](../.agents/skills/tdd/tests.md)
        sample crossfade).
 5. [ ] `EngineSupervisor` respawns the subprocess on crash; the
        session map is reconstructed transparently.
-6. [ ] `get_params(["ver"])` fills the snapshot `readouts`; the UI
-       About/footer shows `Engine: QEMU · 2.0.4.0`.
+6. [ ] `get_params(["ver"])` fills the snapshot `readouts`; the
+       Advanced `ver` card shows 2.0.4.0.
 
 **Tracer bullet test.** `cargo test --features qemu -p ddp-daemon
 power_toggle_persists` — the Slice-1 tracer bullet test, now against
@@ -2211,7 +2192,7 @@ for both end users and contributors.
 | Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
 | Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle; the vis frame (`vc*` + `vn*`) rides every `Process` reply (ADR-0010)|
 | Param coverage            | 24 of 64 AK params                                   | All 64 AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); four buckets: Settable / Experimental / ReadOnly-Dynamic / ReadOnly-Static (incl. the build/license readouts — `ver` is the version readout)                                |
-| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into the disk-served `index.html` — nothing embedded |
+| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state) into the disk-served `index.html` — nothing embedded |
 | Persistence               | Multi-file XML                                       | Runtime `parameters.toml` + `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; 5-layer cascade; 500 ms debounce                                    |
 | External edits            | Not supported                                        | `notify`-based watcher on `config.toml` only (the binary-side TOMLs load at startup); debounced reload + state-snapshot broadcast                                                              |
 | Visualizer                | Gains only                                           | Per-block `vis` events riding `Process` replies (`vc*` gains/excitations + `vn*` native); client ballistics + idle fade — no pump, no suspend protocol                                         |

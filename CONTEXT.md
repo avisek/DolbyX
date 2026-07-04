@@ -129,11 +129,10 @@ semantics).
 
 **Bootstrap**:
 `window.__BOOTSTRAP__` — a JSON blob the daemon injects into `index.html`
-at request time. Carries the full `ParameterDef[]` metadata table, the
-initial `State` snapshot, and the engine backend name. The UI reads it
-synchronously at module init so the page paints fully populated on the
-first frame, with no pre-paint network round-trip. (Engine version is not
-a bootstrap field — it's the `ver` param, a ReadOnly-Static readout.)
+at request time. Carries the full `ParameterDef[]` metadata table and the
+initial `State` snapshot. The UI reads it synchronously at module init
+so the page paints fully populated on the first frame, with no pre-paint
+network round-trip.
 _Avoid_: config, init payload, manifest.
 
 **`vis` event**:

@@ -14,10 +14,11 @@ ReadOnly-Dynamic arrays as its `VisFrame` (the vis tail, ADR-0010).
 v2.0 ships one implementation: `QemuBackend`, which runs a single shared
 `qemu-arm-static` subprocess holding `libdseffect.so` and multiplexing N
 sessions internally, eliminating v1's per-stream subprocess startup and
-memory duplication. A `create_session` at any rate other than the engine's
-default 44100 Hz (e.g. a 32 or 48 kHz host) is handled inside the backend
-via `EFFECT_CMD_SET_CONFIG` (cmd 1), keeping the trait surface
-rate-agnostic. Future backends (`UnicornBackend` for in-process JIT,
-`StaticBinaryBackend` for ARM→x86_64 translation) slot in behind the
-same trait without touching daemon code. The trade-off is a WSL2
-dependency on Windows for v2.0; v2.1 (Unicorn) removes it.
+memory duplication. Every session init sends `EFFECT_CMD_SET_CONFIG` (cmd 1)
+inside the backend — the explicit `create_session` rate (host-validated),
+stereo + PCM16 + WRITE — never relying on the engine's 44100 Hz power-on
+default; the trait surface stays rate-agnostic. Future backends
+(`UnicornBackend` for in-process JIT, `StaticBinaryBackend` for ARM→x86_64
+translation) slot in behind the same trait without touching daemon code.
+The trade-off is a WSL2 dependency on Windows for v2.0; v2.1 (Unicorn)
+removes it.
