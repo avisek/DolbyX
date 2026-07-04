@@ -622,7 +622,7 @@ Events (daemon → client):
 
 ```jsonc
 { "type": "state", "snapshot": { /* full state */ } }
-{ "type": "vis", "params": { "vcbg": [...], "vcbe": [...], "vnbg": [...], "vnbe": [...] } }
+{ "type": "vis", "params": { "vnbg": [...], "vnbe": [...], "vcbg": [...], "vcbe": [...] } }
 { "type": "ack", "request_id": "...", "ok": true }
 { "type": "error", "request_id": "...", "code": "INVALID_REQUEST", "message": "..." }
 { "type": "error", "request_id": "...", "code": "ENGINE_REJECTED", "status": -22, "message": "..." }
@@ -1857,7 +1857,7 @@ handling in `ws.ts`, StubBackend fabricated `VisFrame`s for tests.
 
 1. [ ] Every `process()` on the main session broadcasts one `vis`
        event carrying the reply's four arrays verbatim under their
-       4-CC keys (`params.vcbg` / `vcbe` / `vnbg` / `vnbe` — raw
+       4-CC keys (`params.vnbg` / `vnbe` / `vcbg` / `vcbe` — raw
        int16 1/16-dB).
 2. [ ] `process()` on a non-main session emits nothing.
 3. [ ] No audio → no `vis` events; no timer fires, no suspend flag

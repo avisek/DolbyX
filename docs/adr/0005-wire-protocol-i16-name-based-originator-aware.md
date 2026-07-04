@@ -13,7 +13,7 @@ echoed in its `ack` / `error`, correlating replies over the
 multiplexed WebSocket. The daemon assigns each WebSocket connection a serial
 originator id at handshake and broadcasts state changes to all clients
 **except** the originator, preventing echo loops in multi-tab scenarios.
-`vis` events (keyed `vcbg` / `vcbe` / `vnbg` / `vnbe`) broadcast
+`vis` events (keyed `vnbg` / `vnbe` / `vcbg` / `vcbe`) broadcast
 unconditionally. Validation is asymmetric
 by design: the daemon owns range validation up front and rejects with
 `INVALID_REQUEST` — its only rejection code — while engine status
