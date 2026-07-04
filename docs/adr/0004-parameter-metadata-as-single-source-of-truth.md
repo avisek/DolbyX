@@ -30,6 +30,11 @@ the engine-version readout.
 A committed twin, `parameters.engine.toml`, is probe-generated,
 reference-only, never loaded; a CI diff gate blocks drift on the
 engine-fact fields (`name length min max frac_bits default`) while the
-product fields (`kind category access label description help basic`) stay
+product fields (`kind category access label description help`) stay
 free. Adding a parameter is an edit to `parameters.toml` plus a daemon
 restart; the UI auto-discovers it via bootstrap.
+
+Master-control membership is deliberately *not* metadata — it's
+a curated UI overlay (`MasterControls.tsx`); those params still appear in the
+Advanced panel under their feature categories, and their rendering facts come
+from this table by 4-CC lookup.

@@ -99,6 +99,15 @@ Profile), "Off" preset (replaced by `None`).
 gains) and `geon` (enable). Edited via the Visualizer/Equalizer overlay
 (see Decision 10).
 
+**Master control**:
+One of the three main-screen controls — Surround Virtualizer
+(`vdhe`+`dhsb`), Dialog Enhancer (`deon`+`dea`), Volume Leveller
+(`dvle`+`dvla`) — each pairing an enable AK param (toggle / tri-state) with an
+amount AK param (slider). A curated UI overlay, *not* an engine-derived
+category or a `ParameterDef` field; the same params also appear in the
+Advanced panel under their feature categories.
+_Avoid_: basic param, basic switch, "Basic panel".
+
 **Originator**:
 The WebSocket client that issued a command. The daemon assigns each WS
 connection a serial id at handshake and suppresses broadcasting the

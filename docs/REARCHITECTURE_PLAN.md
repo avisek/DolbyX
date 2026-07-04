@@ -25,7 +25,7 @@ values: `not started`, `in progress`, `done`, `blocked`.
 | 1     | Power toggle, persisted end-to-end            | not started   | **tracer bullet** — first vertical slice           |
 | 2     | Factory profile selection applies AK overrides| not started   |                                                    |
 | 3     | Factory EQ presets apply as overlays          | not started   |                                                    |
-| 4     | Master controls (VL / DE / SV)                | not started   | the signature DDP main-screen controls             |
+| 4     | Master controls (SV / DE / VL)                | not started   | the signature DDP main-screen controls             |
 | 5     | Event-driven visualizer                       | not started   |                                                    |
 | 6     | GEQ editing with smoother + inverse           | not started   | HITL — golden snapshots                            |
 | 7     | Custom profiles & EQ presets (full CRUD)      | not started   |                                                    |
@@ -392,7 +392,6 @@ pub struct ParameterDef {
     pub label: String,          // human-readable display name
     pub description: String,    // engine one-liner
     pub help: String,           // engine long help — may be empty
-    pub basic: bool,            // renders in the Basic panel (VL/DE/SV) — enables + amounts
 }
 
 pub enum ParamKind {
@@ -415,7 +414,7 @@ pub enum ParamAccess {
 }
 
 pub enum ParamCategory {
-    Basic, Ieq, Geq,
+    Ieq, Geq,
     VolumeLeveller, DialogEnhancer,
     HeadphoneVirtualizer, SpeakerVirtualizer, NextGenSurround,
     AudioRegulator, AudioOptimizer, VolumeMaximizer, PeakLimiter,
@@ -529,7 +528,7 @@ param-twin`) and never loaded — it exists so CI can diff
 `parameters.toml`'s **engine-fact fields** (`name`, `length`, `min`,
 `max`, `frac_bits`, `default`) against engine ground truth and fail on
 drift. The product fields (`kind`, `category`, `access`, `label`,
-`description`, `help`, `basic`) are free to edit.
+`description`, `help`) are free to edit.
 
 Wire and storage are name-based (4-CC string). Saved configs are
 stable under reordering the table. Adding a new parameter to the
@@ -950,7 +949,7 @@ src/
 │   ├── PowerToggle.tsx
 │   ├── ProfileTabs.tsx
 │   ├── EqPresetPicker.tsx
-│   ├── BasicSwitches.tsx  # Volume Leveller + Dialog Enhancer + Surround Virtualizer
+│   ├── MasterControls.tsx # Surround Virtualizer + Dialog Enhancer + Volume Leveller
 │   ├── Visualizer.tsx     # SVG visualizer + EQ curve
 │   ├── EqCurve.tsx
 │   └── ConnectionBadge.tsx
@@ -1507,7 +1506,7 @@ entry below passes the deletion test.
 | **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output) → VisFrame`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); every `process` reply carries the four ReadOnly-Dynamic arrays as its `VisFrame` (Decision 10). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf), the vis-tail append (local `ak_get` per block). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
 | **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT` → `SET_CONFIG` → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` refresh after `SET_CONFIG`, the vis fan-out (oldest-session `Process` replies → `vis` events, Decision 10). `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
-| **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`, `basic`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
+| **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
@@ -1732,25 +1731,24 @@ picker UI.
 
 ---
 
-### Slice 4 — Master controls (Volume Leveller / Dialog Enhancer / Surround Virtualizer)
+### Slice 4 — Master controls (Surround Virtualizer / Dialog Enhancer / Volume Leveller)
 
 **Slice goal.** The main screen shows the three signature DDP
-controls — Volume Leveller, Dialog Enhancer, Surround Virtualizer —
+controls — Surround Virtualizer, Dialog Enhancer, Volume Leveller —
 each a toggle plus an amount slider. Adjusting one writes the backing
 AK param(s) to the active profile, flushes to the engine, and persists.
 
-**Modules introduced.** `BasicSwitches.tsx` with bespoke toggle +
-amount-slider widgets for the `basic`-flagged digest params (`dvla`,
-`deon`/`dea`, `vdhe`, … — exact set per
-[docs/ddp/02-ak-parameters.md](ddp/02-ak-parameters.md)); reuses
-`WsCommands(set_param)` against the active profile.
+**Modules introduced.** `MasterControls.tsx` holding the `MASTER_CONTROLS`
+descriptor — three ordered `(label, enable, amount)` entries (`vdhe`/`dhsb`,
+`deon`/`dea`, `dvle`/`dvla`) — with bespoke toggle + amount-slider widgets
+that resolve each half's `kind` and range from the bootstrap
+`params` by 4-CC; reuses `WsCommands(set_param)` against the active profile.
 
 **Behaviors to test:**
 
-1. [ ] The three master controls render from the `basic`-flagged
-       params in the bootstrap metadata, grouped by their
-       `ParameterDef.category` (Volume Leveller / Dialog Enhancer /
-       Surround Virtualizer).
+1. [ ] The three master controls render from the `MASTER_CONTROLS`
+       descriptor, each half resolving its 4-CC against the bootstrap
+       metadata.
 2. [ ] Toggling Volume Leveller writes its enable param to the active
        profile and flushes to the engine via `set_param`.
 3. [ ] Dragging the Dialog Enhancer amount slider writes `dea` to
@@ -1940,8 +1938,7 @@ CSS-grid layout.
        (Decision 3), not header + interleaved pairs.
 8. [ ] Long arrays (`aobg ≤ 329`, `arbi`/`arbl`/`arbh`/`aobf`/`arbf`
        40) render in a wide card collapsed by default.
-9. [ ] Category headers introduce groupings; Basic params appear
-       first.
+9. [ ] Category headers introduce groupings.
 
 **Tracer bullet test.** Render `AdvancedPanel` with a fixture of 64
 params, assert 64 widgets appear in a `data-testid`-matched grid;
