@@ -2,8 +2,9 @@
 
 This document is the canonical plan for the next-generation DolbyX, designed
 in light of the comprehensive DDP reverse engineering captured under
-[docs/ddp/](ddp/README.md). It supersedes [docs/CROSS_PLATFORM_PLAN.md](CROSS_PLATFORM_PLAN.md)
-once implementation begins.
+[docs/ddp/](ddp/README.md). It supersedes the v1 plan
+(`docs/CROSS_PLATFORM_PLAN.md` — archived with the rest of v1 at tag
+`v1` in Slice 0).
 
 Companion docs:
 
@@ -134,11 +135,11 @@ build a cleaner foundation that:
 │  │  - param_metadata (single SoT,    │                                    │
 │  │    parameters.toml @ startup)     │                                    │
 │  └────────────────┬──────────────────┘                                    │
-│  ┌────────────────▼──────────────────┐    ┌────────────────────────────┐  │
-│  │ Engine (trait Engine + impl):     │    │ Audio plugin server        │  │
-│  │  - sessions: HashMap<u32, Handle> │    │  Win: \\.\pipe\DolbyX      │  │
-│  │  - vis tail on each Process reply │    │  Unix: /tmp/dolbyx.sock    │  │
-│  └────────────────┬──────────────────┘    └────────────┬───────────────┘  │
+│  ┌────────────────▼──────────────────┐    ┌──────────────────────────────┐│
+│  │ Engine (trait Engine + impl):     │    │ Audio plugin server          ││
+│  │  - sessions: HashMap<u32, Handle> │    │ Win:  \\.\pipe\DolbyX        ││
+│  │  - vis tail on each Process reply │    │ Unix: /run/dolbyx/dolbyx.sock││
+│  └────────────────┬──────────────────┘    └────────────┬─────────────────┘│
 │                   │                                    │                  │
 │                   │ now:  QEMU subprocess              │                  │
 │                   │ future: Unicorn/SBT (in-process)   │                  │
@@ -176,9 +177,7 @@ pub trait Engine: Send + Sync {
     fn create_session(&self, sample_rate: u32) -> Result<SessionId>;
     fn destroy_session(&self, id: SessionId) -> Result<()>;
     fn set_enabled(&self, id: SessionId, enabled: bool) -> Result<()>;
-    fn set_param(&self, id: SessionId, name: &str, values: &[i16]) -> Result<()>;
     fn set_params(&self, id: SessionId, params: &[(&str, &[i16])]) -> Result<()>;
-    fn get_param(&self, id: SessionId, name: &str) -> Result<Vec<i16>>;
     fn get_params(&self, id: SessionId, names: &[&str]) -> Result<Vec<Vec<i16>>>;
     fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<VisFrame>;
     // VisFrame: the four ReadOnly-Dynamic arrays (vnbg vnbe vcbg vcbe), 4 × 20 i16
@@ -190,31 +189,30 @@ pub trait Engine: Send + Sync {
 > Persistent record: [ADR-0010 — AK-direct parameter surface; cmd protocol for lifecycle](adr/0010-ak-direct-params-cmd-lifecycle.md).
 
 The shim binds to `libdseffect.so` two ways, split by surface. The
-**parameter** methods (`set_param`, `set_params`, `get_param`) are
-implemented with the engine's exported AK accessors — `ak_find` (4-CC →
-ref), `ak_set` / `ak_set_bulk`, `ak_get` — *not* the cmd protocol's
+**parameter** methods (`set_params`, `get_params`) are implemented with
+the engine's exported AK accessors — `ak_find` (4-CC → ref), `ak_set` /
+`ak_set_bulk`, `ak_get` / `ak_get_bulk` — *not* the cmd protocol's
 DEFINE_PARAMS + DEFINE_SETTINGS handshake and cmd 2 / 3. cmd 3 SET ≡
 `ak_set` bit-for-bit at the DSP (proven by
 [`akctl_probe`](../tools/ddp_probe/README.md): the cmd path is a wrapper
 that adds a name→ref table, a flat-index map, and a dead settings-cache
 write). Going direct drops the handshake, drops the flat-index footgun,
 and is name-based natively. The **lifecycle** methods (`create_session`,
-`set_enabled`, `process`) stay on the cmd protocol — those
-carry engine-internal orchestration (the SET_CONFIG reconfigure below,
-the ENABLE/DISABLE crossfade) that the bare AK framework calls don't
-reproduce.
+`destroy_session`, `set_enabled`, `process`) stay on the cmd protocol —
+those carry engine-internal orchestration (the SET_CONFIG reconfigure
+below, the ENABLE/DISABLE crossfade) that the bare AK framework calls
+don't reproduce.
 
-`get_param` is therefore real, not synthesized: `ak_get` returns the
-live **clamped** registry value the DSP uses — more truthful than a
-write mirror. The daemon still owns its state model for persistence and
-broadcast (and serves the WebSocket state snapshot from it), but
-`get_param` gives an authoritative read-back for verification and
-engine-computed slots. `get_params` batch-reads N params in one
-round-trip (the shim loops `ak_get` / `ak_get_bulk`, mirroring
-`set_params` on the write side) — used for session restore and bulk
-read-back. The visualizer needs no read call at all: every `process`
-returns a `VisFrame` — the four ReadOnly-Dynamic arrays the DSP
-rewrites each block — riding the `Process` reply (Decision 10).
+`get_params` is therefore real, not synthesized: it batch-reads N
+params in one round-trip (the shim loops `ak_get` / `ak_get_bulk`) and
+returns the live **clamped** registry values the DSP uses — more
+truthful than a write mirror. The daemon still owns its state model for
+persistence and broadcast (and serves the WebSocket state snapshot from
+it), but `get_params` gives an authoritative read-back for
+verification, engine-computed slots, and the `readouts`. The visualizer
+needs no read call at all: every `process` returns a `VisFrame` — the
+four ReadOnly-Dynamic arrays the DSP rewrites each block — riding the
+`Process` reply (Decision 10).
 
 The `i16` values throughout this trait are the engine's native 1/16-dB
 units. The trait is the canonical boundary where this format stays
@@ -222,21 +220,22 @@ consistent end-to-end: persistence, state, wire protocol, and engine
 all carry i16s. Only the Web UI converts i16 ↔ float dB at display
 and input time.
 
-`set_param` writes one parameter (`ak_set` / `ak_set_bulk` for an
-array); `set_params` writes a batch. The daemon uses the batch path for
-profile and EQ-preset switches — the shim lands every value before the
-next `process` block, so the change applies atomically on one audio
-block (the DSP recomputes from the registry per block), avoiding the
-mid-switch artifact of dribbling ~40 edits as separate round-trips.
-Single-control edits (slider, toggle, GEQ drag) use `set_param`.
+`set_params` writes a batch (`ak_set` / `ak_set_bulk` per entry) and is
+the *only* write path — a single-control edit (slider, toggle, GEQ
+drag) is a 1-entry batch. Profile and EQ-preset switches ride one
+batch: the shim lands every value before the next `process` block, so
+the change applies atomically on one audio block (the DSP recomputes
+from the registry per block), avoiding the mid-switch artifact of
+dribbling ~40 edits as separate round-trips.
 
 **Structural-param commit.** A few params reshape a feature's filterbank — band
 count and centre frequencies (`genb`/`gebf`, `ienb`/`iebf`, `aonb`/`aocc`/`aobf`,
 `arnb`/`arbf`). The engine *stages* these and re-derives the filterbank only once
 the group's **commit leaf** (its last payload array — `gebg`/`iebt`/`aobg`/`arbh`)
-is re-written. The shim hides this: `set_param`/`set_params` carry a static
-4-group → commit-leaf map and, after staging a batch, touch each affected group's
-commit leaf with its current value (**touch = commit** — it fires even unchanged).
+is re-written. The shim hides this: `set_params` carries a static
+4-group → commit-leaf map and, after staging a batch, touches each
+affected group's commit leaf with its current value
+(**touch = commit** — it fires even unchanged).
 So the daemon just sets the param and it applies; the commit leaf is
 engine-binding knowledge that lives in the shim, *not* in `ParameterDef` and not
 above the `Engine` trait ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)).
@@ -244,16 +243,30 @@ There is no daemon↔engine round-trip — the commit-leaf read is local to the 
 and storage is fixed-capacity (40), so a count change never needs array
 re-alignment, only the commit.
 
+**Sessions.** A session exists per plugin instance and only per plugin
+instance: a plugin's `Hello` creates it, its disconnect destroys it,
+and the daemon never creates sessions on its own — zero plugins means
+zero sessions. AK registries are **per-handle**
+([docs/ddp/03](ddp/03-binary-protocol.md)), so the daemon fans every
+param write out to all live sessions; with zero sessions a write is
+state-only and lands on each future session at init (`set_power`
+likewise performs no engine call). The **main session** — the oldest
+live one — sources `vis` events and the readouts (Decision 4).
+
 **Sample rate.** `libdseffect.so` runs at 44100 Hz by default. A
 `create_session` at any other rate (e.g. a 32000 or 48000 Hz host) is
 handled by one `EFFECT_CMD_SET_CONFIG` (cmd 1) call — the engine
 validates, rebuilds its `Ds1ap` at the new rate, and re-applies the
 params (see [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
 This is a lifecycle command, so it stays on the cmd path and supersedes
-v1's manual `Ds1ap::New` hot-swap. The backend always sends one
-`SET_CONFIG` after `INIT` (the engine no-ops if the config is unchanged),
-pinning stereo + PCM16 + **WRITE** output mode (so `process()` overwrites,
-no per-block `memset`). It validates host-side first, because the engine's
+v1's manual `Ds1ap::New` hot-swap. The rate arrives in the plugin's
+`Hello` and is immutable for the session's lifetime — a rate change is
+destroy + re-create — so a session sees exactly one `SET_CONFIG`, at
+init; the daemon carries no default rate of its own. The backend
+always sends that `SET_CONFIG` after `INIT` (the engine no-ops if the
+config is unchanged), pinning stereo + PCM16 + **WRITE** output mode
+(so `process()` overwrites, no per-block `memset`). It validates
+host-side first, because the engine's
 field checks have two footguns: a rate outside {44100, 48000, 32000}
 **silently falls back to 44100** (still replying success), and a **mono**
 channel mask **poisons the handle** (it tears the graph down before
@@ -274,7 +287,9 @@ For v2.0 the QEMU subprocess approach is kept, but the **engine subprocess
 is shared across all audio streams** — only one `qemu-arm-static` process
 runs, holding one loaded `libdseffect.so`, and managing N effect handles
 internally. This eliminates per-stream subprocess startup latency and
-per-stream memory duplication compared to the current code.
+per-stream memory duplication compared to the current code. On Windows
+the daemon is a **native Windows binary**; `QemuBackend` spawns the ARM
+engine inside WSL2 via `wsl.exe` stdio — the v1-proven path.
 
 When the Unicorn or static-binary backend lands, the daemon configuration
 swaps the trait impl and nothing else changes.
@@ -436,7 +451,8 @@ CI-gated against drift (see metadata delivery below). Engine-honest with
 no exceptions: the engine boots **10-band**, so `genb` defaults to 10
 and `gebf` to the 10 ISO octave centres (32 Hz–16 kHz) zero-padded; the
 standard **20-band stereo** config is not a table default — it lives
-once at `defaults.toml` top level (Decision 7). `default` is the base
+once in `defaults.toml`'s shared `[profile]` table (Decision 7).
+`default` is the base
 layer of the persistence cascade: `defaults.toml` and `config.toml`
 store only divergences from it, so the table is the single home for the
 per-param defaults the original DDP repeated in full in every profile.
@@ -463,8 +479,9 @@ engine-level acceptance:
 - **ReadOnly-Static** (8) — the native grid `vnnb`/`vnbf` plus the
   build-version / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
   `lcpt`. Write-protected and fixed between reconfigurations; read once via
-  `ak_get` after `SET_CONFIG` — `vnnb`/`vnbf` are rate-derived, so a
-  reconfigure re-reads them. Plain read-only cards in the Advanced panel;
+  `ak_get` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
+  rate-derived, so the readouts re-read when the main session changes
+  (Decision 4). Plain read-only cards in the Advanced panel;
   `ver` doubles as the engine-version readout (the UI formats its 4×i16 as
   "2.0.4.0" — see Decision 6).
 - **Experimental** (10) — not exposed by original DDP, but the engine
@@ -552,7 +569,7 @@ headers introduce visual groupings.
 
 > Persistent record: [ADR-0005 — Wire protocol: name-based, originator-aware, i16 1/16-dB throughout](adr/0005-wire-protocol-i16-name-based-originator-aware.md).
 
-**Wire format.** The state snapshot, all `set_param` commands,
+**Wire format.** The state snapshot, all `set_params` commands,
 and the binary engine protocol carry raw int16 1/16-dB
 values end-to-end — no pre-conversion to dB. Only the UI does
 the int16 ↔ float dB conversion at the display/input boundary. JSON
@@ -573,33 +590,41 @@ originator — preventing echo loops in multi-tab/multi-client scenarios (see
 Commands (client → daemon):
 
 ```jsonc
-{ "cmd": "get_state" }
-{ "cmd": "set_power", "on": true }
-{ "cmd": "set_profile", "id": "music" }
-{ "cmd": "set_param", "name": "dvla", "value": 4 }
-{ "cmd": "set_param", "name": "iebt", "values": [67, 95, ...] }
-{ "cmd": "set_param", "name": "gebg", "values": [24, -8, ...] }
-{ "cmd": "set_eq_preset", "id": "rich" }   // "id": null → profile's own EQ params
+{ "cmd": "get_state", "request_id": "r1" }
+{ "cmd": "set_power", "request_id": "r2", "on": true }
+{ "cmd": "set_profile", "request_id": "r3", "id": "music" }
+{ "cmd": "set_params", "request_id": "r4", "params": { "dvla": [4] } }  // single edit = 1-entry batch
+{ "cmd": "set_params", "request_id": "r5", "params": { "gebg": [24, -8, ...], "geon": [1] } }
+{ "cmd": "set_eq_preset", "request_id": "r6", "id": "rich" }  // "id": null → profile's own EQ params
 
-{ "cmd": "add_profile", "from": "music", "name": "My Music" }
-{ "cmd": "rename_profile", "id": "user_a3f1", "name": "Late Night" }
-{ "cmd": "remove_profile", "id": "user_a3f1" }
-{ "cmd": "reset_profile", "id": "music" }
+{ "cmd": "add_profile", "request_id": "r7", "from": "music", "name": "My Music" }
+{ "cmd": "rename_profile", "request_id": "r8", "id": "user_a3f1", "name": "Late Night" }
+{ "cmd": "remove_profile", "request_id": "r9", "id": "user_a3f1" }
+{ "cmd": "reset_profile", "request_id": "r10", "id": "music" }
 
-{ "cmd": "add_eq_preset", "from": "rich", "name": "Vocal Forward" }
-{ "cmd": "rename_eq_preset", "id": "user_91c2", "name": "Vocal" }
-{ "cmd": "edit_eq_preset", "id": "user_91c2", "gebg": [...] }
-{ "cmd": "remove_eq_preset", "id": "user_91c2" }
-{ "cmd": "reset_eq_preset", "id": "rich" }
+{ "cmd": "add_eq_preset", "request_id": "r11", "from": "rich", "name": "Vocal Forward" }
+{ "cmd": "rename_eq_preset", "request_id": "r12", "id": "user_91c2", "name": "Vocal" }
+{ "cmd": "edit_eq_preset", "request_id": "r13", "id": "user_91c2", "params": { "gebg": [...] } }
+{ "cmd": "remove_eq_preset", "request_id": "r14", "id": "user_91c2" }
+{ "cmd": "reset_eq_preset", "request_id": "r15", "id": "rich" }
 ```
+
+Every command carries a client-generated `request_id`, echoed verbatim
+in the resulting `ack` / `error` — replies on a multiplexed WebSocket
+aren't positionally paired with requests, so the id is what lets a
+client (or a test) await its outcome, promise-style. `set_params` is
+the only param write; a bulk edit (profile switch, GEQ drag frame)
+lands as one atomic engine batch. `set_params`, `edit_eq_preset`, and
+the `vis` event all share one payload shape:
+`params: { "<4-CC>": [i16, …] }`.
 
 Events (daemon → client):
 
 ```jsonc
 { "type": "state", "snapshot": { /* full state */ } }
-{ "type": "vis", "gains": [...], "excitations": [...], "native_gains": [...], "native_excitations": [...] }
+{ "type": "vis", "params": { "vcbg": [...], "vcbe": [...], "vnbg": [...], "vnbe": [...] } }
 { "type": "ack", "request_id": "...", "ok": true }
-{ "type": "error", "request_id": "...", "code": "INVALID_PARAM", "message": "..." }
+{ "type": "error", "request_id": "...", "code": "INVALID_REQUEST", "message": "..." }
 { "type": "error", "request_id": "...", "code": "ENGINE_REJECTED", "status": -22, "message": "..." }
 ```
 
@@ -608,17 +633,22 @@ time the daemon's internal state mutates from a non-WS source (e.g. config
 file edit reload). At DolbyX's state scale (hundreds of bytes) full
 snapshots are preferable to partial diffs. The snapshot carries user-state
 plus a read-only `readouts` map — the 8 ReadOnly-Static values keyed by
-4-CC, refreshed on `SET_CONFIG`. The engine backend name is delivered once
+4-CC, read from the main session (`ParameterDef.default` values while no
+session exists). The engine backend name is delivered once
 via the bootstrap `engine` field on page load — see Decision 6.
 
 **Validation: two layers, asymmetric responsibilities.**
 
 _Daemon-side_ (the only layer that does value validation): every
-`set_param` is checked against the `ParameterDef` metadata — 4-CC
-declared, length matches, value within `min`/`max`. Failures
+`set_params` entry is checked against the `ParameterDef` metadata —
+4-CC declared, length matches, values within `min`/`max`. Failures
 short-circuit with
-`{ "type": "error", "code": "INVALID_PARAM", "request_id": "...",
-"message": "..." }` and the engine is never called.
+`{ "type": "error", "code": "INVALID_REQUEST", "request_id": "...",
+"message": "..." }` and the engine is never called. `INVALID_REQUEST`
+is the only daemon-side rejection code — malformed JSON, unknown ids,
+factory rename/delete, and param validation all use it, the `message`
+saying why. On any `error` the client re-issues `get_state` to
+reconcile.
 
 _Engine-side_ (validates a very narrow set of things): the engine
 checks only (a) `setting_index` range against the cache size, (b)
@@ -648,20 +678,24 @@ predictable, inspectable behaviour rather than relying on a hidden clamp
 (probe section 7: `vmb=240` and `vmb=480` both clamp to 192; #2 reads the
 clamped values back via `ak_get`).
 
-**Visualizer source.** `vis` events source from the **oldest session**
-(the first entry in the session list): its `Process` replies carry the
-vis frame the daemon broadcasts (Decision 10). If that session has no
-audio flowing there are simply no events — no suspended flag; idle is
-client-derived. The source does not switch when the oldest session goes
-silent — it only changes when that session ends, at which point the
-next-oldest becomes the source. This keeps the visualiser predictable
-and avoids flicker between sources.
+**Visualizer source.** `vis` events source from the **main session** —
+the oldest live session, index 0 of the supervisor's creation-ordered
+session list: its `Process` replies carry the
+vis frame the daemon broadcasts (Decision 10). If the main session has
+no audio flowing there are simply no events — no suspended flag; idle
+is client-derived. The source does not switch when the main session
+goes silent — only when it dies, at which point the next-oldest
+becomes main and the daemon re-reads the readouts (the rate-derived
+`vnnb`/`vnbf` may differ) and broadcasts. This keeps the visualiser
+predictable and avoids flicker between sources.
 
 **ReadOnly param updates.** The four ReadOnly-Dynamic params (`vnbg`,
 `vnbe`, `vcbg`, `vcbe`) ride the `vis` event, refreshed per audio block
 (Decision 10). The eight ReadOnly-Static params surface in the snapshot's
-`readouts` map — read via `ak_get` after `SET_CONFIG`, refreshed on
-reconfiguration. Both paths use the AK-direct binding
+`readouts` map — read from the main session via `ak_get` at its init,
+re-read when a different session becomes main; with zero sessions they
+are implicitly the `ParameterDef.default` values, and real sampling
+starts with the first session. Both paths use the AK-direct binding
 ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the engine has no
 cmd 3 GET, so AK-direct is what makes a real read possible (v1's only read
 path was cmd 4 `DS_PARAM_VISUALIZER_DATA`, visualizer-only). Experimental
@@ -688,17 +722,15 @@ Each message is `[u32 length][u32 opcode][payload]`. Replies are
 | 0x01 | `CreateSession`  | `[u32 sample_rate]`                                   | `[u32 session_id]`                       |
 | 0x02 | `DestroySession` | `[u32 session_id]`                                    | empty                                    |
 | 0x03 | `SetEnabled`     | `[u32 session_id][u8 enabled]`                        | empty                                    |
-| 0x10 | `SetParam`       | `[u32 session_id][4-CC name][u16 count][i16 × count]` | empty                                    |
-| 0x11 | `SetParams`      | `[u32 session_id][u16 n]( [4-CC name][u16 count][i16 × count] × n )` | empty                      |
-| 0x12 | `GetParam`       | `[u32 session_id][4-CC name]`                         | `[u16 count][i16 × count]`               |
-| 0x13 | `GetParams`      | `[u32 session_id][u16 n]( [4-CC name] × n )`          | `[u16 n]( [u16 count][i16 × count] × n )` |
+| 0x10 | `SetParams`      | `[u32 session_id][u16 n]( [4-CC name][u16 count][i16 × count] × n )` | empty                      |
+| 0x11 | `GetParams`      | `[u32 session_id][u16 n]( [4-CC name] × n )`          | `[u16 n]( [u16 count][i16 × count] × n )` |
 | 0x30 | `Process`        | `[u32 session_id][u32 frames][i16 × frames × 2 pcm]`  | `[i16 × frames × 2 pcm][i16 × 80 vis tail]` |
 
-`SetParam` / `SetParams` / `GetParam` / `GetParams` are served in the shim
+`SetParams` / `GetParams` are served in the shim
 by the AK accessors (`ak_set` / `ak_set_bulk` / `ak_get` / `ak_get_bulk`),
 not the cmd protocol — the AK-direct binding
-([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)). `GetParam` /
-`GetParams` read the live **clamped** registry value the DSP uses; the
+([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)).
+`GetParams` reads the live **clamped** registry values the DSP uses; the
 engine has no cmd 3 GET, so this in-process read is the only true per-param
 getter (see
 [docs/ddp/03 → The AK registry read path](ddp/03-binary-protocol.md#the-ak-registry-read-path)).
@@ -805,7 +837,8 @@ Stack:
 - **`solid-js/store`** for state management — built-in `createStore`,
   no third-party state library needed.
 - **Vitest** for unit tests with `@solidjs/testing-library` and a
-  mocked WebSocket. **Playwright** for E2E against a real daemon
+  mocked WebSocket. **Playwright** for E2E (lands with Slice 9) against
+  a real daemon
   driving the real engine (`QemuBackend` + `libdseffect.so`), so the
   binary protocol, the AK-direct param binding, and lifecycle
   (`SET_CONFIG`, the enable crossfade) are covered too. `StubBackend` stays in
@@ -847,26 +880,29 @@ There is intentionally no `/api/*` endpoint in dev or prod. Bootstrap
 injection is the only mechanism.
 
 Development workflow. The repo root carries a single `Justfile`
-(`cargo install just` once). `just dev` runs both `cargo watch -x 'run
--p ddp-daemon'` and `pnpm --prefix ui dev` concurrently with
-prefixed/coloured output. Rust changes restart the daemon; TS and CSS
-changes hot-reload via Vite.
+(`cargo install just` once). `just dev` runs both the daemon under
+`cargo watch` (passing `--ui ui/dev.html`) and `pnpm -C ui dev`
+concurrently with prefixed/coloured output. Rust changes restart the
+daemon; TS and CSS changes hot-reload via Vite.
 
 The daemon is the single front door for both dev and prod: the browser
-visits `localhost:9876`. In dev mode the daemon's `GET /` returns a
-hardcoded HTML literal that injects `window.__BOOTSTRAP__` and
-references the Vite dev server's module entry directly:
+visits `localhost:9876`. `GET /` reads one HTML file from disk and
+string-replaces its `<!--BOOTSTRAP-->` placeholder with a `<script>`
+defining `window.__BOOTSTRAP__` — a single producer; dev and prod
+differ only in which file. Prod (default): `$(daemon-dir)/index.html`,
+the Vite singlefile build placed beside the binary by `just
+build-release`. Dev: `just dev` passes `--ui ui/dev.html`, the
+checked-in dev shell that pulls the Vite dev server's module entry
+directly. A missing or unreadable file → the daemon refuses to start
+(same policy as `parameters.toml`).
 
 ```html
+<!-- ui/dev.html -->
 <!DOCTYPE html>
 <html>
   <head>
     <title>DolbyX</title>
-    <script>
-      window.__BOOTSTRAP__ = {
-        /* daemon-serialized JSON */
-      }
-    </script>
+    <!--BOOTSTRAP-->
   </head>
   <body>
     <div id="root"></div>
@@ -906,8 +942,8 @@ if (!window.__BOOTSTRAP__) {
 just dev      # daemon + UI together (recommended)
 
 # or, equivalently, in two terminals:
-cargo watch -x 'run -p ddp-daemon'
-pnpm --prefix ui dev
+cargo watch -x 'run -p ddp-daemon -- --ui ui/dev.html'
+pnpm -C ui dev
 ```
 
 Recommended VS Code extensions: **rust-analyzer**, **Even Better TOML**,
@@ -921,16 +957,12 @@ Production build:
 just build-release
 # → ui/dist/index.html built by Vite + vite-plugin-singlefile
 #   (CSS/JS inlined; <!--BOOTSTRAP--> placeholder left unreplaced)
-# → cargo build --release --features embedded-ui embeds
-#   ui/dist/index.html via rust-embed
+# → cargo build --release
+# → ui/dist/index.html copied into the release dir beside the binary
 ```
 
-With `embedded-ui` enabled, the daemon's `GET /` reads the embedded
-single-file `index.html` bytes and string-replaces `<!--BOOTSTRAP-->`
-with the serialized bootstrap JSON before sending. Without the feature
-(dev default), the daemon serves the hardcoded dev-mode HTML described
-above. The `embedded-ui` Cargo feature is the toggle between the two
-HTML producers in `http_server`.
+Nothing is embedded in the daemon binary — no cargo feature, no
+`rust-embed`, one `GET /` code path.
 
 UI component tree:
 
@@ -976,6 +1008,14 @@ src/
 
 > Persistent record: [ADR-0007 — TOML overlay persistence with file watcher](adr/0007-toml-overlay-persistence-with-file-watcher.md).
 
+**System-level deployment.** DolbyX installs once per machine and
+serves every user — there is no per-user mode. The daemon runs as a
+system service (Linux: systemd unit with `RuntimeDirectory=dolbyx`;
+Windows: a Windows service), so every path below is machine-wide. The
+plugin socket lives at `/run/dolbyx/dolbyx.sock` (Windows:
+`\\.\pipe\DolbyX`); the installer / service unit owns directory
+creation and ACLs so user-session audio hosts can connect.
+
 Two TOML files in distinct locations:
 
 - `config.toml` — user state, editable, in the platform-standard data dir.
@@ -986,32 +1026,35 @@ Two TOML files in distinct locations:
   not state, and outside this cascade).
 
 Both store **only deltas** over the `ParameterDef.default` base
-(Decision 3), in **two namespaces** each: top-level 4-CC keys apply to
-*every profile* — the shared operational config (the 20-band setup,
-`ven`, …) is stated here exactly once — and keys in the bare
-`[eq_preset]` table apply to *every EQ preset*. A param may live in both
-namespaces (`genb` is part of each profile's band structure *and* each
-preset's). A param resolves through five layers, later shadowing
-earlier:
+(Decision 3), in **two namespaces** each — `[profile]` and
+`[eq_preset]` — parsed by one uniform rule: a sub-table
+(`[profile.<id>]`, `[eq_preset.<id>]`) holds one item's params; any
+other key in the namespace table is a **shared** param applying to
+*every* item — the shared operational config (the 20-band setup,
+`ven`, …) is stated exactly once in `[profile]`. The root level holds
+exactly `power` and `selected_profile`, nothing else. A param may live
+in both namespaces (`genb` is part of each profile's band structure
+*and* each preset's). A param resolves through five layers, later
+shadowing earlier:
 
 ```
-ParameterDef.default → defaults.toml top → defaults.toml [item]
-                     →  config.toml  top →  config.toml  [item]
+ParameterDef.default → defaults.toml shared → defaults.toml [item]
+                     →  config.toml  shared →  config.toml  [item]
 ```
 
-("top" = the namespace's shared layer — root keys for profiles, bare
-`[eq_preset]` for presets; `[item]` = the `[profile.<id>]` /
+("shared" = the namespace's `[profile]` / `[eq_preset]` table keys;
+`[item]` = the `[profile.<id>]` /
 `[eq_preset.<id>]` table.) The two files mirror the original's
 `ds1-default.xml` / `ds1-current.xml` pair; the `ParameterDef.default`
-base and the shared top layers are v2 refinements — the original
+base and the shared layers are v2 refinements — the original
 repeated the factory defaults in full in every profile, DolbyX factors
 them out. The cascade is resolved at load, so each in-memory profile
 and preset is complete — a profile switch pushes one `SetParams` batch
 (Decision 4), with no per-param fallback. `defaults.toml` also drives
 `reset_profile` and `reset_eq_preset` actions (reset = remove the
 user's overrides). Write-back is **always per-item**: the daemon writes
-params under `[profile.<id>]` / `[eq_preset.<id>]`, never to a top
-layer — the top layers are a hand-edit affordance.
+params under `[profile.<id>]` / `[eq_preset.<id>]`, never to a shared
+layer — the shared layers are a hand-edit affordance.
 
 A `notify`-based file watcher subscribes to **`config.toml` only**;
 `defaults.toml` and `parameters.toml` are read once at startup — an
@@ -1029,15 +1072,16 @@ in `config.toml` is custom.
 
 Schema notes:
 
-- No `[state]` table header; `power`, `selected_profile`, and the
-  all-profiles 4-CC keys share the top level — every non-reserved key
-  is a param.
+- The root level is exactly `power` + `selected_profile` — no
+  `[state]` table header, no root param keys.
 - Profiles and EQ presets are keyed by id using table-per-id syntax
   (`[profile.music]`, `[eq_preset.rich]`), not array-of-tables. The id
   becomes the table key.
 - AK param overrides (4-CC keys) live directly in the namespace they
-  modify — top level, `[eq_preset]`, `[profile.<id>]`,
-  `[eq_preset.<id>]` — no `params` sub-tables. Serde uses
+  modify — `[profile]`, `[eq_preset]`, `[profile.<id>]`,
+  `[eq_preset.<id>]` — no `params` sub-tables. Both namespaces parse by
+  the same rule: a sub-table is an item, any other key is a shared
+  param. Serde uses
   `#[serde(flatten)] params: HashMap<String, ParamValue>` to collect
   unknown keys.
 
@@ -1047,7 +1091,7 @@ Schema notes:
 power = true
 selected_profile = "music"
 
-# → every profile: the standard 20-band stereo config, stated once
+[profile]            # → every profile: the standard 20-band stereo config, stated once
 genb = 20
 ienb = 20
 aonb = 20
@@ -1177,9 +1221,9 @@ visualizer is a pure event stream:
   (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`, 4 × 20 i16) to every `Process` reply
   via local `ak_get` — no separate `get_params`, no round-trip, no
   pump thread (Decision 4 protocol table).
-- **Broadcast.** The daemon emits one `vis` event per oldest-session
-  block (Decision 4), all four arrays as raw int16 1/16-dB. No
-  coalescing, no timer: no audio → no events.
+- **Broadcast.** The daemon emits one `vis` event per main-session
+  block (Decision 4), all four arrays keyed by 4-CC as raw int16
+  1/16-dB. No coalescing, no timer: no audio → no events.
 - **Render.** The client draws every `rAF` (~60 fps) from the latest
   event, applying fast-attack / slow-decay per-band ballistics —
   smooth at any host block rate.
@@ -1200,10 +1244,11 @@ feeds the Advanced panel's ReadOnly-Dynamic live cards (Decision 3).
    `excitation_idx(c) ≥ 47 - r`; colour: `r < 12` red, `12 ≤ r < 18`
    yellow, `r ≥ 18` blue (`ROWS_RED = 12`, `ROWS_YELLOW = 6` in
    `GraphicVisualiserPainter.java`). Empty rows render as the dark
-   "off" tile.
+   "off" tile. (A 32 kHz main session's grid is 19 bands — the spare
+   20th column just stays at the floor.)
 4. Level pip — one brighter cyan brick per column at the row for
-   current `gains[c]` (the per-column EQ-curve indicator; sources
-   from `vcbg`, same as the curve).
+   the current `vcbg[c]` (the per-column EQ-curve indicator, same
+   source as the curve).
 5. EQ overlay group — track + thumbs + curve glow + curve sharp,
    wrapped in an `<g>` with a CSS `opacity` transition for fade.
 
@@ -1231,7 +1276,7 @@ between the two adjacent integer band gains
 (`GraphicEqualizerPainter.translateGaindBToY`).
 
 **Curve source.** The polyline reads from the latest `vis` event's
-`gains` array (= `vcbg`) during steady state, and falls back
+`vcbg` array during steady state, and falls back
 to the locally smoothed user buffer while idle (no `vis` events).
 `vcbg ≠ gebg`: `gebg` is the user's GEQ input parameter, while
 `vcbg` is the composed EQ curve the engine is actually applying
@@ -1278,8 +1323,9 @@ maxEditGain]`, decay toward the violated clamp with
    `α = 0.5^(Δt / 0.3s)`; in-range cells are untouched. Then
    convolve: `smooth[b] = Σ kernel[i] · temp[b + i]`. Skip-write
    threshold `|new - old| > 0.02 dB`.
-3. Throttled `set_param gebg` — at most one per 60 ms; carries the
-   smoothed, clamped 20-band int16 1/16-dB array to the daemon.
+3. Throttled `set_params` — at most one per 60 ms; carries the
+   smoothed, clamped 20-band `gebg` int16 1/16-dB array to the
+   daemon as a 1-entry batch.
 
 **Smoother kernels.**
 
@@ -1323,7 +1369,8 @@ artifact contains:
 
 ```
 dolbyx/
-├── dolbyx-daemon          # the Rust binary (UI embedded)
+├── dolbyx-daemon          # the Rust binary
+├── index.html             # Vite singlefile UI build, disk-served (Decision 6)
 ├── dolbyx-engine-arm      # the ARM-side engine binary (statically built)
 ├── libdseffect.so         # bundled
 ├── parameters.toml        # AK metadata table, runtime-loaded (Decision 3)
@@ -1439,7 +1486,7 @@ DolbyX/
 │   │   ├── parameters.toml          #   AK metadata table, runtime-loaded (source-of-truth)
 │   │   ├── parameters.engine.toml   #   probe-generated twin — CI diff gate, never loaded
 │   │   ├── src/main.rs
-│   │   ├── src/http_server.rs       #   axum routes + rust-embed UI serving
+│   │   ├── src/http_server.rs       #   GET / (disk HTML + bootstrap) + GET /ws
 │   │   ├── src/ws_server.rs         #   WebSocket session handling
 │   │   ├── src/ws_commands.rs       #   command dispatch
 │   │   ├── src/audio_server.rs      #   plugin socket accept loop
@@ -1468,9 +1515,11 @@ DolbyX/
 │   ├── vite.config.ts               # backend-integration mode; HMR via :5173
 │   ├── tsconfig.json
 │   ├── index.html                   # has <!--BOOTSTRAP--> placeholder for prod
+│   ├── dev.html                     # dev shell — :5173 module entry + placeholder
 │   └── src/                         # (see Decision 6 for component tree)
 ├── vendored/
-│   └── libdseffect.so               # v8.1 build, bundled
+│   ├── libdseffect.so               # v8.1 build, bundled
+│   └── ds1-default.xml              # original DDP factory XML — defaults.toml source
 └── scripts/
     ├── build-release.sh
     ├── package-windows.ps1
@@ -1483,10 +1532,13 @@ is intentionally I/O-free so it can be unit-tested in isolation, ported, or
 wrapped for FFI later. The `ddp-persistence` crate is a separate member to
 keep I/O concerns out of the state model.
 
-During the build-out the v1 `arm/` and `daemon/` trees stay alongside the new
-`crates/` as the reference implementation; the Solid `ui/` replaces the v1
-vanilla-JS `ui/` in place. All v1 remnants are removed in one commit once v2.0
-lands.
+v1 is archived, not kept alongside: Slice 0 tags the pre-v2 tree as
+`v1` and deletes the v1 code in one commit — `daemon/`, the vanilla-JS
+`ui/`, `windows/vst/`, `arm/` (after relocating `libdseffect.so` +
+`ds1-default.xml` to `vendored/` and the Android stubs into
+`tools/ddp_probe/`), the v1 docs and scripts. `tools/ddp_probe/` and
+`samples/` stay — active tooling, not v1 code. Reference the old tree
+via `git show v1:<path>` if ever needed.
 
 ## Deep modules
 
@@ -1503,14 +1555,14 @@ entry below passes the deletion test.
 
 | Module | Interface | What's hidden | Introduced in |
 |---|---|---|---|
-| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_param(id, name, &[i16])` · `set_params(id, &[(name, &[i16])])` · `get_param(id, name) → Vec<i16>` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output) → VisFrame`. All values are `i16` 1/16-dB. `get_param` / `get_params` read the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); every `process` reply carries the four ReadOnly-Dynamic arrays as its `VisFrame` (Decision 10). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf), the vis-tail append (local `ak_get` per block). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
-| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, session map, session init (`EFFECT_CMD_INIT` → `SET_CONFIG` → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` refresh after `SET_CONFIG`, the vis fan-out (oldest-session `Process` replies → `vis` events, Decision 10). `set_enabled` applies to every live session; a session created while power is off starts disabled. | Slice 1 |
+| **`Engine`** trait (`ddp-engine`) | `create_session(sample_rate) → SessionId` · `destroy_session(id)` · `set_enabled(id, bool)` · `set_params(id, &[(name, &[i16])])` · `get_params(id, names) → Vec<Vec<i16>>` · `process(id, &input, &mut output) → VisFrame`. All values are `i16` 1/16-dB; the param surface is batch-only (a single edit = 1-entry batch). `get_params` reads the live clamped registry via `ak_get` / `ak_get_bulk` (AK-direct binding, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); every `process` reply carries the four ReadOnly-Dynamic arrays as its `VisFrame` (Decision 10). | QEMU subprocess lifecycle, binary protocol framing, session table, ARM-side multiplexing, the AK-direct param binding (params via `ak_*`, lifecycle via cmd), the structural-param commit (touch the group's commit leaf), the vis-tail append (local `ak_get` per block). Later: Unicorn ELF loader, Android stubs. **Two adapters** (Stub + QEMU) — real seam, not hypothetical. | Slice 1 (Stub), Slice 9 (QEMU) |
+| **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<EngineInfo>` · `shutdown()` · `info() → EngineInfo{backend}` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, the creation-ordered session list (**main session** = oldest = index 0, Decision 4), session init (`EFFECT_CMD_INIT` → `SET_CONFIG` at the plugin's rate → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` re-read when the main session changes (`ParameterDef.default` with zero sessions), the vis fan-out (main-session `Process` replies → `vis` events, Decision 10). Param writes and `set_enabled` fan out to every live session (AK registries are per-handle); with zero sessions, no engine call. A session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
 | **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
-| **`HttpServer`** (`ddp-daemon`) | One route only: `GET /` → bootstrap-injected HTML. Bind address from config. | rust-embed prod asset for `index.html` + `<!--BOOTSTRAP-->` string-replace, hardcoded dev-mode HTML literal referencing `:5173`, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`. Cargo feature `embedded-ui` toggles dev vs prod producers. | Slice 1 |
-| **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_PARAM` (daemon-side validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, command validation against `ParameterDef`, ack envelope, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
-| **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/tmp/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
+| **`HttpServer`** (`ddp-daemon`) | Two routes: `GET /` → bootstrap-injected HTML · `GET /ws` → WebSocket upgrade (handled by `WsServer`). Port from the `--port` CLI flag (default 9876) — not config.toml. | Disk read of the UI HTML (`$(daemon-dir)/index.html`; dev flag points at the checked-in `ui/dev.html`), the `<!--BOOTSTRAP-->` string-replace, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state + engine`, refuse-to-start on a missing/unreadable file. | Slice 1 |
+| **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_REQUEST` (any daemon-side rejection — malformed JSON, unknown ids, param validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, `request_id` echo in ack/error, command validation against `ParameterDef`, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
+| **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/run/dolbyx/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
 | **UI `GainSmoother`** (`ui/src/lib/gain_smoother.ts`) | `enqueue(band, dB)` · `tick() → Option<[i16; 20]>` (returns smoothed, clamped 20-band write, or `None` if nothing pending). | 5-cell thick-brush splat, τ=0.3 s exponential decay toward clamps, kernel convolution (`Mobile` / `Soft` / `Direct`), 60 ms drain throttle, 20×20 pseudoinverse on preset-change broadcasts for drag continuity. | Slice 6 |
 
 `is_factory`, the four-bucket settability classification, and the
@@ -1526,6 +1578,11 @@ own. Each TDD slice is then implemented with the
 [tdd](../.agents/skills/tdd/SKILL.md) skill — one test → one
 impl → repeat; never write all tests up front. Slices 0–10 constitute
 the v2.0 release. v2.1+ and v3.0 follow.
+
+> **Slices are provisional.** They set scope and order, but will be
+> re-derived just before implementation so each slice fits a single
+> session's context window (< 100k tokens) — split where needed, never
+> merged into bigger bangs.
 
 Each TDD slice carries six fields:
 
@@ -1546,6 +1603,16 @@ Each TDD slice carries six fields:
 Pure scaffolding — no user-visible behavior to test, so the `tdd` skill
 does not apply. Treat this slice as one-shot setup.
 
+- **v1 archival.** Tag the pre-v2 tree `v1`, then delete v1 in one
+  commit: `daemon/`, the vanilla-JS `ui/`, `windows/vst/`, `arm/`,
+  the v1 docs (`docs/ARCHITECTURE.md`, `docs/CROSS_PLATFORM_PLAN.md`),
+  the v1 scripts (`start-dolbyx.bat`, `setup_wsl.sh`), and the
+  `linux/` / `macos/` / `nix/` `.gitkeep` placeholders. Relocate
+  first: `arm/lib/libdseffect.so` + `ds1-default.xml` → `vendored/`;
+  `arm/stubs/` (+ the stub-build Makefile bits) → `tools/ddp_probe/`,
+  fixing the probe's `ARMDIR` and README paths so it builds
+  standalone. `tools/ddp_probe/` and `samples/` stay. Rewrite the root
+  README for v2.
 - New Cargo workspace with the crate skeleton above.
 - Top-level `Justfile` with `dev`, `build-release`, `lint`, `test`
   recipes.
@@ -1555,9 +1622,10 @@ does not apply. Treat this slice as one-shot setup.
   `vite-plugin-solid`, `vite-plugin-singlefile`,
   `@solidjs/testing-library`, and `eslint-plugin-solid` pinned. No
   Tailwind — plain CSS with BEM + `theme.css` of CSS variables.
-- `defaults.toml` created from `ds1-default.xml` — each factory profile
-  / EQ preset stored as its delta over the `ParameterDef.default` base,
-  plus the top-level 20-band operational block (Decision 7).
+- `defaults.toml` created from `vendored/ds1-default.xml` — each
+  factory profile / EQ preset stored as its delta over the
+  `ParameterDef.default` base, plus the shared `[profile]` 20-band
+  operational block (Decision 7).
 - AK parameter metadata file (`parameters.toml`, runtime-loaded — no
   build step) populated with all 64 entries, **seeded from the engine tree**
   (`make -C tools/ddp_probe dump-tree`) — authoritative names, lengths,
@@ -1580,10 +1648,11 @@ does not apply. Treat this slice as one-shot setup.
 
 **Progress checklist:**
 
+- [ ] v1 tagged `v1` + deleted; `tools/ddp_probe/` builds standalone
 - [ ] Cargo workspace + crate skeleton compiled
 - [ ] Justfile recipes work end-to-end (`just dev`, `just lint`, `just test`)
 - [ ] GitHub Actions CI green on Linux + Windows runners
-- [ ] UI scaffold builds via `pnpm --prefix ui build`
+- [ ] UI scaffold builds via `pnpm -C ui build`
 - [ ] `defaults.toml` round-trips through TOML parser
 - [ ] `parameters.toml` parses to 64 `ParameterDef`s at daemon startup
 - [ ] `parameters.toml` seeded from `make -C tools/ddp_probe dump-tree` (drops `mxou`/`lcsz`, adds `scpe`/`test`)
@@ -1620,10 +1689,10 @@ and an About/footer surface that renders `window.__BOOTSTRAP__.engine`.
 2. [ ] WS `/ws` connects; first frame is a `state` event matching the
        current `State`.
 3. [ ] WS `set_power { on: false }` flips `State.power`; daemon
-       replies with an `ack` carrying the originator-matching
-       `request_id`.
-4. [ ] After `set_power`, the `StubBackend` recorded
-       `set_enabled(session, false)` exactly once.
+       replies with an `ack` echoing the command's `request_id`.
+4. [ ] With one session created via `EngineSupervisor`, `set_power`
+       records `set_enabled(session, false)` on the `StubBackend`
+       exactly once; with zero sessions, no engine call at all.
 5. [ ] Two concurrent WS clients connect; one issues `set_power`;
        only the *other* receives the broadcast `state` event
        (originator echo suppression — see
@@ -1633,26 +1702,26 @@ and an About/footer surface that renders `window.__BOOTSTRAP__.engine`.
        [ADR-0007](adr/0007-toml-overlay-persistence-with-file-watcher.md)).
 7. [ ] Daemon restart reloads `power` from `config.toml`.
 8. [ ] Malformed JSON command returns
-       `{ type: "error", code: "INVALID_PARAM", … }` and does not
+       `{ type: "error", code: "INVALID_REQUEST", … }` and does not
        crash the session.
 9. [ ] The WebSocket client auto-reconnects after the daemon restarts
        or the socket drops; on reconnect it re-issues `get_state` and
        reconciles, and `ConnectionBadge` reflects connected /
        reconnecting (Decision 6).
 10. [ ] The About/footer surface renders `engine.backend` plus the
-       formatted `ver` readout — e.g. `Engine: STUB · 0.0.0.0` from the
-       stub's fabricated readout; the real `Engine: QEMU · 2.0.4.0` is
-       verified in Slice 9.
+       formatted `ver` readout — e.g. `Engine: STUB · 0.0.0.0`, sourced
+       from `ParameterDef.default` (no session exists yet); the real
+       `Engine: QEMU · 2.0.4.0` is verified in Slice 9.
 11. [ ] Refactor pass — extract duplication revealed by 1–10 without
        breaking any green test ([tdd](../.agents/skills/tdd/SKILL.md):
        never refactor while RED).
 
 **Tracer bullet test.** Integration test: start daemon with
-`StubBackend`, connect via WS, send `{ "cmd": "set_power", "on":
-false }`, assert `StubBackend` recorded
-`set_enabled(session, false)` exactly once. Real `axum` test client,
-real `tokio-tungstenite` against a bound port — no mocking past the
-`Engine` trait.
+`StubBackend`, create one session via `EngineSupervisor`, connect via
+WS, send `{ "cmd": "set_power", "on": false }`, assert `StubBackend`
+recorded `set_enabled(session, false)` exactly once. Real `axum` test
+client, real `tokio-tungstenite` against a bound port — no mocking
+past the `Engine` trait.
 
 **Mock policy.** `StubBackend` is the only stand-in. HTTP and WS run
 real; persistence runs against a real `tempdir`.
@@ -1683,7 +1752,7 @@ UI component, factory-state bootstrap.
 6. [ ] `reset_profile { id: "music" }` clears `config.toml`'s
        per-profile overrides; UI receives a fresh state snapshot.
 7. [ ] `set_profile { id: "nonexistent" }` returns
-       `INVALID_PARAM`, leaves state unchanged.
+       `INVALID_REQUEST`, leaves state unchanged.
 
 **Tracer bullet test.** Start daemon, WS `set_profile {id:"movie"}`,
 assert `StubBackend` recorded a single `set_params` call carrying
@@ -1742,7 +1811,7 @@ AK param(s) to the active profile, flushes to the engine, and persists.
 descriptor — three ordered `(label, enable, amount)` entries (`vdhe`/`dhsb`,
 `deon`/`dea`, `dvle`/`dvla`) — with bespoke toggle + amount-slider widgets
 that resolve each half's `kind` and range from the bootstrap
-`params` by 4-CC; reuses `WsCommands(set_param)` against the active profile.
+`params` by 4-CC; reuses `WsCommands(set_params)` against the active profile.
 
 **Behaviors to test:**
 
@@ -1750,7 +1819,7 @@ that resolve each half's `kind` and range from the bootstrap
        descriptor, each half resolving its 4-CC against the bootstrap
        metadata.
 2. [ ] Toggling Volume Leveller writes its enable param to the active
-       profile and flushes to the engine via `set_param`.
+       profile and flushes to the engine via a 1-entry `set_params`.
 3. [ ] Dragging the Dialog Enhancer amount slider writes `dea` to
        the active profile.
 4. [ ] The Surround Virtualizer toggle writes `vdhe` per its
@@ -1762,7 +1831,7 @@ that resolve each half's `kind` and range from the bootstrap
        suppressed.
 
 **Tracer bullet test.** Start daemon with `StubBackend`, WS
-`set_param` for the Volume Leveller amount on Music, assert
+`set_params` carrying the Volume Leveller amount on Music, assert
 `StubBackend` recorded the write and `config.toml` persisted it.
 
 **Mock policy.** Stub. UI via `@solidjs/testing-library` with a mocked
@@ -1780,21 +1849,21 @@ stops, the client freezes and fades the spectrum on its own — no
 suspend protocol.
 
 **Modules introduced.** Vis fan-out in `EngineSupervisor`
-(oldest-session `Process` replies → `vis` events), `Visualizer.tsx`
+(main-session `Process` replies → `vis` events), `Visualizer.tsx`
 SVG component with per-band ballistics + idle detection, `vis` event
 handling in `ws.ts`, StubBackend fabricated `VisFrame`s for tests.
 
 **Behaviors to test:**
 
-1. [ ] Every `process()` on the source session broadcasts one `vis`
-       event carrying the reply's four arrays verbatim (`gains`,
-       `excitations`, `native_gains`, `native_excitations` — raw
+1. [ ] Every `process()` on the main session broadcasts one `vis`
+       event carrying the reply's four arrays verbatim under their
+       4-CC keys (`params.vcbg` / `vcbe` / `vnbg` / `vnbe` — raw
        int16 1/16-dB).
-2. [ ] `process()` on a non-source session emits nothing.
+2. [ ] `process()` on a non-main session emits nothing.
 3. [ ] No audio → no `vis` events; no timer fires, no suspend flag
        exists.
-4. [ ] Source is the oldest session; when it ends, the next-oldest
-       takes over (Decision 4).
+4. [ ] The source is the main session (= oldest); when it dies, the
+       next-oldest becomes main and takes over (Decision 4).
 5. [ ] Client ballistics: fast attack / slow decay per band, smooth
        at any block rate.
 6. [ ] Client idle: no event for ~200 ms → freeze last frame; fade
@@ -1806,7 +1875,7 @@ handling in `ws.ts`, StubBackend fabricated `VisFrame`s for tests.
        [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
 
 **Tracer bullet test.** Start daemon with `StubBackend` fabricating
-fixed `VisFrame`s; keep the source session live via periodic
+fixed `VisFrame`s; keep the main session live via periodic
 `process()` calls (no audio path until Slice 10); subscribe via WS;
 assert one `vis` event per `process()` carrying the fabricated arrays
 verbatim, and zero events after the calls stop.
@@ -1827,7 +1896,7 @@ the inverse-smoother matrix.
 
 **Modules introduced.** UI `GainSmoother` (thick-brush splat, kernel
 convolution, exponential decay, inverse-on-preset-change),
-`EqCurve.tsx`, `WsCommands(set_param)` for `gebg`, GEQ-thumb pointer
+`EqCurve.tsx`, `WsCommands(set_params)` for `gebg`, GEQ-thumb pointer
 pipeline.
 
 **Behaviors to test:**
@@ -1843,8 +1912,8 @@ pipeline.
 5. [ ] On `state` broadcast updating active `gebg`, the
        inverse-smoother repopulates `temp` so the next touch stays
        continuous.
-6. [ ] WS `set_param { name: "gebg", values: [...] }` forwards to
-       `StubBackend::set_param("gebg", _)` correctly.
+6. [ ] WS `set_params { params: { "gebg": [...] } }` forwards to
+       `StubBackend::set_params` correctly.
 7. [ ] EQ curve renders as a polyline with rounded joins (not
        Catmull-Rom) per
        [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
@@ -1885,7 +1954,7 @@ remove_eq_preset)`, derived `is_factory`, CRUD UI affordances.
 3. [ ] Renaming a custom profile updates `name`, not `id` (id stable;
        persistence keys on id).
 4. [ ] Factory items cannot be deleted or renamed — daemon returns
-       `INVALID_PARAM`.
+       `INVALID_REQUEST`.
 5. [ ] Deleting a custom EQ preset that N profiles select falls all
        of them back to `None` (their own EQ params).
 6. [ ] Deleting a custom profile currently selected falls back to
@@ -1926,7 +1995,7 @@ CSS-grid layout.
 2. [ ] `WidgetFactory` dispatches by `(ParamKind, ParamAccess)`;
        every kind has a matching widget; unknown combos render an
        opaque-int fallback with a console warn.
-3. [ ] Settable widgets emit `set_param` on commit (debounced 60 ms
+3. [ ] Settable widgets emit `set_params` on commit (debounced 60 ms
        for continuous controls).
 4. [ ] Experimental widgets render with a small "experimental" badge
        ([ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md)).
@@ -1991,7 +2060,7 @@ apply, `SET_CONFIG`) — [tests.md](../.agents/skills/tdd/tests.md)
        sample crossfade).
 5. [ ] `EngineSupervisor` respawns the subprocess on crash; the
        session map is reconstructed transparently.
-6. [ ] `get_param("ver")` fills the snapshot `readouts`; the UI
+6. [ ] `get_params(["ver"])` fills the snapshot `readouts`; the UI
        About/footer shows `Engine: QEMU · 2.0.4.0`.
 
 **Tracer bullet test.** `cargo test --features qemu -p ddp-daemon
@@ -2024,7 +2093,7 @@ the visualizer responds; the EQ takes effect.
 **Behaviors to test:**
 
 1. [ ] Windows daemon binds `\\.\pipe\DolbyX`; Linux daemon binds
-       `/tmp/dolbyx.sock`.
+       `/run/dolbyx/dolbyx.sock`.
 2. [ ] Plugin `Hello {sample_rate, max_frames}` is acked with a
        fresh `session_id` from `EngineSupervisor::create_session`.
 3. [ ] `Process` frames round-trip through the shared engine
@@ -2100,7 +2169,8 @@ The daemon's command-dispatch integration tests use the `StubBackend`
 engine impl for speed and determinism; the daemon's real-engine integration
 test (`ddp-daemon/tests/e2e_qemu.rs`, gated by the `qemu` cargo
 feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU +
-`libdseffect.so` path. UI E2E (Playwright) drives the real daemon
+`libdseffect.so` path. UI E2E (Playwright, landing with Slice 9)
+drives the real daemon
 with the real engine so the binary protocol and the AK-direct engine
 binding are covered end-to-end.
 
@@ -2141,7 +2211,7 @@ for both end users and contributors.
 | Wire format               | Mixed dB / int16                                     | int16 1/16-dB throughout; dB conversion is UI-only                                                                                                                                             |
 | Wire protocol             | Parameter indices; cmd 3 GET swallowed silently      | Parameter names (4-CC); single source of truth via metadata table; params via AK accessors (`ak_set`/`ak_set_bulk` write, `ak_get`/`ak_get_bulk` real read); cmd protocol for lifecycle; the vis frame (`vc*` + `vn*`) rides every `Process` reply (ADR-0010)|
 | Param coverage            | 24 of 64 AK params                                   | All 64 AK params via `ak_find`/`ak_set` (no DEFINE_PARAMS/SETTINGS handshake); four buckets: Settable / Experimental / ReadOnly-Dynamic / ReadOnly-Static (incl. the build/license readouts — `ver` is the version readout)                                |
-| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into `index.html`; embedded at release build        |
+| Web UI                    | Vanilla JS embedded in daemon                        | Solid + TypeScript + Vite; plain CSS + BEM; separate dev workflow; daemon injects bootstrap (metadata table + initial state + engine info) into the disk-served `index.html` — nothing embedded |
 | Persistence               | Multi-file XML                                       | Runtime `parameters.toml` + `defaults.toml` (next to the daemon binary) + `config.toml` (platform data dir); table-per-id; 5-layer cascade; 500 ms debounce                                    |
 | External edits            | Not supported                                        | `notify`-based watcher on `config.toml` only (the binary-side TOMLs load at startup); debounced reload + state-snapshot broadcast                                                              |
 | Visualizer                | Gains only                                           | Per-block `vis` events riding `Process` replies (`vc*` gains/excitations + `vn*` native); client ballistics + idle fade — no pump, no suspend protocol                                         |

@@ -1,14 +1,14 @@
 # Backend-agnostic engine, QEMU subprocess as v2.0 default
 
-The daemon talks to the engine through a narrow `trait Engine` (eight
-methods: `create_session`, `destroy_session`, `set_enabled`, `set_param`,
-`set_params`, `get_param`, `get_params`, `process`).
-The parameter methods are served by the engine's AK accessors directly,
-not the cmd protocol — the AK-direct binding
-([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)) — so `get_param` is a
-real read of the live registry via `ak_get`, `get_params` bulk-reads N
-params in one call, and `set_params` batches profile and EQ-preset
-switches so the change applies on one audio block. The visualizer needs
+The daemon talks to the engine through a narrow `trait Engine` (six
+methods: `create_session`, `destroy_session`, `set_enabled`,
+`set_params`, `get_params`, `process`). The parameter surface is
+batch-only — a single-control edit is a 1-entry batch — and is served
+by the engine's AK accessors directly, not the cmd protocol — the
+AK-direct binding ([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)) —
+so `get_params` is a real read of the live registry via `ak_get` /
+`ak_get_bulk`, and one `set_params` lands a profile or EQ-preset
+switch on one audio block. The visualizer needs
 no read call at all: every `process` reply carries the four
 ReadOnly-Dynamic arrays as its `VisFrame` (the vis tail, ADR-0010).
 v2.0 ships one implementation: `QemuBackend`, which runs a single shared

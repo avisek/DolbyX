@@ -31,7 +31,7 @@ original daemon-mirror-only read story is superseded); exposes authoritative met
 is name-based natively; and simplifies the future Unicorn backend (fewer, leaner
 ARM entry points, no `effect_param_t` marshalling). The blast radius is the shim
 only — the `Engine` trait and the daemon↔subprocess protocol stay name-based,
-gaining `get_param` / `get_params` (and the `GetParam` / `GetParams` opcodes)
+gaining `get_params` (and the `GetParams` opcode)
 now that a read is a single `ak_get` / `ak_get_bulk`. This also folds the
 visualizer in: the shim appends the four ReadOnly-Dynamic arrays
 (`vnbg vnbe vcbg vcbe`, a local `ak_get` per block) to every `Process`
@@ -75,13 +75,13 @@ writing the leaf), so the bit-for-bit equivalence above is unaffected. Evidence:
 [`reshape_probe`](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape),
 [docs/ddp/02](../ddp/02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol).
 
-The quirk is hidden **inside the shim**, never above it. `set_param` / `set_params`
-own a static 4-group → commit-leaf map — engine-binding knowledge, versioned with
+The quirk is hidden **inside the shim**, never above it. `set_params`
+owns a static 4-group → commit-leaf map — engine-binding knowledge, versioned with
 the binary, *not* a column in the `ParameterDef` table ([ADR-0004](0004-parameter-metadata-as-single-source-of-truth.md)),
 which is product metadata. After staging a batch's writes, the shim re-writes each
 touched group's commit leaf once, with its current value (a local `ak_get`) unless
-the batch already carried it — **touch = commit**. So `set_param("genb", &[10])`
-commits on its own; the daemon, the `Engine` trait, and `ParameterDef` never
+the batch already carried it — **touch = commit**. So a 1-entry `set_params` of
+`genb` commits on its own; the daemon, the `Engine` trait, and `ParameterDef` never
 mention commit leaves. No daemon↔engine round-trip — the `ak_get` is local to the
 shim. And storage is fixed-capacity-40: a count change never zeroes the
 out-of-range slots ([`reshape_probe` finding D](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape)),
