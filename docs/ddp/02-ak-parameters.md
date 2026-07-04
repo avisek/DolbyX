@@ -229,7 +229,7 @@ lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
 \* `vcnb`/`vcbf` aren't in Java's `isParamSettable` whitelist, but the engine
 accepts host writes (write-protect bit clear) — DolbyX v2 surfaces them as
 **Experimental**. The `vn*` slots and `vcbg`/`vcbe` are write-protected —
-**ReadOnly-Dynamic** (`vcbg` `vcbe` `vnbg` `vnbe`, DSP-filled each block) and
+**ReadOnly-Dynamic** (`vnbg` `vnbe` `vcbg` `vcbe`, DSP-filled each block) and
 **ReadOnly-Static** (`vnnb` `vnbf`) in v2's buckets; see
 [Engine vs Java settability](#engine-vs-java-settability).
 
@@ -497,7 +497,7 @@ runtime**. DolbyX v2 surfaces all 64 in a four-bucket classification
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly-Dynamic** — `vcbg`, `vcbe` (custom), `vnbg`, `vnbe` (native)                | Engine **write-protects** them (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. DSP-filled each block. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; v2 reads them per block ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) |
+| **ReadOnly-Dynamic** — `vnbg`, `vnbe` (native), `vcbg`, `vcbe` (custom)                | Engine **write-protects** them (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. DSP-filled each block. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; v2 reads them per block ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) |
 | **ReadOnly-Static** — `vnnb`, `vnbf` + `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`   | `vnnb`/`vnbf` are the engine's rate-derived native-grid descriptors, write-protected like the dynamic four. The build/license six hold engine identity the DSP doesn't read at runtime (write-protect covers `bver`/`ver`/`bndl`/`lcvd`; `lcmf`/`lcpt` accept writes with no observable effect). Read via `ak_get`. | no in Java's setup; v2 reads them once after SET_CONFIG      |
 | **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 

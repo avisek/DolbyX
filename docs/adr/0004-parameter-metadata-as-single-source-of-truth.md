@@ -18,8 +18,8 @@ presentation, not engine-level acceptance (empirically the engine
 accepts cmd 3 SET against any declared parameter regardless of Java's
 `isParamSettable` whitelist; [`tools/ddp_probe/`](../../tools/ddp_probe/README.md)):
 **Settable** (42 — Java's whitelist), **Experimental** (10 — `preg pstg
-endp ocf ven vol vcnb vcbf scpe test`), **ReadOnly-Dynamic** (4 — `vcbg
-vcbe vnbg vnbe`, riding every `vis` event), **ReadOnly-Static** (8 —
+endp ocf ven vol vcnb vcbf scpe test`), **ReadOnly-Dynamic** (4 — `vnbg
+vnbe vcbg vcbe`, riding every `vis` event), **ReadOnly-Static** (8 —
 `vnnb vnbf` + `bver bndl ver lcmf lcvd lcpt`, read once after
 `SET_CONFIG`; `vnnb`/`vnbf` are rate-derived, hence the re-read on
 reconfig). Nothing is dropped — `ak_get`
@@ -30,6 +30,6 @@ the engine-version readout.
 A committed twin, `parameters.engine.toml`, is probe-generated,
 reference-only, never loaded; a CI diff gate blocks drift on the
 engine-fact fields (`name length min max frac_bits default`) while the
-product fields (`kind category access label help basic`) stay free.
-Adding a parameter is an edit to `parameters.toml` plus a daemon
+product fields (`kind category access label description help basic`) stay
+free. Adding a parameter is an edit to `parameters.toml` plus a daemon
 restart; the UI auto-discovers it via bootstrap.

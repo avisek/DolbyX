@@ -181,7 +181,7 @@ pub trait Engine: Send + Sync {
     fn get_param(&self, id: SessionId, name: &str) -> Result<Vec<i16>>;
     fn get_params(&self, id: SessionId, names: &[&str]) -> Result<Vec<Vec<i16>>>;
     fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<VisFrame>;
-    // VisFrame: the four ReadOnly-Dynamic arrays (vcbg vcbe vnbg vnbe), 4 × 20 i16
+    // VisFrame: the four ReadOnly-Dynamic arrays (vnbg vnbe vcbg vcbe), 4 × 20 i16
 }
 ```
 
@@ -392,13 +392,13 @@ pub struct ParameterDef {
     pub label: String,          // human-readable display name
     pub description: String,    // engine one-liner
     pub help: String,           // engine long help — may be empty
-    pub basic: bool,            // member of the 5-bool digest
+    pub basic: bool,            // renders in the Basic panel (VL/DE/SV) — enables + amounts
 }
 
 pub enum ParamKind {
     Toggle,                     // 0/1
     Tristate { on: i16 },       // 0/1/2, where "on" = 1 or 2
-    Integer { max: u16 },
+    Integer,
     Decibel { lkfs: bool },
     FrequencyHz,
     Degrees,
@@ -454,8 +454,8 @@ engine-level acceptance:
 - **Settable** (42) — every param in Java's `isParamSettable` whitelist.
   DSP reads the value and produces well-defined
   bounded behaviour. Editable widgets in the Advanced panel.
-- **ReadOnly-Dynamic** (4) — `vcbg`, `vcbe` (custom) + `vnbg`, `vnbe`
-  (native): write-protected (flag `0x2`), rewritten by the DSP every audio
+- **ReadOnly-Dynamic** (4) — `vnbg`, `vnbe` (native) + `vcbg`, `vcbe`
+  (custom): write-protected (flag `0x2`), rewritten by the DSP every audio
   block. They ride the `vis` event (Decision 4 and Decision 10); their
   Advanced cards live-update from it. `vc*` and `vn*` read identical until
   the custom bands are reconfigured, because the engine seeds the custom
@@ -529,7 +529,7 @@ param-twin`) and never loaded — it exists so CI can diff
 `parameters.toml`'s **engine-fact fields** (`name`, `length`, `min`,
 `max`, `frac_bits`, `default`) against engine ground truth and fail on
 drift. The product fields (`kind`, `category`, `access`, `label`,
-`help`, `basic`) are free to edit.
+`description`, `help`, `basic`) are free to edit.
 
 Wire and storage are name-based (4-CC string). Saved configs are
 stable under reordering the table. Adding a new parameter to the
@@ -658,17 +658,16 @@ silent — it only changes when that session ends, at which point the
 next-oldest becomes the source. This keeps the visualiser predictable
 and avoids flicker between sources.
 
-**ReadOnly param updates.** The four ReadOnly-Dynamic params (`vcbg`,
-`vcbe`, `vnbg`, `vnbe`) ride the `vis` event, refreshed per audio block
+**ReadOnly param updates.** The four ReadOnly-Dynamic params (`vnbg`,
+`vnbe`, `vcbg`, `vcbe`) ride the `vis` event, refreshed per audio block
 (Decision 10). The eight ReadOnly-Static params surface in the snapshot's
 `readouts` map — read via `ak_get` after `SET_CONFIG`, refreshed on
 reconfiguration. Both paths use the AK-direct binding
 ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the engine has no
 cmd 3 GET, so AK-direct is what makes a real read possible (v1's only read
 path was cmd 4 `DS_PARAM_VISUALIZER_DATA`, visualizer-only). Experimental
-params (`preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`,
-`scpe`, `test`) update through the regular state-snapshot path since the
-daemon owns the write side.
+params update through the regular state-snapshot path since the daemon
+owns the write side.
 
 The daemon serves no `/api/*` endpoints. Parameter metadata and the
 initial state snapshot are injected into the served `index.html` as
@@ -711,7 +710,7 @@ slots.
 The `Process` opcode wraps `libdseffect.so`'s `process()` (see
 [ddp_probe](ddp/03-binary-protocol.md#practical-reminders)). Its reply
 carries a fixed 160-byte **vis tail**: the ARM shim appends
-`vcbg ‖ vcbe ‖ vnbg ‖ vnbe` (4 × 20 i16) after each block via local
+`vnbg ‖ vnbe ‖ vcbg ‖ vcbe` (4 × 20 i16) after each block via local
 `ak_get` — the visualizer data arrives with the audio, no extra
 round-trip, no dedicated opcode (Decision 10). v2 configures
 the output for **WRITE** mode in `SET_CONFIG`, so `process()` overwrites the
@@ -1176,7 +1175,7 @@ polling loop; v2 drops the daemon-side cadence entirely — the
 visualizer is a pure event stream:
 
 - **Data.** The ARM shim appends the four ReadOnly-Dynamic arrays
-  (`vcbg ‖ vcbe ‖ vnbg ‖ vnbe`, 4 × 20 i16) to every `Process` reply
+  (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`, 4 × 20 i16) to every `Process` reply
   via local `ak_get` — no separate `get_params`, no round-trip, no
   pump thread (Decision 4 protocol table).
 - **Broadcast.** The daemon emits one `vis` event per oldest-session
@@ -1933,7 +1932,7 @@ CSS-grid layout.
        for continuous controls).
 4. [ ] Experimental widgets render with a small "experimental" badge
        ([ADR-0004](adr/0004-parameter-metadata-as-single-source-of-truth.md)).
-5. [ ] ReadOnly-Dynamic cards (`vcbg`, `vcbe`, `vnbg`, `vnbe`)
+5. [ ] ReadOnly-Dynamic cards (`vnbg`, `vnbe`, `vcbg`, `vcbe`)
        live-update from `vis` events.
 6. [ ] ReadOnly-Static cards render the snapshot `readouts`; the `ver`
        card shows the formatted "2.0.4.0".

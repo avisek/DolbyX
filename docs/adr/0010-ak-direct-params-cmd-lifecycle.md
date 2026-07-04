@@ -34,7 +34,7 @@ only — the `Engine` trait and the daemon↔subprocess protocol stay name-based
 gaining `get_param` / `get_params` (and the `GetParam` / `GetParams` opcodes)
 now that a read is a single `ak_get` / `ak_get_bulk`. This also folds the
 visualizer in: the shim appends the four ReadOnly-Dynamic arrays
-(`vcbg vcbe vnbg vnbe`, a local `ak_get` per block) to every `Process`
+(`vnbg vnbe vcbg vcbe`, a local `ak_get` per block) to every `Process`
 reply, so v2 needs no cmd-4 visualizer call — the vis frame rides the
 audio.
 

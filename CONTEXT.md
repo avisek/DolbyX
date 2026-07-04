@@ -62,7 +62,7 @@ post-processed `vis` event payload).
 The classification of an AK parameter into one of four:
 `Settable` (Java-whitelisted, DSP produces well-defined output),
 `Experimental` (engine accepts writes, original DDP UI hid the slot),
-`ReadOnly-Dynamic` (`vcbg`/`vcbe`/`vnbg`/`vnbe` — write-protected, the DSP
+`ReadOnly-Dynamic` (`vnbg`/`vnbe`/`vcbg`/`vcbe` — write-protected, the DSP
 rewrites them every audio block), or `ReadOnly-Static` (`vnnb`/`vnbf` the
 rate-derived native grid + `bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`
 build-version / license — read once at session config via `ak_get`, never
