@@ -28,22 +28,31 @@ typedef struct {
 
 #define AUDIO_CHANNEL_OUT_STEREO      0x3
 #define AUDIO_FORMAT_PCM_16_BIT       0x1
-#define EFFECT_BUFFER_ACCESS_WRITE    1
-#define EFFECT_BUFFER_ACCESS_READ     0
+/* effect_buffer_access_e — AOSP order. SET_CONFIG accepts WRITE/ACCUMULATE on
+ * the output (not READ); process() obeys it — ACCUMULATE adds, WRITE overwrites. */
+#define EFFECT_BUFFER_ACCESS_WRITE       0
+#define EFFECT_BUFFER_ACCESS_READ        1
+#define EFFECT_BUFFER_ACCESS_ACCUMULATE  2
 
-/* Buffer provider callbacks (NULL for our use case) */
+/* Buffer provider callbacks (NULL for our use case). AOSP layout = 3 words. */
 typedef struct buffer_provider_s {
     int32_t (*getBuffer)(void* cookie, audio_buffer_t* buffer);
     void    (*releaseBuffer)(void* cookie, audio_buffer_t* buffer);
-} buffer_provider_t;
+    void*   cookie;
+} buffer_provider_t;                   /* = 12 bytes */
 
+/* Real AOSP buffer_config_t / effect_config_t — the exact on-wire layout the
+ * engine's EFFECT_CMD_SET_CONFIG (cmd 1) handler reads; format/accessMode are
+ * BYTES at +28/+29. See tools/ddp_probe/setconfig_probe.c and
+ * docs/ddp/03-binary-protocol.md. */
 typedef struct {
-    audio_buffer_t    buffer;         /* 8 bytes: frameCount + data ptr */
-    uint32_t          samplingRate;
-    uint32_t          channels;
-    uint32_t          accessMode;
-    uint32_t          format;
-    buffer_provider_t bufferProvider; /* 8 bytes: 2 function pointers */
+    audio_buffer_t    buffer;         /* @0  8 bytes: frameCount + data ptr      */
+    uint32_t          samplingRate;   /* @8                                      */
+    uint32_t          channels;       /* @12 AUDIO_CHANNEL mask: mono=1 stereo=3 */
+    buffer_provider_t bufferProvider; /* @16 12 bytes: getBuffer/releaseBuffer/cookie */
+    uint8_t           format;         /* @28 AUDIO_FORMAT_PCM_16_BIT = 1         */
+    uint8_t           accessMode;     /* @29 output ∈ {0, 2 (ACCUMULATE)}        */
+    uint16_t          mask;           /* @30                                     */
 } buffer_config_t;                    /* = 32 bytes total */
 
 typedef struct {

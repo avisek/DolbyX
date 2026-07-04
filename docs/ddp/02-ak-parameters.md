@@ -24,16 +24,18 @@ version of that array with explanatory annotations.
   standard 20-band stereo config).
 - **bounds**: clamped at `DsAkSettings.set` time
   (`Ds.apk/.../DsAkSettings.java:278-326`). Values outside the range
-  are silently clamped, not rejected. **The engine itself does NOT
-  clamp or validate values** — direct probe evidence in
-  [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 110
-  into `dvla` (range 0..10) produces an engine log line
-  `settingsCache[...] updated with value 110` (verbatim, no clamp);
-  the DSP then reads the raw 110 (its own math bounds the result — see
-  [Engine vs Java settability](#engine-vs-java-settability)). Clamping
-  is exclusively a Java-side concern;
-  any non-Java host that wants safety must validate before forwarding
-  to the engine.
+  are silently clamped, not rejected. **The engine clamps too, in the AK
+  registry** — direct probe evidence in
+  [tools/ddp_probe/](../../tools/ddp_probe/README.md): writing 210 into
+  `dvla` (range 0..10) logs `settingsCache[...] updated with value 210`
+  (the cache keeps the raw value), but the forwarded `ak_set` clamps the
+  registry copy to 10, and the DSP reads the **clamped registry** (#7).
+  So the cache and registry diverge on out-of-range writes; `ak_get`
+  reads the clamped value, `ak_get_min`/`ak_get_max` the engine's range
+  (which differs from the table for `vmb`/`vol` — see
+  [Engine vs Java settability](#engine-vs-java-settability)). A host
+  should still validate up front: the engine's silent clamp uses ranges
+  that don't always match the published table.
 - **dB scaling**: most dB-valued parameters are stored as
   `int16 = round(dB × 16)`. So a +6 dB setting is stored as `+96`.
   This 1/16 dB resolution applies uniformly to gains, leveler targets,
@@ -43,8 +45,10 @@ version of that array with explanatory annotations.
   `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **This is a
   Java-side UI whitelist, not an engine-level constraint** — see the
   ["Engine vs Java settability" section](#engine-vs-java-settability)
-  near the end of this document for the empirical detail. The engine's
-  `_akSet` accepts writes to any declared parameter index.
+  near the end of this document for the empirical detail. The engine
+  accepts writes to any declared index **except its 10 write-protected
+  leaves** (the `ak_get_flags` write-protect bit `0x2` — version /
+  license-vendor / visualizer outputs).
 - **basic**: whether the parameter is one of the 5 booleans digested
   into `DsClientSettings`. Setting a basic param fires
   `onProfileSettingsChanged`; setting a non-basic settable param fires
@@ -60,10 +64,10 @@ or 3, not by 4-CC. (See [03-binary-protocol.md](03-binary-protocol.md).)
 
 ### Build / version (read-only)
 
-These slots have no host read path (cmd 3 GET is unimplemented). DolbyX v2
-drops all three from the metadata table — `ver` is reachable via cmd 6 and
-is surfaced as `engine.version` on the bootstrap instead. See
-"Recommendation for DolbyX v2" below.
+These slots have no cmd-path read (cmd 3 GET is unimplemented), but
+`ak_get` reads them fine — DolbyX v2 surfaces all three as
+**ReadOnly-Static** readouts, with `ver` as the engine-version readout.
+See "Recommendation for DolbyX v2" below.
 
 |   # | 4-CC   | len | bounds      | settable | Description                                                            |
 | --: | ------ | --: | ----------- | -------- | ---------------------------------------------------------------------- |
@@ -136,7 +140,7 @@ is surfaced as `engine.version` on the bootstrap instead. See
 
 |   # | 4-CC   | len | bounds    | settable | Description                                                                                              |
 | --: | ------ | --: | --------- | -------- | -------------------------------------------------------------------------------------------------------- |
-|  24 | `arnb` |   1 | 1..40     | yes      | Audio Regulator band count. Constrained to equal `aonb`.                                                 |
+|  24 | `arnb` |   1 | 1..40     | yes      | Audio Regulator band count.                                                                              |
 |  25 | `arbf` |  40 | 20..20000 | yes      | Audio Regulator band centre frequencies.                                                                 |
 |  50 | `arbi` |  40 | 0..1      | yes      | Audio Regulator band isolate flags. Per-band: 1 = independent compression, 0 = group with neighbours.    |
 |  51 | `arbl` |  40 | -2080..0  | yes      | Audio Regulator low thresholds in 1/16 dB. Below these, the band is left alone.                          |
@@ -155,7 +159,7 @@ is surfaced as `engine.version` on the bootstrap instead. See
 
 |   # | 4-CC   |       len | bounds    | settable       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --: | ------ | --------: | --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  20 | `aonb` |         1 | 1..40     | yes (constant) | Audio Optimizer band count. Must equal `arnb`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|  20 | `aonb` |         1 | 1..40     | yes (constant) | Audio Optimizer band count.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 |  21 | `aobf` |        40 | 20..20000 | yes            | Audio Optimizer band centre frequencies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |  22 | `aobg` | 329 (max) | -480..480 | yes            | Audio Optimizer band gains in 1/16 dB. The static `329` is the engine's worst-case-max `= aocc_max (8) × (aonb_max (40) + 1 channel-id) + 1 sentinel`. The **runtime length** is `(aonb + 1) × aocc` (= 42 for the standard 20-band stereo config), set by `setConstantAkParam("aonb", …)`. Layout is **channel-id-prefixed**, not header+pairs: `[AK_CHAN_L, L_gain_0..L_gain_(aonb-1), AK_CHAN_R, R_gain_0..R_gain_(aonb-1), …]` for up to `aocc` channels, optionally terminated by `AK_CHAN_EMPTY`. (Source: libdseffect.so `aobg` description string.) |
 |  23 | `aoon` |         1 | 0..2      | yes            | Audio Optimizer enable. **0 = off, 1 = on (all endpoints), 2 = auto (only when output is SPEAKER).**                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -182,62 +186,109 @@ is surfaced as `engine.version` on the bootstrap instead. See
 | --: | ------ | --: | ------ | -------- | -------------------------------------------------------------------------------------------------------------- |
 |  16 | `ngon` |   1 | 0..2   | yes      | Next Gen Surround enable. 0 = off, 1 = on, 2 = auto (on when input is stereo, off when input is already 5.1+). |
 
-### Visualizer compensation bands (the visible visualizer data)
+### Visualizer bands — native (`vn*`) source + custom (`vc*`) view
 
-These are the parameters that the visualizer reads. The engine _fills_
-`vcbg` and `vcbe` with the current state of the EQ curve and the
-spectral excitations every block. The values cannot be written; the
-read happens via command 4 (`DS_PARAM_VISUALIZER_DATA`) which returns
-both arrays concatenated as 40 int16s.
+The engine exposes per-band visualization **two ways** — and they aren't two
+measurements, they're one source and a resampled view of it (engine help text,
+`ddp_probe dump docs`):
 
-|   # | 4-CC   | len | bounds    | settable | Description                                                                                                   |
-| --: | ------ | --: | --------- | -------- | ------------------------------------------------------------------------------------------------------------- |
-|  33 | `vcnb` |   1 | 1..40     | no       | Visualizer band count (= 20 in standard config).                                                              |
-|  34 | `vcbf` |  20 | 20..20000 | no       | Visualizer band centre frequencies in Hz.                                                                     |
-|  35 | `vcbg` |  20 | -192..576 | no       | Visualizer band **gains** in 1/16 dB (-12 to +36 dB). The current EQ curve. UI divides by 16 to get float dB. |
-|  36 | `vcbe` |  20 | -192..576 | no       | Visualizer band **excitations** in 1/16 dB. The current per-band audio energy. UI divides by 16.              |
+- **Native (`vn*`)** — the visualizer's **own filterbank bands**, the
+  ground-truth analysis, in two halves. `vnnb`/`vnbf` *report* the native band
+  count + centre frequencies — a **rate-derived grid** the engine picks from the
+  sample rate (20 bands @48k/44.1k, **19 @32k**; re-derived on reconfigure, not
+  per block) — while the DSP fills `vnbg`/`vnbe` every block. All read-only.
+- **Custom (`vc*`)** — the native data **interpolated onto a host-chosen grid**.
+  `vcnb`/`vcbf` are **writable**: you pick the count + (monotonically
+  increasing) centre frequencies, and the engine resamples the native
+  gains/excitations onto them, filling `vcbg`/`vcbe`. Command 4
+  (`DS_PARAM_VISUALIZER_DATA`) returns `vcbg‖vcbe` as 40 int16s.
 
-The bound `[-192, +576]` is what the engine actually outputs. The UI
-maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel
-grid (1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rendering).
+So **`vc*` = resample(`vn*`, onto `vcbf`)**. The engine **seeds the custom grid
+to the native grid** at startup, so `vc*` reads byte-for-byte identical to `vn*`
+until a host writes `vcnb`/`vcbf` — then `vc*` follows the new grid while `vn*`
+holds steady (proven in [tools/ddp_probe/](../../tools/ddp_probe/README.md),
+`make vis`: a `vcbf` remap swings `vc*` by max |Δ|≈430 while `vn*` stays at the
+noise floor; its section C then sweeps the **sample rate** and the native count
+itself tracks 20/20/19 @48k/44.1k/32k). The whole `vn*` family and the
+`vcbg`/`vcbe` data arrays are read-only (write-protect bit `0x2`); only the
+custom **layout** — `vcnb`/`vcbf` — is host-writable. The native grid's one
+lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
 
-### Visualizer "native" bands (separate set, used internally)
+|   # | 4-CC   | len | bounds    | settable | Description                                                                                            |
+| --: | ------ | --: | --------- | -------- | ------------------------------------------------------------------------------------------------------ |
+|  28 | `ven`  |   1 | 0..1      | no       | Visualizer enable (AK-level; parallel to command 7). `vn*`/`vc*` are filled only while on.             |
+|  29 | `vnnb` |   1 | 1..20     | no       | **Native** band count — rate-derived (20 @48k/44.1k, 19 @32k); read-only report.                       |
+|  30 | `vnbf` |  20 | int16     | no       | **Native** band centre frequencies in Hz — rate-derived, read-only.                                    |
+|  31 | `vnbg` |  20 | int16     | no       | **Native** band gains in 1/16 dB — the engine's ground-truth gain curve.                               |
+|  32 | `vnbe` |  20 | int16     | no       | **Native** band excitations in 1/16 dB — ground-truth per-band energy.                                 |
+|  33 | `vcnb` |   1 | 0..20     | no\*     | **Custom** band count — **host-writable** (engine seeds it to `vnnb`; `0` = no custom bands).          |
+|  34 | `vcbf` |  20 | 20..20000 | no\*     | **Custom** band centre frequencies in Hz — **host-writable**, monotonically increasing.                |
+|  35 | `vcbg` |  20 | -192..576 | no       | **Custom** band **gains** in 1/16 dB (-12 to +36 dB) — `vn*` gains resampled onto `vcbf`. The EQ curve the UI draws; UI ÷ 16. |
+|  36 | `vcbe` |  20 | -192..576 | no       | **Custom** band **excitations** in 1/16 dB — `vn*` excitations resampled onto `vcbf`. UI ÷ 16.         |
 
-These look identical in shape to the `vc*` family and exist alongside
-them. They are not used by the standard UI and exist for the engine's
-own internal monitoring. None of them are read by `DsClient`. DolbyX v2
-drops the `vnb*` family entirely (no cmd 4 path, no cmd 3 GET) — see the
-"Recommendation for DolbyX v2" section below.
+\* `vcnb`/`vcbf` aren't in Java's `isParamSettable` whitelist, but the engine
+accepts host writes (write-protect bit clear) — DolbyX v2 surfaces them as
+**Experimental**. The `vn*` slots and `vcbg`/`vcbe` are write-protected —
+**ReadOnly-Dynamic** (`vnbg` `vnbe` `vcbg` `vcbe`, DSP-filled each block) and
+**ReadOnly-Static** (`vnnb` `vnbf`) in v2's buckets; see
+[Engine vs Java settability](#engine-vs-java-settability).
 
-|   # | 4-CC   | len | bounds | settable | Description                                                   |
-| --: | ------ | --: | ------ | -------- | ------------------------------------------------------------- |
-|  28 | `ven`  |   1 | 0..1   | no       | Visualizer enable as an AK parameter (parallel to command 7). |
-|  29 | `vnnb` |   1 | 1..20  | no       | Visualizer-native band count.                                 |
-|  30 | `vnbf` |  20 | int16  | no       | Visualizer-native band frequencies.                           |
-|  31 | `vnbg` |  20 | int16  | no       | Visualizer-native band gains.                                 |
-|  32 | `vnbe` |  20 | int16  | no       | Visualizer-native band excitations.                           |
+The bound `[-192, +576]` is what the engine outputs for `vcbg`/`vcbe`. The UI
+maps `[-192, +576]` ÷ 16 = `[-12, +36]` dB onto a 48-row vertical pixel grid
+(1 dB per row). See [04-ui-data-flow.md](04-ui-data-flow.md#visualizer-rendering).
 
 ### Endpoint / volume
 
 |   # | 4-CC   | len | bounds     | settable | Description                                                                                                                                                                                                                                   |
 | --: | ------ | --: | ---------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |  55 | `endp` |   1 | 0..6       | no       | Output endpoint enum. **0 = SPEAKER, 1 = HEADPHONES, 2 = HDMI, 3 = SPDIF, 4 = DLNA, 5 = LINE_OUT, 6 = BLUETOOTH.** Read-only at the AK level — the service is supposed to set this via the `setOutputDevice` HAL flow, not by `setDsApParam`. |
-|  56 | `mxou` |   1 | 1..8       | no       | Maximum output channels (mono..7.1).                                                                                                                                                                                                          |
+|  56 | `mxou` |   1 | 1..8       | no       | Maximum output channels (mono..7.1). **Not an engine root leaf** — a node param (under the `le`/`e` excitation buses); the host's flat registration resolves to **ref 0 (dead)**, so writes are ignored. See [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).                                                                                                                                                                                                          |
 |  57 | `vol`  |   1 | -2048..480 | no       | System volume hint in 1/16 dB. The leveler uses this to know how loud the user is currently playing back.                                                                                                                                     |
 
 ### Licensing
 
 These exist to gate features behind an SKU. In the v8.1 build all features
 are enabled (`<authorized_technologies>` in `ds1-default.xml`). DolbyX v2
-drops all four from the metadata table — no host read path, opaque
-payloads.
+surfaces `lcmf`/`lcvd`/`lcpt` as **ReadOnly-Static** readouts — `ak_get` is
+the read path; the payloads stay opaque. (`lcsz` is a phantom — see its row.)
 
 |   # | 4-CC   | len | bounds    | settable | Description                                    |
 | --: | ------ | --: | --------- | -------- | ---------------------------------------------- |
 |  60 | `lcmf` |   2 | int16     | no       | License modifier (2 int16s, opaque).           |
 |  61 | `lcvd` |   2 | int16     | no       | License vendor (2 int16s, opaque).             |
-|  62 | `lcsz` |   1 | 1..32767  | no       | License size.                                  |
+|  62 | `lcsz` |   1 | 1..32767  | no       | License size. **Not an engine root leaf** — a node param (under `init`/`eval`); resolves to **ref 0 (dead)**. See [the discrepancy](#javas-list-vs-the-engines-root-leaves). |
 |  63 | `lcpt` | 168 | -128..127 | no       | License payload (168 bytes of signed payload). |
+
+## Java's list vs the engine's root leaves
+
+`DsAkSettings.akParams_` is hand-maintained, and it disagrees with the
+engine's real root leaves two ways — proven in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) experiment 10, which
+resolves every host name against the live AK tree:
+
+- **Two phantoms.** `mxou` and `lcsz` are in Java's 64 but are **node**
+  params, not root leaves — in `dump tree` they sit nested under DSP nodes
+  (`mxou` under the `le`/`e` excitation buses, `lcsz` under `init`/`eval`).
+  Their flat registration can't resolve to a root leaf, so the engine hands
+  back **ref 0** — a dead, unresolved ref. A cmd 3 SET still forwards to
+  `ak_set`, but the resolve fails and the write is dropped before it reaches
+  a leaf. As host params they are non-functional.
+- **Two omissions.** `scpe` and `test` are real root leaves with real
+  ranges that Java leaves out:
+
+  | 4-CC   | ref | len | bounds | frac | default | engine description            |
+  | ------ | --: | --: | ------ | ---: | ------: | ----------------------------- |
+  | `scpe` |  71 |   1 | 0..2   |    0 |       2 | Surround Compressor enable    |
+  | `test` | 139 |   1 | 0..1   |    0 |       0 | Peak Limiter Test Mode Enable |
+
+So the **correct host set is Java's 64 − {`mxou`, `lcsz`} + {`scpe`,
+`test`}** (still 64). Neither `scpe` nor `test` is in Java's
+`isParamSettable` whitelist, so DolbyX v2 surfaces them as **Experimental**
+(see [Recommendation for DolbyX v2](#recommendation-for-dolbyx-v2)); the
+`mxou`/`lcsz` phantoms drop out entirely. The engine ships a name +
+one-line description per param — and a long help string for 75 of them
+(`ddp_probe dump docs`) — so a generated table sources these straight
+from `ddp_probe dump tree`, no hand-transcription.
 
 ## Per-parameter scaling cheat-sheet
 
@@ -313,12 +364,70 @@ parameters.** This is one of the most common debugging traps; see the
 detailed sequence in
 [03-binary-protocol.md](03-binary-protocol.md#the-mandatory-init-handshake).
 
+### Changing them at runtime (the commit protocol)
+
+"Constant" describes how the **host** uses them (set once at init), not an
+engine limit. They are not write-protected, and the engine reshapes its DSP on
+them **live** — through a documented commit: a count or frequency write is
+**inert until the dependent gains/targets array is re-written**, and that write
+re-derives the filterbank. From the engine's own help text (`ddp_probe dump
+docs`, e.g. `genb`: _"If this value is changed, the 'gebf' and 'gebg' settings
+must be updated. The Graphic Equalizer will not update until these parameters
+have been updated."_):
+
+| Feature    | Count         | Frequencies | Commit (re-write to apply)  |
+| ---------- | ------------- | ----------- | --------------------------- |
+| GEQ        | `genb`        | `gebf`      | **`gebg`**                  |
+| IEQ        | `ienb`        | `iebf`      | **`iebt`**                  |
+| AO         | `aonb`/`aocc` | `aobf`      | **`aobg`**                  |
+| AR         | `arnb`        | `arbf`      | **`arbh`**                  |
+
+A clean runtime update is **count → full frequency array → re-write the commit
+array** — but that sequence is only convention. What matters is **commit
+*presence*, not order**: empirically all six orderings of the three writes land
+the identical shape (raising or lowering the band count alike), and the commit
+*write* is the trigger — it fires even with unchanged values, while a
+count/frequency change alone never reshapes. Mechanism: each array param's
+`*_preupdate` hook flips a bit in a per-feature validity word (GEQ `0x5c0`, IEQ
+`0x718`, AO `0x870`, AR `0x9c8`) — stagers set a dirty bit (`gebf`→`0x02`), the
+commit array sets **bit `0x40`**. Counts have no hook; they're polled in
+`root_preupdate` each block and a change only *invalidates* (`bic #0x3d`), never
+sets `0x40`. The recompute runs at the next process block off the *current* stored
+state when `0x40` is present — so write order is unobservable; only the
+commit-array write sets the commit bit.
+
+The commit array is the feature's **last** payload array, not necessarily a
+"gains" array. AR carries three (`arbi` isolates, `arbl`/`arbh` thresholds), and
+only the last, `arbh`, commits — `arbi`/`arbl` are stagers like `arbf`, and the
+threshold values themselves are live-smoothed each block; it's the band
+*structure* the `arbh` write re-derives. (The help text says re-write all three;
+measurement shows one suffices — same overstatement as GEQ's "`gebf` and
+`gebg`", where only `gebg` commits.)
+
+The init dance above is just this protocol run once at startup — nothing stops
+a host from re-running it on a live engine. Proven empirically in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape)
+(`make reshape` — sweeps all six GEQ orderings, then repeats the gate on a
+second, unrelated DSP): moving a GEQ band's centre or raising the band count is a
+no-op until `gebg` is re-written, then the boost moves / the new band wakes
+mid-stream; moving an AR limiting band is likewise inert until `arbh`.
+
+The storage is **fixed-capacity** (40-band) — allocated once at `ak_open`, the
+arrays never resize. Measured (`reshape_probe` finding D): filling every slot then
+shrinking the count leaves the out-of-range slots **untouched** — never zeroed —
+and a commit + a grow re-expose them. So a count change has **no "wrong-sized
+array" transient** to repair; the commit is all it needs. That reduces the host
+rule to: **to update any structural param, write it, then re-write its group's
+commit leaf** — the last array, with its current value if you didn't otherwise
+touch it. (Where that re-write lives in v2 — the engine binding, not the daemon —
+is [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md).)
+
 ## Per-parameter visualization dimensions
 
-For UI widgets, here are the natural ranges to expose. These are the
-ranges to enforce **on the host side** before forwarding to the
-engine — the engine itself never clamps (see "Conventions / bounds"
-above):
+For UI widgets, here are the natural ranges to expose. Enforce these
+**on the host side** before forwarding: the engine does clamp silently
+in its registry, but to its own bounds, which differ from these for some
+params (see "Conventions / bounds" above):
 
 | Parameter group                               | UI control                                             | Range to expose                                                                        |
 | --------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
@@ -345,8 +454,12 @@ above):
 The "settable" column above mirrors Java's `DsAkSettings.isParamSettable`
 whitelist (42 of the 64 names). That whitelist exists in the original
 DDP service for two reasons: (a) gating UI controls, and (b) deciding
-which params get a flat cache slot in DEFINE_SETTINGS. **It is not an
-engine-level constraint.**
+which params get a flat cache slot in DEFINE_SETTINGS. **It is not _the_
+engine-level constraint** — the engine enforces its own, much smaller
+read-only set via the `ak_get_flags` write-protect bit `0x2` (10 params; see
+[07 — Per-param type & flags](07-ak-api.md#per-param-type--flags)). Java's
+22 non-settable names are a superset that also hides many engine-writable
+params (`preg`, `endp`, `vol`, …).
 
 Empirically (see [tools/ddp_probe/](../../tools/ddp_probe/README.md)
 section 5b), if the host puts a "non-settable" param in
@@ -362,41 +475,46 @@ emits the same three log lines it emits for any settable write:
 This includes writes to `bver` (`ak_set(0/bver, 0) = 9999`), `bndl`,
 `ver` (`ak_set(37/ver, 0) = 4242`), `vcbg`, `vcbe`, `endp`
 (`ak_set(55/endp, 0) = 2`), `preg`, `pstg`, `mxou`, `ocf`, `vol`,
-`ven`, `vcnb`, `vnnb`, `lcsz`. The cache update + AK forward both
-fire.
+`ven`, `vcnb`, `vnnb`, `lcsz`. The log line records the *attempted*
+value, and the cache update always fires — but the **AK forward only
+lands for writable leaves**, and two classes don't: `mxou`/`lcsz`
+resolve to **ref 0** (dead — node params, see
+[Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves)),
+and the **10 write-protected leaves** (`bver`, `ver`, `bndl`, `lcvd`,
+`vcbg`, `vcbe`, `vnnb`, `vnbf`/`vnbg`/`vnbe`) carry the engine's read-only
+flag (`0x2`), so the public `ak_set` the cmd-3 path calls stores nothing and
+returns `0` — the registry value is unchanged (the raw cache still
+keeps it). The engine's
+own `ak_get_type`/`ak_get_flags` are the authoritative read-only signal —
+see [07 — Per-param type & flags](07-ak-api.md#per-param-type--flags) and
+`ddp_probe dump types`.
 
 What differs across "non-settable" params is **whether the DSP uses
-the value afterwards** and, separately, **whether there is a host read
-path**. DolbyX v2 collapses this into three buckets, each of which is
-surfaced in the UI; engine-internal slots with no read path are dropped
-from the metadata table entirely (see "Recommendation for DolbyX v2"
-below for the exclusion list):
+the value afterwards** and, separately, **whether it changes at
+runtime**. DolbyX v2 surfaces all 64 in a four-bucket classification
+(see "Recommendation for DolbyX v2" below):
 
 | Bucket                                                                                 | DSP behaviour                                                                                              | Engine cache slot                                            |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | **Settable** (42 params)                                                               | DSP reads the value and produces well-defined bounded behaviour                                            | yes (Java includes them in DEFINE_SETTINGS)                  |
-| **ReadOnly** — `vcbg`, `vcbe`                                                          | DSP overwrites the slot every audio block with its own computed value. Writes "succeed" but are clobbered. | no in Java's setup; included by DolbyX v2 (cmd 4 reads them) |
-| **Experimental** — `preg`, `pstg`, `endp`, `mxou`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf` | DSP reads them; behavior is well-defined. Original DDP UI hides them.                                      | no in Java's setup; included by DolbyX v2                    |
+| **ReadOnly-Dynamic** — `vnbg`, `vnbe` (native), `vcbg`, `vcbe` (custom)                | Engine **write-protects** them (flag bit `0x2`): host writes are **rejected** (`ak_set` stores nothing, returns `0`; cmd 3 too), not clobbered. DSP-filled each block. Read via cmd 4 (`vcbg`/`vcbe`) or `ak_get` (any). | no in Java's setup; v2 reads them per block ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) |
+| **ReadOnly-Static** — `vnnb`, `vnbf` + `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`   | `vnnb`/`vnbf` are the engine's rate-derived native-grid descriptors, write-protected like the dynamic four. The build/license six hold engine identity the DSP doesn't read at runtime (write-protect covers `bver`/`ver`/`bndl`/`lcvd`; `lcmf`/`lcpt` accept writes with no observable effect). Read via `ak_get`. | no in Java's setup; v2 reads them once after SET_CONFIG      |
+| **Experimental** — `preg`, `pstg`, `endp`, `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test` | DSP reads them; behavior is well-defined. Original DDP UI hides them (`scpe`/`test` aren't in Java's list at all; `mxou` is a dead phantom — dropped). | no in Java's setup; included by DolbyX v2                    |
 
-The remaining 11 AK slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-`lcsz`, `lcpt` (engine-internal build-version / license; DSP doesn't
-read at runtime, pre-populated at DEFINE_SETTINGS time) and `vnnb`,
-`vnbf`, `vnbg`, `vnbe` (native-visualizer state; same DSP-overwrites
-inferred shape as `vcb*` but with no host read path) — share one trait:
-no public read path. Only `ver` is reachable from outside, via cmd 6,
-which DolbyX v2 surfaces as `engine.version` rather than as an AK
-parameter. DolbyX v2 omits all 11 from DEFINE_PARAMS and DEFINE_SETTINGS.
+(`ver` is also reachable over the cmd protocol via cmd 6 — an engine fact
+v2 doesn't use: it reads the param. `lcsz`, Java's 7th license/build name,
+isn't an engine root leaf at all — a phantom, not a surfaced slot; see
+above.)
 
-The engine never clamps a written value (see
+The engine **clamps** a written value in the AK registry (the cache keeps
+the raw value; see
 [Engine validation behavior](03-binary-protocol.md#engine-validation-behavior)),
-but the DSP's math is bounded — out-of-range values saturate or clamp,
-they don't scale without limit. In probe section 7, a `vmb` sweep
-(declared 0..240) over a strong sine amplifies up to `vmb=120`, then
-rails the int16 output, so `vmb=240` and `vmb=480` come out
-bit-identical, and `vmb=-100` is bit-identical to `vmb=0` (negative
-clamps to 0). A `dvla` sweep confirms the raw read — `dvla=200` vs
-`dvla=10` differ by 2/512 samples — but the leveler saturates, so the
-out-of-range effect is negligible.
+and the DSP reads the clamped registry. In probe section 7, a `vmb` sweep
+(declared 0..240) raises the output up through `vmb=120`, then flattens at
+the top: `vmb=240` and `vmb=480` produce near-identical output (peak/rms
+stop climbing) because both clamp to the engine's `vmb` max of 192 — #2/#9
+read the clamped value back via `ak_get`. The decisive proof is a direct
+cache poke (registry frozen) the DSP ignores.
 (See [tools/ddp_probe/](../../tools/ddp_probe/README.md) section 7.)
 The forwarding behaviour proven in section 5b — every cmd 3 SET
 fires `ak_set(idx/name, offset) = V` regardless of bucket — means
@@ -422,43 +540,35 @@ one `ak_get(idx/name, offset)` line per slot. Collapsed by param
 
 These values then live in the cache. You can't read them back via
 cmd 3 GET (that command is unimplemented; see
-[03-binary-protocol.md](03-binary-protocol.md#cmd-3-get-unimplemented)),
+[03-binary-protocol.md](03-binary-protocol.md#cmd-3-get--unimplemented)),
 but they are there.
 
 ## Recommendation for DolbyX v2
 
+> v2 binds these **AK-direct** — `ak_find`/`ak_get`/`ak_set`, no
+> DEFINE_PARAMS/DEFINE_SETTINGS handshake and no settings cache
+> ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)). The buckets
+> below classify *which* params v2 surfaces; the binding is AK throughout.
+
 The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a three-bucket classification of the **53 params that get
-surfaced** in DEFINE_PARAMS, DEFINE_SETTINGS, and the Advanced UI:
+above into a four-bucket classification of the **64 params DolbyX v2
+surfaces** — every engine root leaf, nothing dropped:
 
 - **Settable** (42 params) — every param with `settable = yes` above.
-  Daemon validates against metadata; engine accepts the forwarded
-  write into both the settings cache and AK registry.
-- **ReadOnly** (2 params) — `vcbg`, `vcbe`. DSP overwrites both slots
-  every audio block, so writes are clobbered. Readable from outside
-  via cmd 4 (`DS_PARAM_VISUALIZER_DATA`), which returns
-  `vcbg ‖ vcbe` as 40 int16s. Rendered as live read-only displays
-  driven by the visualizer pump.
-- **Experimental** (9 params) — `preg`, `pstg`, `endp`, `mxou`, `ocf`,
-  `ven`, `vol`, `vcnb`, `vcbf`. DSP reads them. Settable behind a UI
-  badge.
-
-The remaining 11 AK slots are dropped entirely:
-
-- `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`, `lcpt` —
-  engine-internal build-version / license slots. DSP doesn't read
-  them at runtime; the engine pre-populates them at DEFINE_SETTINGS
-  time via internal `ak_get` but there is no host read path. The
-  one externally-visible value, the engine version string, comes
-  out of cmd 6 and is surfaced as `engine.version` on the bootstrap
-  rather than as an AK parameter.
-- `vnnb`, `vnbf`, `vnbg`, `vnbe` — the native-visualizer family.
-  Same fate as the license slots from DolbyX's perspective: no cmd 4
-  path, no cmd 3 GET, would only ever show static
-  DEFINE_SETTINGS-time pre-population values. Naming symmetry with
-  `vcb*` suggests they're Dynamic in the DSP sense, but that's
-  unverifiable from outside.
-
-This brings DEFINE_SETTINGS to **~422 cache slots (~844 bytes,
-≈0.8 KB per device)**, a clean ~58 % reduction from the all-64 baseline
-without losing anything user-visible.
+  Daemon validates against metadata; the shim writes via `ak_set`.
+- **Experimental** (10 params) — `preg`, `pstg`, `endp`, `ocf`, `ven`,
+  `vol`, `vcnb`, `vcbf`, `scpe`, `test`. DSP reads them. Settable behind
+  a UI badge. (`scpe`/`test` are real root leaves Java omits; `mxou` —
+  formerly counted here — is a dead phantom, dropped. See
+  [Java's list vs the engine's root leaves](#javas-list-vs-the-engines-root-leaves).)
+- **ReadOnly-Dynamic** (4 params) — `vcbg`, `vcbe` (custom) + `vnbg`,
+  `vnbe` (the native ground truth the `vc*` pair resamples). Write-protected,
+  DSP-filled each block. The engine shim appends all four to every `Process`
+  reply (a local `ak_get` per block) — the visualizer frame rides the audio,
+  no cmd 4, no polling. `vcbg`/`vcbe` drive the Visualizer element; the
+  native pair shows live in the Advanced panel.
+- **ReadOnly-Static** (8 params) — `vnnb`, `vnbf` (the rate-derived native
+  grid; re-read after SET_CONFIG) + `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
+  `lcpt` (build/license identity, read once via `ak_get`). Plain readout
+  cards in the Advanced panel; `ver` is the engine-version readout, which
+  the UI formats as "2.0.4.0" — no cmd 6 in v2.

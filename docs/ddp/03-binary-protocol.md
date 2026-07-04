@@ -1,9 +1,26 @@
 # 03 — Binary Protocol with `libdseffect.so`
 
 The engine's only public surface is the standard Android `AudioEffect`
-HAL: a `process()` for audio and a `command()` for control. Every
-control operation is a single `command()` call with `cmdCode ==
-EFFECT_CMD_SET_PARAM` (5) or `EFFECT_CMD_GET_PARAM` (8).
+HAL: a `process()` for audio and a `command()` for control. Parameter
+traffic is `command()` with `cmdCode == EFFECT_CMD_SET_PARAM` (5) or
+`EFFECT_CMD_GET_PARAM` (8); lifecycle uses the other effect command
+codes — `EFFECT_CMD_INIT` (0), `EFFECT_CMD_SET_CONFIG`
+([1, sample rate / channels](#effect_cmd_set_config-effect-command-1)),
+`EFFECT_CMD_ENABLE` / `DISABLE` (3 / 4).
+
+> **Two numbered namespaces.** The *effect command code* (the `cmdCode`
+> argument: 0 INIT, 1 SET_CONFIG, 3 ENABLE …) is distinct from the
+> *`DS_PARAM_*` selector* (the first int32 of a SET_PARAM payload: 1
+> DEFINE_SETTINGS, 2 ALL_VALUES, 3 SINGLE_DEVICE_VALUE …). Section titles
+> like "Command 1" below mean the `DS_PARAM_*` selector unless prefixed
+> `EFFECT_CMD_`.
+>
+> **v2 note.** DolbyX v2 drives params through the AK accessors directly
+> (no DEFINE_PARAMS / DEFINE_SETTINGS handshake, no cmd 2 / 3), keeping the
+> cmd protocol for lifecycle — the AK-direct binding
+> ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)). This doc
+> stays the reference for the cmd path the engine accepts; [07](07-ak-api.md)
+> covers the AK path that supersedes it for params.
 
 This document describes the exact byte layouts. All multi-byte integers
 are **little-endian** (the ARM32 native order) and unsigned unless
@@ -56,7 +73,7 @@ them by what the engine actually accepts on each side:
 | 1    | `DS_PARAM_DEFINE_SETTINGS`     | yes (init) | —      | Cache layout + pre-population at init                                                                                                                          |
 | 2    | `DS_PARAM_ALL_VALUES`          | yes        | —      | Bulk push of cache values (profile switching)                                                                                                                  |
 | 3    | `DS_PARAM_SINGLE_DEVICE_VALUE` | **yes**    | **NO** | Point write into the cache. The engine's `Effect_getParameter` dispatcher does NOT route cmd 3 — every cmd 3 GET hits the catch-all and returns `-EINVAL(-22)` |
-| 4    | `DS_PARAM_VISUALIZER_DATA`     | —          | yes    | Returns `vcbg ‖ vcbe` (= 40 int16s) — the only way to read DSP state                                                                                           |
+| 4    | `DS_PARAM_VISUALIZER_DATA`     | —          | yes    | Returns `vcbg ‖ vcbe` (= 40 int16s) — the only *protocol* read of DSP state (in-process `ak_get` reads any registry value)                                      |
 | 5    | `DS_PARAM_DEFINE_PARAMS`       | yes (init) | —      | Names the 4-CC namespace; assigns DEFINE_PARAMS indices                                                                                                        |
 | 6    | `DS_PARAM_VERSION`             | —          | yes    | Returns the 4-int16 engine version                                                                                                                             |
 | 7    | `DS_PARAM_VISUALIZER_ENABLE`   | yes        | yes    | Visualizer-tap on/off                                                                                                                                          |
@@ -117,13 +134,11 @@ no-op when referenced later — `ak_set` against it will log
 > only sends those 24, and so the engine assigns them indices 0..23. But
 > this means parameters NOT in that list cannot be referenced by index.
 >
-> **Recommendation for DolbyX v2**: send DEFINE_PARAMS with the 53
-> surfaced AK names from [02-ak-parameters.md](02-ak-parameters.md)
-> (drops 11 unreadable engine-internal slots: `bver`, `bndl`, `ver`,
-> `lcmf`, `lcvd`, `lcsz`, `lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`).
-> Storage cost is ~210 bytes; the gain is symmetry with the metadata
-> table and access to the "Experimental" bucket (`endp`, `preg`,
-> `pstg`, `mxou`, etc.) that the original UI hides.
+> **DolbyX v2** never sends DEFINE_PARAMS — it resolves refs with
+> `ak_find` (v2 note above). A cmd-path host should register all 64
+> names, as the probe harness does (`DEFINE_PARAMS count:64`): storage
+> is a few hundred bytes, and a param left out can't be referenced by
+> index at all.
 
 ### Command 1 — `DS_PARAM_DEFINE_SETTINGS`
 
@@ -171,16 +186,16 @@ The exact total depends on `aonb` (which sets `aobf` to length 40 and
 >
 > Read-back via cmd 3 GET fails — but **the root cause is that
 > cmd 3 GET doesn't exist in the engine at all** (see
-> [Cmd 3 GET](#cmd-3-get-unimplemented) below), not slot-allocation.
+> [Cmd 3 GET](#cmd-3-get--unimplemented) below), not slot-allocation.
 
-> **Recommendation for DolbyX v2**: emit one entry per `(param_idx,
-> offset)` for every offset in every surfaced param's value array,
-> matching the original DDP layout. DolbyX v2 includes all 53 surfaced
-> AK params (drops the 11 unreadable slots — see DEFINE_PARAMS
-> recommendation above and the "DEFINE_SETTINGS scope" subsection
-> below) so every surfaced param has a cache slot — the cost is
-> ~0.8 KB of cache, the gain is access to "Experimental" writes plus
-> the [pre-population side effect](#settings-cache-lifecycle).
+> **DolbyX v2** never sends DEFINE_SETTINGS either (AK-direct). A
+> cmd-path host should emit one entry per `(param_idx, offset)` for
+> every offset in every param's value array, matching the original DDP
+> layout — per-offset entries are what make multi-element SETs land
+> correctly (above). Full coverage is what the probe harness runs
+> (`DEFINE_SETTINGS count:667`, ~1.3 KB of cache); the gain is
+> "Experimental" writes plus the
+> [pre-population side effect](#settings-cache-lifecycle).
 
 ## Steady-state SET commands
 
@@ -256,15 +271,17 @@ host added to the cache and in what order.)
 
 Two important details:
 
-- **Value is not validated.** Writing 110 into `dvla` (range 0..10)
-  succeeds with reply 0 and the engine logs `value 110` verbatim.
-  Writing -2180 into `arbl` (range -2080..0) writes `-2180`. No
-  clamping. See [Engine validation behavior](#engine-validation-behavior).
-- **Every write fires `ak_set`.** The cache and the internal AK
-  registry stay in lockstep — even for params Java considers
-  read-only (writes to `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `endp`,
-  `preg`, etc. all produce `ak_set(idx/name, offset) = V` log lines).
-  See [Settings cache lifecycle](#settings-cache-lifecycle).
+- **Stored raw, then clamped.** Writing 210 into `dvla` (range 0..10)
+  succeeds with reply 0; the engine logs `value 210` verbatim into the
+  cache, but the forwarded `ak_set` **clamps** the registry copy to 10.
+  The cache and registry **diverge** on out-of-range writes, and the DSP
+  reads the clamped registry. See
+  [Engine validation behavior](#engine-validation-behavior).
+- **Every write fires `ak_set`.** The cache gets the raw value, the AK
+  registry the clamped one — even for params Java considers read-only
+  (writes to `bver`, `bndl`, `ver`, `vcbg`, `vcbe`, `endp`, `preg`, etc.
+  all produce `ak_set(idx/name, offset) = V` log lines). See
+  [Settings cache lifecycle](#settings-cache-lifecycle).
 
 #### Example: setting `dvle` (Volume Leveler enable) to 1
 
@@ -314,9 +331,13 @@ The values are in the engine's standard 1/16 dB units. The UI converts
 to float dB by dividing by 16. The visible range is `[-12, +36]` dB →
 `[-192, +576]` int16.
 
-The engine refills `vcbg`/`vcbe` from the DSP every audio block, so
-the values change with the input audio and the active EQ curve. This
-is the only path to read DSP state from outside.
+The DSP writes `vcbg`/`vcbe` into the **AK registry** every audio block
+(not the settings cache), so the values change with the input audio and
+the active EQ curve. cmd 4 fetches them from that registry with the
+engine's own `ak_get_bulk` (once each for `vcbg`/`vcbe`); it's the only
+*protocol* path to DSP state, but in-process `ak_get` reads the same
+registry directly — and most other params too. See
+[the AK registry read path](#the-ak-registry-read-path).
 
 ### Command 6 GET — `DS_PARAM_VERSION`
 
@@ -368,9 +389,68 @@ For DolbyX v2 it's the daemon's in-memory state plus the persisted
 > reading the zero-fill from that buffer, not the engine's `vcbg`
 > values. The fix is to use cmd 4 instead.
 
-> **Implication for DolbyX v2**: the daemon's
-> `engine.get_visualizer_data(session)` Engine-trait method should
-> implement using cmd 4 directly. There is no fallback via cmd 3.
+> **Implication for DolbyX v2**: there's no cmd 3 GET, but v2's AK-direct
+> binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md))
+> provides a *real* per-param GET via `ak_get` (next section), surfaced as
+> the `GetParam` / `GetParams` opcodes. The visualizer arrays ride every
+> `Process` reply (a shim-local `ak_get` per block), not cmd 4 — so v2
+> doesn't use cmd 4 at all.
+
+## The AK registry read path
+
+The "no GET" limit is a *protocol* limit. `libdseffect.so` exports its
+own AK accessors — `ak_get`, `ak_get_bulk`, `ak_get_name`, `ak_get_min`,
+`ak_get_max` — and they're reachable from fixed offsets in the effect
+context, so the process that hosts the engine (the `ddp_probe` harness
+today; the `dolbyx-engine-arm` subprocess in v2) can read most params'
+**live registry** value — what the DSP actually uses, not just the cmd-4
+visualizer slots. cmd 4 itself reads `vcbg`/`vcbe` from this registry via
+`ak_get_bulk` — the disassembled handler calls it once per param; the
+per-element `ak_get` lines in the engine log are that bulk call's internal
+loop, not separate calls.
+
+```c
+void*     handle = *(void**)(*(void**)((char*)H + 0x44));  // pDs1ap, 2 derefs
+uint32_t* refs   = *(uint32_t**)((char*)H + 0xb4);         // tagged refs, DEFINE_PARAMS order
+int v = ak_get(handle, refs[param_index], elem);           // one value (what the probe uses)
+```
+
+The probe reads element-wise via `ak_get` and never calls `ak_get_bulk`
+directly — but the cmd-4 handler does (`ak_get_bulk(handle, refs[idx], 0,
+bands, 4, dst)`, stride 4 = packed int16), and #9a shows that path matches
+the element-wise read 40/40, so the signature is confirmed. A handful of
+slots (`mxou`, `lcsz`) have a `0` ref in that array and aren't reachable
+this way — they're node params, not root leaves, so the host's root-level
+registration resolves them to ref 0 (the Java param-set discrepancy; see
+[02](02-ak-parameters.md#javas-list-vs-the-engines-root-leaves)).
+
+What it establishes (see [ddp_probe](../../tools/ddp_probe/README.md) #9):
+
+- **A real GET.** `ak_get` reproduces cmd 4 — both the 20 gains (`vcbg`) and
+  the 20 excitations (`vcbe`) match (#9a); any other reachable param reads
+  back live (the clamped value the DSP uses — see
+  [validation](#engine-validation-behavior)).
+- **True ranges.** `ak_get_min`/`ak_get_max` give the engine's own clamp
+  bounds. #9c audits a sample and finds `vmb` (`[0..192]`) and `vol`
+  (`[-2080..480]`) diverge from the Java table — so treat the table as
+  advisory and validate per-param, not just for those two.
+- **What moves at runtime.** A registry value-diff across `process()`
+  blocks shows only the visualizer slots (`vcbe`/`vnbe`) change value; the
+  gains track the EQ curve, not the audio. (A value-diff can't see an
+  idempotent same-value rewrite, so this bounds what *changes*, not every
+  slot the DSP writes.)
+
+v2 exposes this to the daemon as the `GetParam` opcode over the
+[binary protocol](../REARCHITECTURE_PLAN.md) (the AK-direct binding,
+[ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)), giving a true
+read-back (verification, defaults, engine-computed state) on top of the
+daemon's own state model. Caveat: it only works where `libdseffect.so` is
+in-process — the cross-process Android HAL can't reach the engine heap —
+and the offsets are pinned to this EOL build.
+
+For the full AK accessor surface (`ak_set`, `ak_enum`, `ak_find`, the
+ref/`ak_resolve` tree model, and reading the engine's authoritative param
+metadata), see [07 — AK API](07-ak-api.md).
 
 ## Command 0 — `DS_PARAM_TUNING`
 
@@ -381,6 +461,13 @@ dispatcher returns reply 0 for tuning per legacy AK convention) but
 there's no observable behavior associated with it. Skip it.
 
 ## The mandatory init handshake
+
+> **v2 note.** This is the **cmd-protocol** setup. DolbyX v2's AK-direct
+> binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) skips
+> DEFINE_PARAMS / DEFINE_SETTINGS entirely — it resolves refs with `ak_find`
+> and writes via `ak_set`, needing only the lifecycle commands (INIT,
+> optionally SET_CONFIG, ENABLE). The sequence below is what the engine
+> accepts and what v1 sends.
 
 To bring the engine into a usable state, the host must perform this
 sequence:
@@ -410,13 +497,17 @@ sequence:
 10. command(EFFECT_CMD_ENABLE, 0, NULL, &replySize, &reply)
 ```
 
-Steps 5–8 are the **constant-params dance**. The engine doesn't
-dynamically resize on these — by the time they arrive,
-DEFINE*SETTINGS has already fixed the cache layout from the lens
-the host chose. The point of the dance is to propagate the
-constants into the engine's AK registry so the DSP reads them at
-runtime, and (for safety) to keep them in sync with whatever lens
-the host baked into the DEFINE_SETTINGS payload. The engine's
+Steps 5–8 are the **constant-params dance**. What's fixed up front is
+the host's **cache layout** — by the time these arrive, DEFINE_SETTINGS
+has already sized the flat blob from the lens the host chose, so the cmd
+flow locks in a band count before the dance runs. The engine's *DSP*
+is not so fixed: it reshapes on these live, via the gains-commit protocol
+(re-write `gebg`/`iebt`/`aobg` after a count/frequency change — see
+[02 — Changing them at runtime](02-ak-parameters.md#changing-them-at-runtime-the-commit-protocol)).
+The point of the dance is to propagate the constants into the engine's
+AK registry; a subsequent gains write (`gebg`/`iebt`/`aobg`, via cmd 2/3)
+fires the commit that syncs the DSP to the lens the host baked into the
+DEFINE_SETTINGS payload. The engine's
 own static `akParams*` table has matching defaults
 (`genb=ienb=aonb=20`), which is what the init-time `ak_get`
 pre-population uses; a host that follows the same defaults gets
@@ -439,30 +530,26 @@ After step 10 the engine actually starts processing audio when
 ### A note on DEFINE_SETTINGS scope
 
 The original DDP service restricts DEFINE_SETTINGS to the 42 params
-in Java's `DsAkSettings.isParamSettable` whitelist. DolbyX v2's
-research-vehicle goal is better served by **including the 53 surfaced
-params** (everything from
-[02-ak-parameters.md](02-ak-parameters.md) except the 11 unreadable
-engine-internal slots — `bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcsz`,
-`lcpt`, `vnnb`, `vnbf`, `vnbg`, `vnbe`):
+in Java's `DsAkSettings.isParamSettable` whitelist. That's a host-side
+choice, not an engine limit — a cmd-path host going wider gains:
 
-- Cache cost is ~0.8 KB (`~422` slots × 2 bytes) — negligible.
-- Every surfaced param gets cache pre-population from the engine's
-  internal AK state at DEFINE_SETTINGS time (see
+- Cache pre-population from the engine's internal AK state at
+  DEFINE_SETTINGS time for every registered param (see
   [Settings cache lifecycle](#settings-cache-lifecycle)).
-- The "Experimental" bucket (`endp`, `mxou`, `preg`, `pstg`, `vol`,
-  `ven`, `vcnb`, `vcbf`, `ocf`) becomes addressable via cmd 3 SET.
-- The "ReadOnly" bucket (`vcbg`, `vcbe`) gets cache slots too, which
-  doesn't hurt anything (the DSP overwrites them every block; the
-  host reads them out-of-band via cmd 4).
-- The 11 excluded slots are skipped because they have no host read
-  path — the engine version surfaces via cmd 6 → bootstrap
-  `engine.version`, and the rest carry no DolbyX-visible state.
+- cmd 3 SET access to the "Experimental" bucket (`endp`, `preg`, `pstg`,
+  `vol`, `ven`, `vcnb`, `vcbf`, `ocf`, `scpe`, `test`).
+- Harmless cache slots for the write-protected slots (the DSP overwrites
+  the registry, not the cache; the host reads `vcbg`/`vcbe` out-of-band
+  via cmd 4 — cmd 3 GET doesn't exist).
 
 The empirical evidence that the all-cache variant works is in
-[tools/ddp_probe/](../../tools/ddp_probe/README.md) — the harness
-runs with all-64 DEFINE_SETTINGS and the engine emits `reply=0` for
-every write; subsetting to 53 is purely a host-side choice.
+[tools/ddp_probe/](../../tools/ddp_probe/README.md) — the harness runs
+with all-64 DEFINE_SETTINGS (`count:667`, ~1.3 KB of cache — negligible)
+and the engine emits `reply=0` for every write; subsetting is purely a
+host-side choice. (DolbyX v2 sends neither DEFINE_PARAMS nor
+DEFINE_SETTINGS — AK-direct, v2 note at top — and reads everything,
+build/license slots included, via `ak_get`; the engine version is also
+reachable via [cmd 6](#command-6-get--ds_param_version).)
 
 ### What the original service does
 
@@ -491,6 +578,67 @@ correctly sized when DEFINE_SETTINGS runs. If you replicate this design
 in DolbyX, you can keep the XML parse approach; if you go a different
 route, just make sure constant params get pushed before DEFINE_SETTINGS
 runs.
+
+## `EFFECT_CMD_SET_CONFIG` (effect command 1)
+
+Sets the audio I/O config — sample rate, channel count, PCM format. In
+Android this is **framework-driven**: AudioFlinger emits it when the effect
+attaches to an output thread, so `DsEffect.java` has no caller and
+`DsConfigParser.java` has no rate logic. v1 instead changed rate by hand via
+the `Ds1ap::New` hot-swap; cmd 1 does the same thing correctly and
+**supersedes** it (proven in
+[`setconfig_probe`](../../tools/ddp_probe/README.md)).
+
+**Payload** is the real AOSP `effect_config_t` — two 32-byte
+`buffer_config_t` (input, then output), little-endian:
+
+```
+buffer_config_t (32 B):
+  [u32 frameCount][ptr raw][u32 samplingRate][u32 channels]  // channels mask: stereo=3 (only usable value)
+  [ptr getBuffer][ptr releaseBuffer][ptr cookie]             // 12-byte buffer_provider (unused; NULL)
+  [u8 format][u8 accessMode][u16 mask]                       // format PCM16=1 ; accessMode 0=WRITE/2=ACCUMULATE ; mask ignored
+```
+
+(The simplified struct in `arm/audio_effect_defs.h` is corrected to this;
+`setconfig_probe.c`'s `cfg_t` is the authoritative layout.)
+
+**Mechanism** (the `Effect_command` cmd-1 branch): validate → if rate +
+channels are unchanged, no-op (reply 0) → else cache the config, then
+`Effect_reinit` deletes the old `Ds1ap` and builds a new one at the requested
+rate (`Ds1ap::New` → `ak_open` → `ak_set_input_config` → `ak_rate_code`),
+`Effect_setConfig` re-applies the cached AK params, and the audio buffer is
+re-inited → reply 0.
+
+**Validation is three-tiered** — envelope, then fields, then the reconfig
+itself — and where the error surfaces differs per tier:
+
+| Tier / case                                                       | `command()` | `*pReplyData` | handle              |
+| ----------------------------------------------------------------- | ----------- | ------------- | ------------------- |
+| valid; rate or channels changed                                   | 0           | 0             | reconfigured        |
+| valid; unchanged                                                  | 0 (no-op)   | 0             | unchanged           |
+| **envelope**: `cmdSize ≠ 64`, null, or `*replySize ≠ 4`           | **−22**     | untouched     | intact              |
+| **field**: `in ≠ out`, `fmt ≠ PCM16`, `ch` mask `∉ {1,3}`, `acc ∉ {0,2}` | 0    | **−22**       | intact              |
+| **reconfig**: rate `∉ {44100,48000,32000}`                        | 0           | 0             | falls back to 44100 |
+| **reconfig**: channels = mono                                     | 0           | **−22**       | **poisoned**        |
+
+A field reject returns 0 — **always check `*pReplyData`, not just the return**.
+The two reconfig rows are the surprises (`setconfig_probe` Sc5/Sc6):
+
+- **Silent rate fallback.** `Effect_reinit` gates the rate to **{44100, 48000,
+  32000}**; any other rate **silently falls back to 44100 and still replies 0
+  (success)**. Validate the rate host-side (or read it back via
+  `ak_bus_get_rate` on bus 0).
+- **Mono poisons the handle.** A mono mask (1) *passes* the field check, but
+  `Effect_reinit` only accepts channel counts {2, 6, 8} — and it tears down the
+  old graph *before* that check. So mono leaves `Ds1ap` NULL: reply −22 and the
+  handle is unusable. **Stereo (mask 3) is the only working value** — the effect
+  layer is hard-limited to stereo even though the `Ds1ap` core supports 6/8.
+
+**accessMode is a real knob, not hard-wired.** The engine honours **WRITE (0)**
+(`out[i] = processed`) and **ACCUMULATE (2)** (`out[i] += processed`) —
+`setconfig_probe` Sc7 proves it behaviourally. v1/AudioFlinger pick ACCUMULATE,
+which is why `process()` needs the pre-`memset` (below); WRITE would overwrite
+and need none — so DolbyX v2 picks **WRITE** and drops the per-block zeroing.
 
 ## Endianness, types, and memory layout
 
@@ -521,13 +669,21 @@ checks exactly these things, and nothing else:
 | Value-buffer size                  | size doesn't match the command's encoding    | `DS_PARAM_VISUALIZER_ENABLE Invalid value size N` (and similar)                             | `-22`                        |
 | Param-index range (`ak_set` layer) | `param_idx >= num_defined_params`            | `_akSet: Wrong parameter index N`                                                           | (internal; cmd reply varies) |
 
-What the engine does **NOT** check:
+What the engine does **NOT** check at the protocol/cache layer (but see
+the value-range note — the registry *does* clamp):
 
-- **Value range.** Writing 110 into `dvla` (range 0..10) succeeds with
-  reply 0; the engine logs `value 110` verbatim. Writing 9999, -2180,
-  or any other int16 likewise succeeds. There are no clamp-related
-  strings anywhere in the binary; clamping is exclusively a Java-side
-  concern (`DsAkSettings.set` at `Ds.apk/.../DsAkSettings.java:278-326`).
+- **Value range — raw in the cache, clamped in the registry.** A cmd 3
+  SET writes the value to two places: the **raw** int16 into the settings
+  cache (the engine logs `value 210` verbatim for `dvla`, range 0..10),
+  and a forwarded `ak_set` that **clamps** the copy in the AK registry to
+  the engine's own range. The DSP reads the **clamped registry**, not the
+  raw cache (proven by a cache poke the DSP ignores — ddp_probe #7), so an
+  out-of-range write is silently clamped, not honoured. The clamp emits no
+  log string (why an earlier string scan missed it); read the clamped
+  value back with `ak_get`, and the range with `ak_get_min`/`ak_get_max`
+  — which differ from the Java table for `vmb` (`[0..192]`, not `..240`)
+  and `vol` (`[-2080..480]`). Java clamps too
+  (`DsAkSettings.set` at `Ds.apk/.../DsAkSettings.java:278-326`).
 - **4-CC name validity in DEFINE_PARAMS.** A DEFINE_PARAMS blob
   containing `[xxxx, dvla, yyyy]` is accepted with reply 0. The bogus
   4-CCs occupy param-index slots that simply don't resolve to anything
@@ -540,7 +696,7 @@ What the engine does **NOT** check:
 - **Settability of the target param.** The engine accepts cmd 3 SET
   against any flat index in the cache, regardless of whether the
   param Java would call settable. Writes to `bver`, `bndl`, `ver`,
-  `vcbg`, `vcbe`, `endp`, `preg`, `vol`, `ven`, `vcnb`, `lcsz`, etc.
+  `vcbg`, `vcbe`, `endp`, `preg`, `vol`, `ven`, `vcnb`, etc.
   all produce `ak_set(idx/name, 0) = V` engine log lines.
 
 ### On GET (cmd 4, 6, 7)
@@ -557,15 +713,18 @@ dispatch for it.
 
 | Reply           | Source  | Meaning                                                                                                            |
 | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| 0               | success | engine accepted; SET writes propagated to cache and `ak_set`                                                       |
+| 0               | success | engine accepted; SET writes the raw value to the cache and a clamped copy via `ak_set`                              |
 | -1 (`-EPERM`)   | engine  | invalid command data (e.g. psize wrong)                                                                            |
 | -22 (`-EINVAL`) | engine  | invalid command code (cmd 3 GET, etc.), bad setting_index, or wrong value-buffer size                              |
 | -4              | Java    | `Ds.setDsApParam` host-side rejection (e.g. `iebt`/`gebg` going through the wrong API) — not emitted by the engine |
 
 `DsClient.translateErrorCodeToExceptions` maps Java-side codes to
-exceptions. For the daemon, propagate engine `-22` as
-`ENGINE_REJECTED` and own all value-range validation up front
-because the engine offers no second line of defense.
+exceptions. For the daemon, propagate engine `-22` as `ENGINE_REJECTED`
+and still own value-range validation up front: the engine clamps to its
+own `ak_get_min`/`ak_get_max` (a silent second line), but those ranges
+differ from the published table for some params, so a host that validates
+gives predictable, inspectable behaviour rather than relying on a hidden
+clamp.
 
 ## Settings cache lifecycle
 
@@ -613,51 +772,68 @@ during DEFINE_SETTINGS show three things:
    [EffectDs] ak_set(<param_idx>/<name>, 0) = V
    [EffectDs] DS_PARAM_SINGLE_DEVICE_VALUE returned from ak_set()/ak_set_bulk()
    ```
-   This means the cache and the AK registry stay synchronized — the
-   cache isn't a "stage and apply" buffer; writes propagate
-   immediately into the engine's internal DSP-input state.
+   The cache gets the **raw** value; `ak_set` **clamps** its copy into
+   the AK registry. The two stores **diverge** on out-of-range writes,
+   and the DSP reads the **registry**, not the cache (ddp_probe #7) — so
+   the cache is a raw host-side record, not the engine's DSP-input state.
 
 What the DSP does with that state then depends on the param. DolbyX v2
-surfaces three buckets, each derived from observed DSP behaviour:
+surfaces four buckets, each derived from observed DSP behaviour:
 
-- **Settable params** — DSP reads each block.
-- **ReadOnly** (`vcbg`, `vcbe`) — DSP overwrites the cache+AK slot
-  every block with its own computed value. Writes are clobbered.
-  The host reads them via cmd 4.
-- **Experimental** (`endp`, `mxou`, `preg`, etc.) — DSP reads them
-  on the same audio block. Probe section 7 shows the Settable bucket
-  (`dvla`, `vmb`) is read raw (bounded by DSP saturation); the universal
-  ak_set forwarding in section 5b extends this to every Experimental
-  param.
+- **Settable** — the DSP reads them from the clamped registry each
+  block.
+- **ReadOnly-Dynamic** (`vcbg`, `vcbe`, `vnbg`, `vnbe`) — the DSP
+  overwrites the **registry** slot every block with its own computed value
+  (the cache slot is never touched). The host reads them via cmd 4
+  (`vc*` only) or `ak_get`.
+- **ReadOnly-Static** (`vnnb`, `vnbf` + the build/license six) — filled
+  by the engine (rate-derived grid / engine identity), not by the DSP
+  loop. Read via `ak_get`.
+- **Experimental** (`endp`, `preg`, `scpe`, etc.) — read from the
+  registry on the same audio block. Probe section 7 shows the clamped
+  registry (not the raw cache) drives the DSP, proven by a cache poke the
+  DSP ignores; the universal ak_set forwarding in section 5b extends this
+  to every Experimental param.
 
-A fourth group of 11 AK slots is **excluded** from DolbyX v2's
-surfaces (DEFINE_PARAMS, DEFINE_SETTINGS, metadata table, UI) because
-they share one trait — no host read path:
+DolbyX v2 excludes nothing — all 64 root leaves surface
+([02](02-ak-parameters.md#recommendation-for-dolbyx-v2)). The engine-internal
+identity / license slots (`bver`, `bndl`, `ver`, `lcmf`, `lcvd`, `lcpt`) are
+the least alive: the DSP doesn't read them at runtime, the engine
+pre-populates them from its internal AK registry at DEFINE_SETTINGS time,
+and writes succeed at the protocol level with no observable effect. v2 reads
+them via `ak_get` as ReadOnly-Static readouts; `ver` is the engine-version
+readout (also reachable via cmd 6 — an engine fact v2 doesn't use).
 
-- Engine-internal identity / license slots: `bver`, `bndl`, `ver`,
-  `lcmf`, `lcvd`, `lcsz`, `lcpt`. DSP doesn't read them at runtime;
-  the engine pre-populates them from its internal AK registry at
-  DEFINE_SETTINGS time. Writes succeed at the protocol level but
-  have no observable effect. The engine version string (`ver`) is
-  reachable via cmd 6 and surfaces as `engine.version` on the
-  bootstrap rather than as an AK parameter.
-- Native-visualizer slots: `vnnb`, `vnbf`, `vnbg`, `vnbe`. Same
-  fate; naming symmetry with `vcb*` suggests they're Dynamic in the
-  DSP sense, but that's unverifiable from outside (no cmd 4 path).
+The native-visualizer slots (`vnnb`/`vnbf`/`vnbg`/`vnbe`) are the engine's
+ground-truth filterbank visualizer — `ak_get` reads them (ddp_probe #9), and
+they're the source the custom `vcbg`/`vcbe` channel resamples onto its
+host-set grid. `vc*` mirrors `vn*` only while the custom bands are left at
+their default (native) layout; v2 keeps both (`vc*` for the Visualizer
+element, `vn*` in the Advanced panel). See
+[02-ak-parameters.md](02-ak-parameters.md).
 
 The bucket classification lives in
 [02-ak-parameters.md](02-ak-parameters.md#engine-vs-java-settability).
 
 ## Practical reminders
 
-- The engine processes in **ACCUMULATE mode**: `process()` adds to the
-  output buffer rather than overwriting it. Always `memset(out, 0,
-out_bytes)` before calling.
+- `process()` deposits per the output **accessMode** chosen at SET_CONFIG:
+  ACCUMULATE (2) **adds** to the output buffer (v1/AudioFlinger default — so
+  `memset(out, 0, out_bytes)` before every call), WRITE (0) **overwrites** it
+  (no memset needed; DolbyX v2 uses WRITE). See
+  [SET_CONFIG](#effect_cmd_set_config-effect-command-1).
+- A **disabled** effect still deposits per accessMode: `EFFECT_CMD_DISABLE`
+  crossfades wet→dry over ≈120 ms (blocks return `0`), then bypassed blocks
+  return `-ENODATA` and write the **dry input** — WRITE gives `OUT == IN`,
+  ACCUMULATE adds it (`setconfig_probe` Sc9; a never-enabled effect skips the
+  crossfade and bypasses from the first block). A WRITE host thus needs no
+  passthrough copy of its own.
 - `process()` also **clobbers its own input buffer** (enabled or
   disabled). Pass a scratch copy if you still need the original PCM.
-- The default sample rate is 44100 Hz. To run at 48000 Hz you have to
-  use the `Ds1ap::New` hot-swap technique that DolbyX already
-  implements (see `arm/ddp_processor.c`).
+- The default sample rate is 44100 Hz. To run at 48000 or 32000 Hz, send
+  `EFFECT_CMD_SET_CONFIG` ([above](#effect_cmd_set_config-effect-command-1)) —
+  it rebuilds the engine at the new rate and supersedes v1's manual
+  `Ds1ap::New` hot-swap. Other rates silently fall back to 44100.
 - The audio session ID for global mixing is **0**. This is the
   documented behaviour: session 0 = system output.
 - `EffectCreate` returns -EINVAL if you pass anything other than the

@@ -4,6 +4,10 @@ DolbyX is a cross-platform wrapper around the Android Dolby Digital Plus
 `libdseffect.so` engine, exposing it to desktop audio hosts via a Rust
 daemon, a Solid-based Web UI, and platform-native plugins.
 
+**Goal.** Match the original DDP's default behaviour, look, and feel
+out of the box, then extend its capabilities beyond the original and
+simplify where possible.
+
 This document is the canonical glossary for terms specific to the DolbyX
 project — pin new project-specific terms here, not inline in plans or ADRs.
 
@@ -30,35 +34,61 @@ Created by `Engine::create_session`, destroyed by `destroy_session`. The
 shared engine subprocess multiplexes many sessions.
 _Avoid_: stream, connection, instance.
 
+**Native grid** (`vnnb` / `vnbf`):
+The visualizer's intrinsic band layout — count (`vnnb`) + centre frequencies
+(`vnbf`), read-only and **rate-derived**: the engine selects it from the
+sample rate (20 bands @48k/44.1k, 19 @32k), re-derived on (re)configuration,
+not per block. The custom grid (`vcnb`/`vcbf`) seeds from it; `vnbg`/`vnbe`
+are the per-block measurements taken on it (see
+[docs/ddp/02](docs/ddp/02-ak-parameters.md)).
+_Avoid_: "native bands" (ambiguous with the per-block `vnbg`/`vnbe` data).
+
 **`vcbg` / `vcbe`**:
-The two `ReadOnly` AK parameters the DSP rewrites every audio block.
-Returned together by engine cmd 4 (`DS_PARAM_VISUALIZER_DATA`) as 40
-int16s. The only live-engine-state read path DolbyX has.
-_Avoid_: "visualizer data" alone (ambiguous between the raw cmd-4 bytes
-and the post-processed `vis` event payload).
+Two of the four `ReadOnly-Dynamic` AK parameters the DSP rewrites every
+audio block (in the AK registry). Engine cmd 4 (`DS_PARAM_VISUALIZER_DATA`)
+returns the pair as 40 int16s — the original service's read path; v2 instead
+ferries all four dynamic arrays on each `Process` reply (see `vis` event).
+In-process, the engine's own `ak_get` reads the same registry, and most
+other params' live value too (see
+[docs/ddp/03](docs/ddp/03-binary-protocol.md#the-ak-registry-read-path)).
+These are the *custom* (`vc*`) bands — the engine's *native* (`vn*`)
+per-band visualizer data resampled onto a host-set frequency grid
+(`vcnb`/`vcbf`); they read identical to `vn*` until that grid is
+reconfigured (see [docs/ddp/02](docs/ddp/02-ak-parameters.md)).
+_Avoid_: "visualizer data" alone (ambiguous between the raw arrays and the
+post-processed `vis` event payload).
 
 **Settability bucket**:
-The classification of an AK parameter as `Settable` (Java-whitelisted, DSP
-produces well-defined output), `ReadOnly` (`vcbg`/`vcbe` — DSP overwrites
-every block), or `Experimental` (engine accepts writes but original DDP UI
-hid the slot).
+The classification of an AK parameter into one of four:
+`Settable` (Java-whitelisted, DSP produces well-defined output),
+`Experimental` (engine accepts writes, original DDP UI hid the slot),
+`ReadOnly-Dynamic` (`vnbg`/`vnbe`/`vcbg`/`vcbe` — write-protected, the DSP
+rewrites them every audio block), or `ReadOnly-Static` (`vnnb`/`vnbf` the
+rate-derived native grid + `bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`
+build-version / license — read once at session config via `ak_get`, never
+per block). All 64 engine root leaves fall in exactly one bucket; none are
+dropped.
 _Avoid_: param access, settable flag.
 
 ### UI / state vocabulary
 
 **Profile**:
-A user-selectable group of AK parameter overrides plus a selected EQ
-preset id. Factory: Movie, Music, Game, Voice. Custom profiles have no
-category. Exactly one profile is selected at any time.
+The canonical persistence unit — the home for *every* non-readonly AK param
+(the 52 Settable + Experimental), no special cases (structural constants
+included). Stores deltas over `ParameterDef.default`, plus an *optional*
+selected EQ preset. Factory: Movie, Music, Game, Voice; custom profiles have
+no category. Exactly one profile is selected at any time.
 _Avoid_: preset (overloaded with EQ preset), mode.
 
 **EQ preset**:
-A user-selectable IEQ + GEQ curve, global across profiles. Factory: Off,
-Open, Rich, Focused. Each profile stores only the *id* of its currently
-selected EQ preset, not its own copy of the curves.
-_Avoid_: IEQ preset (legacy DDP term — DolbyX generalised IEQ presets to
-own both `iebt` and `gebg`), preset (without "EQ" qualifier — ambiguous
-with Profile).
+An *optional* EQ overlay on top of a profile, global across profiles. Carries
+the full EQ param set — band structure (`genb`/`gebf`/`ienb`/`iebf`), curves
+(`gebg`/`iebt`), enables (`geon`/`ieon`), amount (`iea`). When a profile
+selects one, the preset's EQ params shadow the profile's own; with `None`
+selected, the profile's own EQ params are effective. Editing a preset
+propagates to every profile currently using it. Factory: Open, Rich, Focused.
+_Avoid_: IEQ preset (legacy DDP term), preset (without "EQ" — ambiguous with
+Profile), "Off" preset (replaced by `None`).
 
 **IEQ**:
 "Intelligent EQ" — the engine-driven target curve. Backed by AK params
@@ -68,6 +98,15 @@ with Profile).
 "Graphic EQ" — the user-driven curve. Backed by AK params `gebg[20]` (band
 gains) and `geon` (enable). Edited via the Visualizer/Equalizer overlay
 (see Decision 10).
+
+**Master control**:
+One of the three main-screen controls — Surround Virtualizer
+(`vdhe`+`dhsb`), Dialog Enhancer (`deon`+`dea`), Volume Leveller
+(`dvle`+`dvla`) — each pairing an enable AK param (toggle / tri-state) with an
+amount AK param (slider). A curated UI overlay, *not* an engine-derived
+category or a `ParameterDef` field; the same params also appear in the
+Advanced panel under their feature categories.
+_Avoid_: basic param, basic switch, "Basic panel".
 
 **Originator**:
 The WebSocket client that issued a command. The daemon assigns each WS
@@ -80,16 +119,21 @@ semantics).
 **Bootstrap**:
 `window.__BOOTSTRAP__` — a JSON blob the daemon injects into `index.html`
 at request time. Carries the full `ParameterDef[]` metadata table, the
-initial `State` snapshot, and immutable engine info (version, backend).
-The UI reads it synchronously at module init so the page paints fully
-populated on the first frame, with no pre-paint network round-trip.
+initial `State` snapshot, and the engine backend name. The UI reads it
+synchronously at module init so the page paints fully populated on the
+first frame, with no pre-paint network round-trip. (Engine version is not
+a bootstrap field — it's the `ver` param, a ReadOnly-Static readout.)
 _Avoid_: config, init payload, manifest.
 
-**`vis_suspended`**:
-The pump-emitted flag indicating audio is idle. Latches on after 10
-consecutive empty cmd-4 reads (`VISUALIZER_SUSPENDED_THRESHOLD`) and
-latches off symmetrically. While suspended, `vis` events are suppressed.
-_Avoid_: idle, paused, off (those overload other concepts).
+**`vis` event**:
+The visualizer broadcast — `vc*` gains/excitations (main spectrum + EQ
+curve) plus native `vn*` bands (Advanced live display), emitted once per
+oldest-session `process()` block (the ARM shim piggybacks the arrays on the
+`Process` reply). A pure event stream: no audio → no events. The client
+renders at 60 fps from the latest event and detects idle itself (no event
+for ~200 ms → freeze + fade). No daemon-side pump, cadence, or suspend latch.
+_Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
+(removed — idle is client-side).
 
 **Slice** (architectural):
 A vertical tracer bullet through every layer DolbyX uses (UI · WS ·

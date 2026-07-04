@@ -180,8 +180,8 @@ These 20-band target curves define the spectral "personality":
 | `ocf`                 | Output Channel Format           | STEREO / 5.1 / 7.1                                     |
 | `endp`                | Endpoint                        | SPEAKER / HEADPHONES / HDMI / SPDIF / DLNA / ANALOG    |
 | `vol`                 | Volume                          | System volume level (informs leveler)                  |
-| `vcbe/vcbf/vcbg/vcnb` | Volume Compensation Band params | Additional per-band volume compensation                |
-| `vnbe/vnbf/vnbg/vnnb` | Visualization Band params       | Visualization output configuration                     |
+| `vcnb/vcbf/vcbg/vcbe` | Custom Visualizer Band params   | Per-band visualizer data on a host-set frequency grid (resampled from the native bands) |
+| `vnnb/vnbf/vnbg/vnbe` | Native Visualizer Band params   | The engine's intrinsic-filterbank visualizer output (ground truth; `vc*` resamples it) |
 | `lcmf/lcpt/lcsz/lcvd` | License params                  | SKU verification                                       |
 | `scpe`                | Surround Compressor Enable      | Separate from the profile-level control                |
 | `test`                | Test mode                       | Engineering test flag                                  |
