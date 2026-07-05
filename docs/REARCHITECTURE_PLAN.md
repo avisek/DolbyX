@@ -344,9 +344,9 @@ be reset (overrides cleared) but not deleted or renamed.
 (Decision 7), so it never half-applies. With `None` selected, the
 profile's own EQ params are effective.
 
-**Edit routing.** While a preset is selected, EQ edits land on the preset
-and propagate to every profile currently selecting it; with `None`, they
-land on the profile.
+**Edit routing.** `set_params` writes the active profile; `edit_eq_preset`
+writes the EQ preset — the UI picks which by whether a preset is active. The
+daemon just overlays.
 
 User-visible consequences:
 
@@ -1552,7 +1552,7 @@ entry below passes the deletion test.
 | **`EngineSupervisor`** (`ddp-daemon`) | `start() → Result<()>` · `shutdown()` · session ops mirroring `Engine`. Errors: `EngineCrashed`, `SessionInitFailed`, `SessionNotFound`. | Subprocess respawn on crash, the creation-ordered session list (**main session** = oldest = index 0, Decision 4), session init (`EFFECT_CMD_INIT` → `SET_CONFIG` at the plugin's rate → one `set_params` of the resolved profile → `EFFECT_CMD_ENABLE` — no DEFINE_PARAMS/SETTINGS handshake, [ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)), the `readouts` re-read when the main session changes (`ParameterDef.default` with zero sessions), the vis fan-out (main-session `Process` replies → `vis` events, Decision 10). Param writes and `set_enabled` fan out to every live session (AK registries are per-handle); with zero sessions, no engine call. A session created while power is off starts disabled. | Slice 1 |
 | **`State`** (`ddp-state`) | `State::new_from_defaults(&Defaults)` · `apply(Command) → Result<StateDiff, ValidationError>` · accessor methods for power / selected_profile / profiles / eq_presets. Invariants: `selected_profile` always exists; every `Some` `selected_eq_preset` exists; deleting a referenced EQ preset falls profiles back to `None`. | Factory overlay, `is_factory` derivation from `Defaults` presence, validation against `ParameterDef` (4-CC declared, length matches, value in range), profile / preset CRUD invariants. I/O-free. | Slice 1 (just `power`), grown each slice |
 | **`ParameterDef` table** (`ddp-state`) | `parse(toml: &str) → Result<Vec<ParameterDef>, ParseError>` · `lookup(name: &str) → Option<&ParameterDef>` · `iter() → impl Iterator<…>`. Returned `ParameterDef` carries `name`, `length`, `min`/`max`, `frac_bits`, `default`, `kind`, `category`, `access`, `label`, `description`, `help`. | 64 entries parsed from the runtime `parameters.toml` at daemon startup (malformed → refuse to start), file validation, the four-bucket access classification (see ADR-0004). | Slice 0 (parser), used Slice 1+ |
-| **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`, `MigrationFailed`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), schema migration from v1, debounce timer. | Slice 1 |
+| **`Persistence`** (`ddp-persistence`) | `load(params_path, defaults_path, config_path) → State` · `flush(&State)` (500 ms debounced; debounce shared across all on-disk fields) · `watch(callback)` — `config.toml` only. Errors: `ParseError`. | `parameters.toml` + `defaults.toml` startup loads, the 5-layer cascade (two namespaces), per-item write-back, `notify` watcher on `config.toml`, mtime self-write suppression (1 s quiet window), debounce timer. | Slice 1 |
 | **`HttpServer`** (`ddp-daemon`) | Two routes: `GET /` → bootstrap-injected HTML · `GET /ws` → WebSocket upgrade (handled by `WsServer`). Port from the `--port` CLI flag (default 9876) — not config.toml. | Disk read of the UI HTML (`$(daemon-dir)/index.html`; dev flag points at the checked-in `ui/dev.html`), the `<!--BOOTSTRAP-->` string-replace, `window.__BOOTSTRAP__` JSON serialisation of `params[] + state`, refuse-to-start on a missing/unreadable file. | Slice 1 |
 | **`WsServer` + `WsCommands`** (`ddp-daemon`) | `WsServer::accept(stream)` registers an originator. `WsCommands::dispatch(originator, Command) → Event` typed via `serde`. Errors: `INVALID_REQUEST` (any daemon-side rejection — malformed JSON, unknown ids, param validation) and `ENGINE_REJECTED` (status −22 from engine). | Originator id assignment + echo suppression, `request_id` echo in ack/error, command validation against `ParameterDef`, broadcast routing, full state snapshot on `get_state` and on connect. | Slice 1 |
 | **`AudioServer`** (`ddp-daemon`) | `accept_loop(supervisor) → !`. Plugin protocol: `Hello{sample_rate, max_frames}` → `HelloAck{session_id}` · `Process{frames, pcm}` → `Processed{pcm}` · `Goodbye`. | Per-platform socket accept (Windows named pipe `\\.\pipe\DolbyX` vs Unix `/run/dolbyx/dolbyx.sock`), session-id allocation, audio multiplexing onto the shared engine subprocess. **Two adapters** (named-pipe + AF_UNIX) — real seam. | Slice 10 |
@@ -1909,6 +1909,8 @@ pipeline.
 7. [ ] EQ curve renders as a polyline with rounded joins (not
        Catmull-Rom) per
        [ADR-0008](adr/0008-visualizer-equalizer-rendering-spec.md).
+8. [ ] EQ edits route UI-side: a GEQ drag emits `edit_eq_preset` when a
+       preset is active, else `set_params`.
 
 **Tracer bullet test.** Vitest unit test — feed a known drag trace
 into `GainSmoother`, assert the emitted 20-band write matches a
