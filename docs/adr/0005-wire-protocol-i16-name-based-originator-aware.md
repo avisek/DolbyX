@@ -10,15 +10,15 @@ metadata table. The param surface is batch-only: `set_params`,
 `params: { "<4-CC>": [i16, …] }` — and a single-control edit is a
 1-entry map. Every command carries a client-generated `request_id`,
 echoed in its `ack` / `error`, correlating replies over the
-multiplexed WebSocket. The daemon assigns each WebSocket connection a serial
-originator id at handshake and broadcasts state changes to all clients
-**except** the originator, preventing echo loops in multi-tab scenarios.
-`vis` events (keyed `vnbg` / `vnbe` / `vcbg` / `vcbe`) broadcast
-unconditionally. Validation is asymmetric
-by design: the daemon owns range validation up front and rejects with
+multiplexed WebSocket. The daemon assigns each WebSocket connection a
+serial originator id at handshake and broadcasts state changes to all
+clients **except** the originator, preventing echo loops in multi-tab
+scenarios. `vis` events (keyed `vnbg` / `vnbe` / `vcbg` / `vcbe`)
+broadcast unconditionally. Validation is asymmetric by design: the
+daemon owns range validation up front and rejects with
 `INVALID_REQUEST` — its only rejection code — while engine status
-errors surface as `ENGINE_REJECTED`. The engine *does*
-silently clamp an out-of-range write — but only in its AK registry, to its
+errors surface as `ENGINE_REJECTED`. The engine *does* silently clamp
+an out-of-range write — but only in its AK registry, to its
 own bounds (which differ from the published table for some params), while
 the raw value lingers in the settings cache; see
 [`tools/ddp_probe/`](../../tools/ddp_probe/README.md) section 7 and

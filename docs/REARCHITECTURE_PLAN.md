@@ -255,8 +255,9 @@ live one — sources `vis` events and the readouts (Decision 4).
 
 **Sample rate.** Every session init sends one `EFFECT_CMD_SET_CONFIG`
 (cmd 1) after `INIT`, explicitly setting the session's rate — DolbyX
-never relies on the engine's 44100 Hz power-on default. The engine validates,
-rebuilds its `Ds1ap` at the requested rate, and re-applies the params (see
+never relies on the engine's 44100 Hz power-on default. The engine
+validates, rebuilds its `Ds1ap` at the requested rate, and re-applies
+the params (see
 [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
 This is a lifecycle command, so it stays on the cmd path and supersedes
 v1's manual `Ds1ap::New` hot-swap. The rate arrives in the plugin's
@@ -265,13 +266,13 @@ destroy + re-create — so a session sees exactly one `SET_CONFIG`, at
 init; the daemon carries no default rate of its own. The same
 `SET_CONFIG` pins stereo + PCM16 + **WRITE** output mode (so
 `process()` overwrites, no per-block `memset`). The backend validates
-host-side first, because the engine's
-field checks have two footguns: a rate outside {44100, 48000, 32000}
-**silently falls back to 44100** (still replying success), and a **mono**
-channel mask **poisons the handle** (it tears the graph down before
-rejecting, leaving `Ds1ap` NULL). So the backend rejects non-stereo and
-out-of-set rates up front and never sends mono. It stays behind the
-trait — the `Engine` surface is unchanged.
+host-side first, because the engine's field checks have two footguns:
+a rate outside {44100, 48000, 32000} **silently falls back to 44100**
+(still replying success), and a **mono** channel mask **poisons the
+handle** (it tears the graph down before rejecting, leaving `Ds1ap`
+NULL). So the backend rejects non-stereo and out-of-set rates up front
+and never sends mono. It stays behind the trait — the `Engine` surface
+is unchanged.
 
 Three impls are anticipated, but only one ships in v2.0:
 
@@ -451,10 +452,10 @@ no exceptions: the engine boots **10-band**, so `genb` defaults to 10
 and `gebf` to the 10 ISO octave centres (32 Hz–16 kHz) zero-padded; the
 standard **20-band stereo** config is not a table default — it lives
 once in `defaults.toml`'s shared `[profile]` table (Decision 7).
-`default` is the base
-layer of the persistence cascade: `defaults.toml` and `config.toml`
-store only divergences from it, so the table is the single home for the
-per-param defaults the original DDP repeated in full in every profile.
+`default` is the base layer of the persistence cascade: `defaults.toml`
+and `config.toml` store only divergences from it, so the table is the
+single home for the per-param defaults the original DDP repeated in
+full in every profile.
 
 **Four-bucket settability classification.** This is a deliberate
 deviation from `docs/ddp/02-ak-parameters.md`'s "settable=yes/no"
@@ -480,7 +481,7 @@ engine-level acceptance:
   `lcpt`. Write-protected and fixed between reconfigurations; read once via
   `ak_get` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
   rate-derived, so the readouts re-read when the main session changes
-  (Decision 4). Plain read-only cards in the Advanced panel;
+  (Decision 4). Plain read-only cards in the Advanced panel.
 - **Experimental** (10) — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test`. Editable behind an
@@ -676,14 +677,14 @@ clamped values back via `ak_get`).
 
 **Visualizer source.** `vis` events source from the **main session** —
 the oldest live session, index 0 of the supervisor's creation-ordered
-session list: its `Process` replies carry the
-vis frame the daemon broadcasts (Decision 10). If the main session has
-no audio flowing there are simply no events — no suspended flag; idle
-is client-derived. The source does not switch when the main session
-goes silent — only when it dies, at which point the next-oldest
-becomes main and the daemon re-reads the readouts (the rate-derived
-`vnnb`/`vnbf` may differ) and broadcasts. This keeps the visualiser
-predictable and avoids flicker between sources.
+session list: its `Process` replies carry the vis frame the daemon
+broadcasts (Decision 10). If the main session has no audio flowing
+there are simply no events — no suspended flag; idle is client-derived.
+The source does not switch when the main session goes silent — only
+when it dies, at which point the next-oldest becomes main and the
+daemon re-reads the readouts (the rate-derived `vnnb`/`vnbf` may
+differ) and broadcasts. This keeps the visualiser predictable and
+avoids flicker between sources.
 
 **ReadOnly param updates.** The four ReadOnly-Dynamic params (`vnbg`,
 `vnbe`, `vcbg`, `vcbe`) ride the `vis` event, refreshed per audio block
@@ -833,15 +834,14 @@ Stack:
 - **`solid-js/store`** for state management — built-in `createStore`,
   no third-party state library needed.
 - **Vitest** for unit tests with `@solidjs/testing-library` and a
-  mocked WebSocket. **Playwright** for E2E (lands with Slice 9) against
-  a real daemon
-  driving the real engine (`QemuBackend` + `libdseffect.so`), so the
-  binary protocol, the AK-direct param binding, and lifecycle
-  (`SET_CONFIG`, the enable crossfade) are covered too. `StubBackend` stays in
-  `ddp-engine` for Rust unit/integration tests of daemon command
-  dispatch — see Code quality standards. CI runs `apt-get install
-qemu-user-static` on the Linux image; `libdseffect.so` is bundled in
-  the repo (see Decision 11).
+  mocked WebSocket. **Playwright** for E2E (lands with Slice 9)
+  against a real daemon driving the real engine (`QemuBackend` +
+  `libdseffect.so`), so the binary protocol, the AK-direct param
+  binding, and lifecycle (`SET_CONFIG`, the enable crossfade) are
+  covered too. `StubBackend` stays in `ddp-engine` for Rust
+  unit/integration tests of daemon command dispatch — see Code quality
+  standards. CI runs `apt-get install qemu-user-static` on the Linux
+  image; `libdseffect.so` is bundled in the repo (see Decision 11).
 - **ESLint** with `@typescript-eslint/strict-type-checked` and
   `eslint-plugin-solid`, **Prettier**.
 
@@ -862,7 +862,8 @@ metadata table cannot change for the lifetime of the daemon). The UI
 reads `window.__BOOTSTRAP__` synchronously at module init, hydrates
 the Solid store, and paints the full UI on the first frame. The
 WebSocket then connects in the background; its `state` event reconciles
-any drift between HTML render time and WS connect time (and handles reconnects).
+any drift between HTML render time and WS connect time (and handles
+reconnects).
 
 There is intentionally no `/api/*` endpoint in dev or prod. Bootstrap
 injection is the only mechanism.
@@ -1031,18 +1032,18 @@ ParameterDef.default → defaults.toml shared → defaults.toml [item]
 ```
 
 ("shared" = the namespace's `[profile]` / `[eq_preset]` table keys;
-`[item]` = the `[profile.<id>]` /
-`[eq_preset.<id>]` table.) The two files mirror the original's
-`ds1-default.xml` / `ds1-current.xml` pair; the `ParameterDef.default`
-base and the shared layers are v2 refinements — the original
-repeated the factory defaults in full in every profile, DolbyX factors
-them out. The cascade is resolved at load, so each in-memory profile
-and preset is complete — a profile switch pushes one `SetParams` batch
-(Decision 4), with no per-param fallback. `defaults.toml` also drives
-`reset_profile` and `reset_eq_preset` actions (reset = remove the
-user's overrides). Write-back is **always per-item**: the daemon writes
-params under `[profile.<id>]` / `[eq_preset.<id>]`, never to a shared
-layer — the shared layers are a hand-edit affordance.
+`[item]` = the `[profile.<id>]` / `[eq_preset.<id>]` table.) The two
+files mirror the original's `ds1-default.xml` / `ds1-current.xml`
+pair; the `ParameterDef.default` base and the shared layers are v2
+refinements — the original repeated the factory defaults in full in
+every profile, DolbyX factors them out. The cascade is resolved at
+load, so each in-memory profile and preset is complete — a profile
+switch pushes one `SetParams` batch (Decision 4), with no per-param
+fallback. `defaults.toml` also drives `reset_profile` and
+`reset_eq_preset` actions (reset = remove the user's overrides).
+Write-back is **always per-item**: the daemon writes params under
+`[profile.<id>]` / `[eq_preset.<id>]`, never to a shared layer — the
+shared layers are a hand-edit affordance.
 
 A `notify`-based file watcher subscribes to **`config.toml` only**;
 `defaults.toml` and `parameters.toml` are read once at startup — an
@@ -1264,8 +1265,8 @@ between the two adjacent integer band gains
 (`GraphicEqualizerPainter.translateGaindBToY`).
 
 **Curve source.** The polyline reads from the latest `vis` event's
-`vcbg` array during steady state, and falls back
-to the locally smoothed user buffer while idle (no `vis` events).
+`vcbg` array during steady state, and falls back to the locally
+smoothed user buffer while idle (no `vis` events).
 `vcbg ≠ gebg`: `gebg` is the user's GEQ input parameter, while
 `vcbg` is the composed EQ curve the engine is actually applying
 (`gebg` blended with `iebt` per `ieon`). The overlay must reflect
@@ -2151,9 +2152,8 @@ engine impl for speed and determinism; the daemon's real-engine integration
 test (`ddp-daemon/tests/e2e_qemu.rs`, gated by the `qemu` cargo
 feature) and `ddp-engine`'s `qemu_smoke.rs` exercise the full QEMU +
 `libdseffect.so` path. UI E2E (Playwright, landing with Slice 9)
-drives the real daemon
-with the real engine so the binary protocol and the AK-direct engine
-binding are covered end-to-end.
+drives the real daemon with the real engine so the binary protocol
+and the AK-direct engine binding are covered end-to-end.
 
 **TypeScript**: `strict: true`, `noUncheckedIndexedAccess: true`,
 `exactOptionalPropertyTypes: true`. ESLint with

@@ -138,11 +138,11 @@ _Avoid_: config, init payload, manifest.
 **`vis` event**:
 The visualizer broadcast — a `params` map keyed by 4-CC: `vcbg`/`vcbe`
 (main spectrum + EQ curve) plus native `vnbg`/`vnbe` (Advanced live
-display), emitted once per
-main-session `process()` block (the ARM shim piggybacks the arrays on the
-`Process` reply). A pure event stream: no audio → no events. The client
-renders at 60 fps from the latest event and detects idle itself (no event
-for ~200 ms → freeze + fade). No daemon-side pump, cadence, or suspend latch.
+display), emitted once per main-session `process()` block (the ARM shim
+piggybacks the arrays on the `Process` reply). A pure event stream: no
+audio → no events. The client renders at 60 fps from the latest event
+and detects idle itself (no event for ~200 ms → freeze + fade). No
+daemon-side pump, cadence, or suspend latch.
 _Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
 (removed — idle is client-side).
 
