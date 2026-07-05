@@ -761,7 +761,10 @@ wet→dry (≈125 ms, blocks still return `0`), then bypassed blocks return
 output (`OUT == IN`, verified by `setconfig_probe` Sc9; same for a
 never-enabled session). So the daemon treats enabled, crossfading, and
 bypassed blocks identically — call `process()`, ship the output — with no
-memset and no input→output copy.
+memset and no input→output copy. The vis tail rides every reply the same
+way — the vis feed is **process-driven, not power-gated**: bypassed blocks
+still emit `vis` events (the client renders whatever the engine yields),
+idling only when `process()` stops.
 
 The engine subprocess holds the session table and routes each command to the
 right `effect_handle_t`. For v2.1 (Unicorn backend), this protocol is
@@ -1243,8 +1246,7 @@ feeds the Advanced panel's ReadOnly-Dynamic live cards (Decision 3).
    `excitation_idx(c) ≥ 47 - r`; colour: `r < 12` red, `12 ≤ r < 18`
    yellow, `r ≥ 18` blue (`ROWS_RED = 12`, `ROWS_YELLOW = 6` in
    `GraphicVisualiserPainter.java`). Empty rows render as the dark
-   "off" tile. (A 32 kHz main session's grid is 19 bands — the spare
-   20th column just stays at the floor.)
+   "off" tile.
 4. Level pip — one brighter cyan brick per column at the row for
    the current `vcbg[c]` (the per-column EQ-curve indicator, same
    source as the curve).
