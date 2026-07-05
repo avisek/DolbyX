@@ -823,7 +823,7 @@ The bucket classification lives in
   (no memset needed; DolbyX v2 uses WRITE). See
   [SET_CONFIG](#effect_cmd_set_config-effect-command-1).
 - A **disabled** effect still deposits per accessMode: `EFFECT_CMD_DISABLE`
-  crossfades wet→dry over ≈120 ms (blocks return `0`), then bypassed blocks
+  crossfades wet→dry over ≈125 ms (blocks return `0`), then bypassed blocks
   return `-ENODATA` and write the **dry input** — WRITE gives `OUT == IN`,
   ACCUMULATE adds it (`setconfig_probe` Sc9; a never-enabled effect skips the
   crossfade and bypasses from the first block). A WRITE host thus needs no

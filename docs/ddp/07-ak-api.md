@@ -51,6 +51,11 @@ uint32_t* refs   = *(uint32_t**)((char*)H + 0xb4);         // host's 64 refs, DE
 `refs[i]` is the tagged ref the engine assigned to the i-th name the host sent
 in `DEFINE_PARAMS`. The offsets `0x44` / `0xb4` are specific to this build.
 
+Because `handle` and `refs` hang off the per-effect context `H`, each session
+carries **its own AK registry** — registries are per-handle. (Cross-checked by
+the two-handle probe in `tools/ddp_probe/README.md`: two handles on identical
+histories keep independent cache/registry state.)
+
 ## Refs and `ak_resolve`
 
 A ref is **not a pointer** — it's a tagged path into the AK object tree: the low

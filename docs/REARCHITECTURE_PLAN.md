@@ -247,9 +247,9 @@ re-alignment, only the commit.
 instance: a plugin's `Hello` creates it, its disconnect destroys it,
 and the daemon never creates sessions on its own — zero plugins means
 zero sessions. AK registries are **per-handle**
-([docs/ddp/03](ddp/03-binary-protocol.md)), so the daemon fans every
-param write out to all live sessions; with zero sessions a write is
-state-only and lands on each future session at init (`set_power`
+([docs/ddp/07](ddp/07-ak-api.md#reaching-ak-in-process)), so the daemon
+fans every param write out to all live sessions; with zero sessions a
+write is state-only and lands on each future session at init (`set_power`
 likewise performs no engine call). The **main session** — the oldest
 live one — sources `vis` events and the readouts (Decision 4).
 
@@ -257,7 +257,7 @@ live one — sources `vis` events and the readouts (Decision 4).
 (cmd 1) after `INIT`, explicitly setting the session's rate — DolbyX
 never relies on the engine's 44100 Hz power-on default. The engine
 validates, rebuilds its `Ds1ap` at the requested rate, and re-applies
-the params (see
+the cached AK params (see
 [docs/ddp/03](ddp/03-binary-protocol.md#effect_cmd_set_config-effect-command-1)).
 This is a lifecycle command, so it stays on the cmd path and supersedes
 v1's manual `Ds1ap::New` hot-swap. The rate arrives in the plugin's
@@ -296,7 +296,7 @@ swaps the trait impl and nothing else changes.
 
 ### Decision 2 — Profiles are canonical; EQ presets are an optional overlay
 
-> Persistent record: [ADR-0003 — Global EQ presets](adr/0003-global-eq-presets-and-geq-per-preset.md).
+> Persistent record: [ADR-0003 — Global EQ presets as optional overlays](adr/0003-global-eq-presets-and-geq-per-preset.md).
 
 A clean simplification over the original DDP model.
 
@@ -478,10 +478,13 @@ engine-level acceptance:
   `vcnb`/`vcbf`.
 - **ReadOnly-Static** (8) — the native grid `vnnb`/`vnbf` plus the
   build-version / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
-  `lcpt`. Write-protected and fixed between reconfigurations; read once via
-  `ak_get` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
+  `lcpt`. Effectively read-only and fixed between reconfigurations; read
+  once via `ak_get` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
   rate-derived, so the readouts re-read when the main session changes
-  (Decision 4). Plain read-only cards in the Advanced panel.
+  (Decision 4). Six carry the write-protect flag `0x2`
+  (`vnnb`/`vnbf`/`bver`/`ver`/`bndl`/`lcvd`); `lcmf`/`lcpt` accept writes
+  with no observable effect ([docs/ddp/02](ddp/02-ak-parameters.md)). Plain
+  read-only cards in the Advanced panel.
 - **Experimental** (10) — not exposed by original DDP, but the engine
   treats the slot as a real DSP input: `preg`, `pstg`, `endp`,
   `ocf`, `ven`, `vol`, `vcnb`, `vcbf`, `scpe`, `test`. Editable behind an
@@ -489,24 +492,25 @@ engine-level acceptance:
   (Peak Limiter test mode) are real root leaves Java omits — added here;
   `mxou`, a Java phantom resolving to ref 0, is dropped. See
   [docs/ddp/02](ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves).)
-  Behavioral confirmation that the DSP applies
-  these params (read from the clamped registry, not the raw cache) is in
+  Behavioral confirmation that the DSP applies these params (read from
+  the clamped registry, not the raw cache) is in
   [tools/ddp_probe/](../tools/ddp_probe/README.md) section 7: a `vmb`
-  sweep over `{0, 120, 240, 480}` raises peak/rms up through `vmb=120`,
-  then flattens at the top — `vmb=240` and `vmb=480` both clamp to the
-  engine's `vmb` max of 192 (read back via `ak_get` in #2/#9). The decisive
-  proof in the same section is a direct cache poke (registry frozen) the
-  DSP ignores. A `dvla` sweep confirms the leveler also varies and
-  collapses the same way (`dvla=10` and `dvla=200` give identical output,
-  both clamped to 10). The same
-  forwarding path applies to every Experimental param — cmd 3 SET
-  fires `ak_set(idx/name, offset) = V` regardless of bucket
-  (section 5b), so a host that drives `endp`, `vol`, etc. gets
-  the same DSP-input semantics. (`vol` is a host volume hint the leveler reads;
-  `vcnb`/`vcbf` configure custom-visualizer mode when `ven` is
-  `ON`. The libdseffect.so `preg` description string says "this
-  parameter should be set to reflect how much gain has been
-  applied".)
+  sweep over `{0, 120, 240, 480}` moves peak/rms — sweep peaks are trends,
+  not exact — with `vmb=240` and `vmb=480` collapsing onto the same
+  output because both clamp to the engine's `vmb` max of 192 (read back
+  via `ak_get` in #2/#9). The decisive proof in the same section is a
+  direct cache poke (registry frozen) the DSP ignores. A `dvla` sweep
+  confirms the leveler also varies and collapses the same way (`dvla=10`
+  and `dvla=200` give identical output, both clamped to 10). The same
+  forwarding path applies to every Experimental param — cmd 3 SET fires
+  `ak_set(idx/name, offset) = V` regardless of bucket (section 5b), so a
+  host that drives `endp`, `vol`, etc. gets the same DSP-input semantics.
+  (`vol` is a host volume hint the leveler reads; `ven` is a single
+  enable gating the fills of both the `vn*` and `vc*` families —
+  `vcnb`/`vcbf` just define the host-writable custom band grid onto which
+  `vn*` is resampled to produce `vc*`, not a separate "mode". The
+  libdseffect.so `preg` description string says "this parameter should be
+  set to reflect how much gain has been applied".)
 
 **`aobg` layout.** The static `329` declared in
 `DsAkSettings.akParams_[22]` is the engine's **worst-case max** =
@@ -648,13 +652,16 @@ saying why. On any `error` the client re-issues `get_state` to
 reconcile.
 
 _Engine-side_ (validates a very narrow set of things): the engine
-checks only (a) `setting_index` range against the cache size, (b)
+checks (a) `setting_index` range against the cache size, (b)
 value-buffer-size mismatch, and (c) cmd-code recognition (and even
 that is asymmetric — cmd 3 GET is always rejected because it isn't
-implemented; see Decision 4 protocol table below). It returns
-`-EINVAL(-22)` for any of these, surfaced as
+implemented; see Decision 4 protocol table below) — these return
+`-EINVAL(-22)`, surfaced as
 `{ "type": "error", "code": "ENGINE_REJECTED", "request_id": "...",
-"status": -22, "message": "..." }`. The engine does **NOT** *reject*
+"status": -22, "message": "..." }`. Malformed command data (psize ≠ 4
+or a missing payload) returns `-1(-EPERM)` instead, and a write to a
+write-protected leaf is a **silent no-op** (`ak_set` stores nothing, no
+error). The engine does **NOT** *reject*
 out-of-range values, does **NOT** reject unknown 4-CCs in DEFINE_PARAMS,
 does **NOT** reject non-zero offsets in DEFINE_SETTINGS — direct evidence
 from [tools/ddp_probe/](../tools/ddp_probe/README.md) and the engine
@@ -694,8 +701,11 @@ re-read when a different session becomes main; with zero sessions they
 are implicitly the `ParameterDef.default` values, and real sampling
 starts with the first session. Both paths use the AK-direct binding
 ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the engine has no
-cmd 3 GET, so AK-direct is what makes a real read possible (v1's only read
-path was cmd 4 `DS_PARAM_VISUALIZER_DATA`, visualizer-only). Experimental
+cmd 3 GET, so AK-direct is what makes a real param read possible. (v1 tried
+to read params via cmd 3 GET — the engine rejects it with `-EINVAL`, and v1
+swallowed that and shipped zero-fill. The engine's actual GET paths are cmd 4
+`DS_PARAM_VISUALIZER_DATA` (visualizer state), cmd 6 (version), and cmd 7
+(echoes a host-written boolean) — none a general param read.) Experimental
 params update through the regular state-snapshot path since the daemon
 owns the write side.
 
@@ -746,7 +756,7 @@ output buffer — **no per-block zeroing** (v1 used ACCUMULATE, which required
 a `memset` before every call). It still **clobbers its own input buffer**
 (enabled or disabled), so the daemon keeps a scratch copy when it needs the
 original PCM. **Disable is engine-owned:** on `DISABLE` the engine crossfades
-wet→dry (≈120 ms, blocks still return `0`), then bypassed blocks return
+wet→dry (≈125 ms, blocks still return `0`), then bypassed blocks return
 `-ENODATA` and — in WRITE mode — deposit the dry input straight into the
 output (`OUT == IN`, verified by `setconfig_probe` Sc9; same for a
 never-enabled session). So the daemon treats enabled, crossfading, and
