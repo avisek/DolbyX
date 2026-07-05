@@ -29,10 +29,21 @@ in persistence. Stable across reorderings of the metadata table.
 _Avoid_: param id, key, code.
 
 **Session**:
-An `effect_handle_t` inside the engine subprocess; one per audio stream.
-Created by `Engine::create_session`, destroyed by `destroy_session`. The
-shared engine subprocess multiplexes many sessions.
+An `effect_handle_t` inside the engine subprocess; one per plugin
+instance — the plugin's `Hello` creates it (`Engine::create_session`),
+its disconnect destroys it. The daemon never creates sessions on its
+own: zero plugins = zero sessions. The shared engine subprocess
+multiplexes many sessions; the sample rate is fixed at creation for
+the session's lifetime.
 _Avoid_: stream, connection, instance.
+
+**Main session**:
+The oldest live session — index 0 of the supervisor's creation-ordered
+list. Sources `vis` events and the ReadOnly-Static `readouts`; when it
+dies the next-oldest becomes main and the readouts re-read (the
+rate-derived native grid may differ). With zero sessions, readouts
+fall back to `ParameterDef.default`.
+_Avoid_: oldest session, control session, primary session.
 
 **Native grid** (`vnnb` / `vnbf`):
 The visualizer's intrinsic band layout — count (`vnnb`) + centre frequencies
@@ -118,20 +129,20 @@ semantics).
 
 **Bootstrap**:
 `window.__BOOTSTRAP__` — a JSON blob the daemon injects into `index.html`
-at request time. Carries the full `ParameterDef[]` metadata table, the
-initial `State` snapshot, and the engine backend name. The UI reads it
-synchronously at module init so the page paints fully populated on the
-first frame, with no pre-paint network round-trip. (Engine version is not
-a bootstrap field — it's the `ver` param, a ReadOnly-Static readout.)
+at request time. Carries the full `ParameterDef[]` metadata table and the
+initial `State` snapshot. The UI reads it synchronously at module init
+so the page paints fully populated on the first frame, with no pre-paint
+network round-trip.
 _Avoid_: config, init payload, manifest.
 
 **`vis` event**:
-The visualizer broadcast — `vc*` gains/excitations (main spectrum + EQ
-curve) plus native `vn*` bands (Advanced live display), emitted once per
-oldest-session `process()` block (the ARM shim piggybacks the arrays on the
-`Process` reply). A pure event stream: no audio → no events. The client
-renders at 60 fps from the latest event and detects idle itself (no event
-for ~200 ms → freeze + fade). No daemon-side pump, cadence, or suspend latch.
+The visualizer broadcast — a `params` map keyed by 4-CC: `vcbg`/`vcbe`
+(main spectrum + EQ curve) plus native `vnbg`/`vnbe` (Advanced live
+display), emitted once per main-session `process()` block (the ARM shim
+piggybacks the arrays on the `Process` reply). A pure event stream: no
+audio → no events. The client renders at 60 fps from the latest event
+and detects idle itself (no event for ~200 ms → freeze + fade). No
+daemon-side pump, cadence, or suspend latch.
 _Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
 (removed — idle is client-side).
 

@@ -391,10 +391,10 @@ For DolbyX v2 it's the daemon's in-memory state plus the persisted
 
 > **Implication for DolbyX v2**: there's no cmd 3 GET, but v2's AK-direct
 > binding ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md))
-> provides a *real* per-param GET via `ak_get` (next section), surfaced as
-> the `GetParam` / `GetParams` opcodes. The visualizer arrays ride every
-> `Process` reply (a shim-local `ak_get` per block), not cmd 4 — so v2
-> doesn't use cmd 4 at all.
+> provides a *real* per-param GET via `ak_get` (next section), surfaced
+> as the `GetParams` opcode. The visualizer arrays ride every `Process`
+> reply (a shim-local `ak_get` per block), not cmd 4 — so v2 doesn't
+> use cmd 4 at all.
 
 ## The AK registry read path
 
@@ -440,7 +440,7 @@ What it establishes (see [ddp_probe](../../tools/ddp_probe/README.md) #9):
   idempotent same-value rewrite, so this bounds what *changes*, not every
   slot the DSP writes.)
 
-v2 exposes this to the daemon as the `GetParam` opcode over the
+v2 exposes this to the daemon as the `GetParams` opcode over the
 [binary protocol](../REARCHITECTURE_PLAN.md) (the AK-direct binding,
 [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)), giving a true
 read-back (verification, defaults, engine-computed state) on top of the
