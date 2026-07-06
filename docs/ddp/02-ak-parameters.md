@@ -40,6 +40,8 @@ version of that array with explanatory annotations.
   `int16 = round(dB × 16)`. So a +6 dB setting is stored as `+96`.
   This 1/16 dB resolution applies uniformly to gains, leveler targets,
   visualizer outputs, and more — see `DsProfileSettings.DB_SCALING_FACTOR`.
+  The engine's own description strings confirm it: "The gains are scaled by
+  16 ie. 16 = 1 dB." and "The values are in dB scaled by 16."
 - **settable**: whether the parameter is exposed for writes via the
   Java AIDL API (`setSingleSetting` / `setProfileSettings` /
   `setDsApParam`). Source: `DsAkSettings.isParamSettable`. **This is a
@@ -87,7 +89,10 @@ See "Recommendation for DolbyX v2" below.
 > cannot be changed via the public AK API. They are read off the engine's
 > internal defaults. DolbyX's CLI-provided pre/post gain in
 > `ddp_processor.c` is applied _outside_ the engine on host-side
-> floats, which is independent of these AK parameters.
+> floats, which is independent of these AK parameters. The binary's `preg`
+> description string reads: "If the audio entering the Audio Processing
+> Platform is known to have been boosted or attenuated, this parameter
+> should be set to reflect how much gain has been applied."
 
 ### Headphone virtualizer (Dolby Headphone)
 
