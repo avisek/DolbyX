@@ -459,9 +459,9 @@ engine-level acceptance:
 - **ReadOnly-Static** (8) — the native grid `vnnb`/`vnbf` plus the
   build-version / license slots `bver`, `bndl`, `ver`, `lcmf`, `lcvd`,
   `lcpt`. Effectively read-only and fixed between reconfigurations; read
-  once via `ak_get` / `ak_get_bulk` after the session's `SET_CONFIG` — `vnnb`/`vnbf` are
-  rate-derived, so the readouts re-read when the main session changes
-  (Decision 4). Six carry the write-protect flag `0x2`
+  once via `ak_get` / `ak_get_bulk` after the session's `SET_CONFIG` —
+  `vnnb`/`vnbf` are rate-derived, so the readouts re-read when the main
+  session changes (Decision 4). Six carry the write-protect flag `0x2`
   (`vnnb`/`vnbf`/`bver`/`ver`/`bndl`/`lcvd`); `lcmf`/`lcpt` accept writes
   with no observable effect ([docs/ddp/02](ddp/02-ak-parameters.md)). Plain
   read-only cards in the Advanced panel.
@@ -676,10 +676,10 @@ avoids flicker between sources.
 **ReadOnly param updates.** The four ReadOnly-Dynamic params (`vnbg`,
 `vnbe`, `vcbg`, `vcbe`) ride the `vis` event, refreshed per audio block
 (Decision 9). The eight ReadOnly-Static params surface in the snapshot's
-`readouts` map — read from the main session via `ak_get` / `ak_get_bulk` at its init,
-re-read when a different session becomes main; with zero sessions they
-are implicitly the `ParameterDef.default` values, and real sampling
-starts with the first session. Both paths use the AK-direct binding
+`readouts` map — read from the main session via `ak_get` / `ak_get_bulk`
+at its init, re-read when a different session becomes main; with zero
+sessions they are implicitly the `ParameterDef.default` values, and real
+sampling starts with the first session. Both paths use the AK-direct binding
 ([ADR-0010](adr/0010-ak-direct-params-cmd-lifecycle.md)); the engine has no
 cmd 3 GET, so AK-direct is what makes a real param read possible. (v1 tried
 to read params via cmd 3 GET — the engine rejects it with `-EINVAL`, and v1
