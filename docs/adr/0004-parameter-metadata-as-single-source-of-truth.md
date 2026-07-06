@@ -13,7 +13,7 @@ serialization, UI widget generation, range validation, display scaling
 (uniform `frac_bits`: display = raw / 2^`frac_bits`) — derives from
 this table.
 
-Access is a four-bucket classification reflecting DSP semantics + UI
+Settability is a four-bucket classification reflecting DSP semantics + UI
 presentation, not engine-level acceptance (empirically the engine
 accepts cmd 3 SET against any declared parameter regardless of Java's
 `isParamSettable` whitelist; [`tools/ddp_probe/`](../../tools/ddp_probe/README.md)):

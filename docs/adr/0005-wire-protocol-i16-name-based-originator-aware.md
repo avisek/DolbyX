@@ -23,5 +23,5 @@ own bounds (which differ from the published table for some params), while
 the raw value lingers in the settings cache; see
 [`tools/ddp_probe/`](../../tools/ddp_probe/README.md) section 7 and
 [ddp/03 → Engine validation behavior](../ddp/03-binary-protocol.md#engine-validation-behavior).
-Host-side validation keeps behaviour predictable instead of relying on that
+Host-side validation keeps behavior predictable instead of relying on that
 hidden clamp.

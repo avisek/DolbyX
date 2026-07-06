@@ -4,7 +4,7 @@ DolbyX is a cross-platform wrapper around the Android Dolby Digital Plus
 `libdseffect.so` engine, exposing it to desktop audio hosts via a Rust
 daemon, a Solid-based Web UI, and platform-native plugins.
 
-**Goal.** Match the original DDP's default behaviour, look, and feel
+**Goal.** Match the original DDP's default behavior, look, and feel
 out of the box, then extend its capabilities beyond the original and
 simplify where possible.
 
@@ -81,6 +81,30 @@ per block). All 64 engine root leaves fall in exactly one bucket; none are
 dropped.
 _Avoid_: param access, settable flag.
 
+**Commit leaf**:
+The last payload array of a structural-param group (`gebg` GEQ, `iebt` IEQ,
+`aobg` Audio Optimizer, `arbh` Audio Regulator). The engine stages a group's
+structural edits and re-derives its filterbank only when the commit leaf is
+re-written, so the shim touches it after any structural change (**touch =
+commit** — fires even unchanged). Shim-internal, not a `ParameterDef` field
+([ADR-0010](docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
+_Avoid_: trigger param, commit param.
+
+**Structural param**:
+An AK param that reshapes a feature's filterbank — band count + centre
+frequencies (`genb`/`gebf`, `ienb`/`iebf`, `aonb`/`aocc`/`aobf`,
+`arnb`/`arbf`). Staged and applied only on the group's **commit leaf** write;
+storage is fixed-capacity (40), so a count change commits without re-aligning
+arrays. Profile-owned — also called *structural constants* where they sit
+fixed in a profile's config.
+
+**Vis tail** / **`VisFrame`**:
+The four ReadOnly-Dynamic arrays (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`, 4 × 20 i16 =
+160 bytes) the ARM shim appends to every `Process` reply via local
+`ak_get_bulk` (one per array) — riding the audio, no separate call. Surfaced
+at the `Engine` trait as `VisFrame`; the daemon turns each into one `vis` event.
+_Avoid_: vis packet; visualizer data (see `vcbg`/`vcbe`).
+
 ### UI / state vocabulary
 
 **Profile**:
@@ -100,6 +124,13 @@ selected, the profile's own EQ params are effective. Editing a preset
 propagates to every profile currently using it. Factory: Open, Rich, Focused.
 _Avoid_: IEQ preset (legacy DDP term), preset (without "EQ" — ambiguous with
 Profile), "Off" preset (replaced by `None`).
+
+**Factory item** (`is_factory`):
+A profile or EQ preset whose id appears in `defaults.toml`. Derived at load,
+never stored (an id only in `config.toml` is custom). Factory items can be
+reset to bundled defaults but not deleted or renamed. Factory profiles: Movie,
+Music, Game, Voice; factory EQ presets: Open, Rich, Focused.
+_Avoid_: built-in, default item, preset flag.
 
 **IEQ**:
 "Intelligent EQ" — the engine-driven target curve. Backed by AK params
@@ -137,7 +168,7 @@ _Avoid_: config, init payload, manifest.
 
 **`vis` event**:
 The visualizer broadcast — a `params` map keyed by 4-CC: `vcbg`/`vcbe`
-(main spectrum + EQ curve) plus native `vnbg`/`vnbe` (Advanced live
+(EQ curve + spectrum) plus native `vnbg`/`vnbe` (Advanced live
 display), emitted once per main-session `process()` block (the ARM shim
 piggybacks the arrays on the `Process` reply). A pure event stream: no
 audio → no events. The client renders at 60 fps from the latest event
@@ -145,6 +176,14 @@ and detects idle itself (no event for ~200 ms → freeze + fade). No
 daemon-side pump, cadence, or suspend latch.
 _Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
 (removed — idle is client-side).
+
+**Readouts**:
+The eight ReadOnly-Static values in the state snapshot's `readouts` map, keyed
+by 4-CC — the rate-derived native grid (`vnnb`/`vnbf`) plus the build-version /
+license slots (`bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`). Read from the main
+session via `ak_get`, `ParameterDef.default` while no session exists; `ver`
+renders as the formatted engine version (e.g. `2.0.4.0`).
+_Avoid_: static params, version blob.
 
 **Slice** (architectural):
 A vertical tracer bullet through every layer DolbyX uses (UI · WS ·
