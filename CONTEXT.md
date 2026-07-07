@@ -48,10 +48,9 @@ _Avoid_: oldest session, control session, primary session.
 **Native grid** (`vnnb` / `vnbf`):
 The visualizer's intrinsic band layout — count (`vnnb`) + centre frequencies
 (`vnbf`), read-only and **rate-derived**: the engine selects it from the
-sample rate (20 bands @48k/44.1k, 19 @32k), re-derived on (re)configuration,
-not per block. The custom grid (`vcnb`/`vcbf`) seeds from it; `vnbg`/`vnbe`
-are the per-block measurements taken on it (see
-[docs/ddp/02](docs/ddp/02-ak-parameters.md)).
+sample rate, re-derived on (re)configuration, not per block. The custom
+grid (`vcnb`/`vcbf`) seeds from it; `vnbg`/`vnbe` are the per-block
+measurements taken on it (see [docs/ddp/02](docs/ddp/02-ak-parameters.md)).
 _Avoid_: "native bands" (ambiguous with the per-block `vnbg`/`vnbe` data).
 
 **`vcbg` / `vcbe`**:
@@ -76,8 +75,8 @@ The classification of an AK parameter into one of four:
 `ReadOnly-Dynamic` (`vnbg`/`vnbe`/`vcbg`/`vcbe` — write-protected, the DSP
 rewrites them every audio block), or `ReadOnly-Static` (`vnnb`/`vnbf` the
 rate-derived native grid + `bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`
-build-version / license — read once at session config via `ak_get`, never
-per block). All 64 engine root leaves fall in exactly one bucket; none are
+build-version / license — read once at session config via `ak_get_bulk`,
+never per block). All 64 engine root leaves fall in exactly one bucket; none are
 dropped.
 _Avoid_: param access, settable flag.
 
@@ -110,8 +109,9 @@ _Avoid_: vis packet; visualizer data (see `vcbg`/`vcbe`).
 **Profile**:
 The canonical persistence unit — the home for *every* non-readonly AK param
 (the 52 Settable + Experimental), no special cases (structural constants
-included). Stores deltas over `ParameterDef.default`, plus an *optional*
-selected EQ preset. Factory: Movie, Music, Game, Voice; custom profiles have
+included). Persists only its divergences (in `config.toml`, over whatever
+resolves beneath it), plus an *optional* selected EQ preset. Factory: Movie,
+Music, Game, Voice; custom profiles have
 no category. Exactly one profile is selected at any time.
 _Avoid_: preset (overloaded with EQ preset), mode.
 
@@ -151,10 +151,11 @@ Advanced panel under their feature categories.
 _Avoid_: basic param, basic switch, "Basic panel".
 
 **Originator**:
-The WebSocket client that issued a command. The daemon assigns each WS
-connection a serial id at handshake and suppresses broadcasting the
-resulting state change back to this client, preventing echo loops in
-multi-tab scenarios.
+The connection that issued the command currently being handled. The daemon
+excludes it from the state fan-out — its own `ack` already confirms the
+change — while broadcasting to the others; an internal `ConnId`, never on
+the wire. Protects the originator's in-flight edits (e.g. a live slider
+drag) from a lagging echo.
 _Avoid_: sender, source, client (those don't carry the suppression
 semantics).
 
@@ -181,7 +182,7 @@ _Avoid_: visualizer data (see `vcbg`/`vcbe`), `vis_suspended` / suspended
 The eight ReadOnly-Static values in the state snapshot's `readouts` map, keyed
 by 4-CC — the rate-derived native grid (`vnnb`/`vnbf`) plus the build-version /
 license slots (`bver`/`bndl`/`ver`/`lcmf`/`lcvd`/`lcpt`). Read from the main
-session via `ak_get`, `ParameterDef.default` while no session exists; `ver`
+session via `ak_get_bulk`, `ParameterDef.default` while no session exists; `ver`
 renders as the formatted engine version (e.g. `2.0.4.0`).
 _Avoid_: static params, version blob.
 

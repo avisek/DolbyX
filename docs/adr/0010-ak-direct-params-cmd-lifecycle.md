@@ -2,8 +2,10 @@
 
 The ARM engine shim binds to `libdseffect.so` two ways, split by surface.
 **Parameters** (read / write / batch) go through the engine's exported AK
-accessors — `ak_find` (4-CC → ref), `ak_set` / `ak_set_bulk` (write),
-`ak_get` / `ak_get_bulk` (read) — *not* the cmd protocol's DEFINE_PARAMS +
+accessors — `ak_find` (4-CC → ref) plus the bulk pair `ak_set_bulk`
+(write) / `ak_get_bulk` (read), stride 4; a scalar `ak_set` / `ak_get` is
+just a count=1 bulk call on the same clamp+store core, so the shim binds
+only the bulk pair — *not* the cmd protocol's DEFINE_PARAMS +
 DEFINE_SETTINGS handshake and cmd 2 / 3 / 4. **Lifecycle** (EffectCreate, INIT,
 SET_CONFIG, ENABLE / DISABLE, `process`) stays on the cmd protocol; the
 engine version is the `ver` param, read via the same AK path.
@@ -24,7 +26,7 @@ plus a settings-cache write the DSP ignores.
 
 Going AK-direct on the param surface drops the init handshake; drops the
 flat-index table (and with it the `begin + count` straddle bug — `ddp_probe`
-#8b); gives a **real per-param GET** via `ak_get` (the clamped value the DSP
+#8b); gives a **real per-param GET** via `ak_get_bulk` (the clamped value the DSP
 actually uses — the engine has no cmd 3 GET, so [ADR-0002](0002-backend-agnostic-engine-qemu-default.md)'s
 original daemon-mirror-only read story is superseded); exposes authoritative metadata
 (`ak_get_min`/`max`/`length`/`type`/`flags` + name/description strings) for free;
@@ -32,9 +34,9 @@ is name-based natively; and simplifies the future Unicorn backend (fewer, leaner
 ARM entry points, no `effect_param_t` marshalling). The blast radius is the shim
 only — the `Engine` trait and the daemon↔subprocess protocol stay name-based,
 gaining `get_params` (and the `GetParams` opcode)
-now that a read is a single `ak_get` / `ak_get_bulk`. This also folds the
+now that a read is a single `ak_get_bulk`. This also folds the
 visualizer in: the shim appends the four ReadOnly-Dynamic arrays
-(`vnbg vnbe vcbg vcbe`, a local `ak_get` per block) to every `Process`
+(`vnbg vnbe vcbg vcbe`, a local `ak_get_bulk` per block) to every `Process`
 reply, so v2 needs no cmd-4 visualizer call — the vis frame rides the
 audio.
 
@@ -79,10 +81,10 @@ The quirk is hidden **inside the shim**, never above it. `set_params`
 owns a static 4-group → commit-leaf map — engine-binding knowledge, versioned with
 the binary, *not* a column in the `ParameterDef` table ([ADR-0004](0004-parameter-metadata-as-single-source-of-truth.md)),
 which is product metadata. After staging a batch's writes, the shim re-writes each
-touched group's commit leaf once, with its current value (a local `ak_get`) unless
+touched group's commit leaf once, with its current value (a local `ak_get_bulk`) unless
 the batch already carried it — **touch = commit**. So a 1-entry `set_params` of
 `genb` commits on its own; the daemon, the `Engine` trait, and `ParameterDef` never
-mention commit leaves. No daemon↔engine round-trip — the `ak_get` is local to the
+mention commit leaves. No daemon↔engine round-trip — the `ak_get_bulk` is local to the
 shim. And storage is fixed-capacity-40: a count change never zeroes the
 out-of-range slots ([`reshape_probe` finding D](../../tools/ddp_probe/README.md#reshape_probe--runtime-reshape-of-structural-constants-make-reshape)),
 so there is no array re-alignment to do — the leaf touch is the whole rule.

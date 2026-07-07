@@ -13,8 +13,11 @@ other key in the `[profile]` / `[eq_preset]` table is shared by
 Resolution is a five-layer cascade — `ParameterDef.default →
 defaults.toml shared → defaults.toml item → config.toml shared →
 config.toml item` — and a param absent everywhere resolves to its
-`ParameterDef.default`. Write-back is always per-item: the shared
-layers are a hand-edit affordance the daemon never writes. `is_factory`
+`ParameterDef.default`. Write-back is always per-item and sparse by base:
+`defaults.toml` stores deltas over `ParameterDef.default`, while
+`config.toml` stores only what diverges from whatever resolves beneath it
+— so a fresh install (nothing diverged) writes an **empty** `config.toml`.
+The shared layers are a hand-edit affordance the daemon never writes. `is_factory`
 is derived at load time from `defaults.toml` presence, not stored on
 disk.
 

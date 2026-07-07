@@ -226,8 +226,11 @@ This probe disturbs it:
   while the native pair holds to **≈8** (smoother noise); `vcbg`==`vnbg` collapses
   to 1/20. So `vc*` is `vn*` resampled, not a copy.
 - **C. Change the rate, the native grid moves.** `SET_CONFIG` to 48k/44.1k/32k
-  and re-read: `vnnb`/`vnbf` flip to the engine's rate-indexed array — **20/20/19**
-  bands — proving the native grid is rate-derived, not host-set and not per-block.
+  and re-read: `vnnb`/`vnbf` flip to the engine's rate-indexed `.constdata` array
+  — **20/20/19** bands — proving the native grid is rate-derived, not host-set and
+  not per-block. The arrays stay **20-wide** at every rate; only `vnnb` of each is
+  live, and at 32k the unused 20th slot is *stale, not zeroed* (`vnbf[19]`=0 but
+  `vnbg[19]`/`vnbe[19]` keep junk) — so gate on `vnnb`.
 
 Neither family is redundant: `vn*` is the zero-config ground truth, `vc*` the
 host-configurable view. See
