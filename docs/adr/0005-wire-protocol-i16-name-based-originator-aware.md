@@ -10,9 +10,9 @@ metadata table. The param surface is batch-only: the write commands
 shape — `params: { "<4-CC>": [i16, …] }` — and a single-control edit is a
 1-entry map. `set_profile` is global; `set_eq_preset { profile_id, id }`
 names its target because EQ selection is per-profile. Every command
-carries a client-generated `request_id`,
-echoed in its `ack` / `error`, correlating replies over the
-multiplexed WebSocket. While handling a command from one connection, the
+carries a client-generated `request_id`, echoed in its `ack` / `error`,
+correlating replies over the multiplexed WebSocket. While handling a
+command from one connection, the
 daemon broadcasts the resulting state to every connection **except** that
 one — no wire id, no handshake, just an internal `ConnId` skipped in the
 fan-out. This protects the originator's in-flight edits (a live GEQ/slider

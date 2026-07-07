@@ -111,8 +111,8 @@ The canonical persistence unit — the home for *every* non-readonly AK param
 (the 52 Settable + Experimental), no special cases (structural constants
 included). Persists only its divergences (in `config.toml`, over whatever
 resolves beneath it), plus an *optional* selected EQ preset. Factory: Movie,
-Music, Game, Voice; custom profiles have
-no category. Exactly one profile is selected at any time.
+Music, Game, Voice; custom profiles have no category. Exactly one profile is
+selected at any time.
 _Avoid_: preset (overloaded with EQ preset), mode.
 
 **EQ preset**:

@@ -204,8 +204,8 @@ below, the ENABLE/DISABLE crossfade) that the bare AK framework calls
 don't reproduce.
 
 `get_params` is therefore real, not synthesized: it batch-reads N
-params in one round-trip (the shim loops `ak_get_bulk` — count = each
-leaf's `ParameterDef.length`, scalars a count=1 read) and
+params in one round-trip (the shim loops `ak_get_bulk`, count = each
+leaf's `ParameterDef.length`) and
 returns the live **clamped** registry values the DSP uses — more
 truthful than a write mirror. The daemon still owns its state model for
 persistence and broadcast (and serves the WebSocket state snapshot from
@@ -672,7 +672,7 @@ implemented; see Decision 4 protocol table below) — these return
 `{ "type": "error", "code": "ENGINE_REJECTED", "request_id": "...",
 "status": -22, "message": "..." }`. Malformed command data (psize ≠ 4
 or a missing payload) returns `-1(-EPERM)` instead, and a write to a
-write-protected leaf is a **silent no-op** (`ak_set` stores nothing, no
+write-protected leaf is a **silent no-op** (`ak_set_bulk` stores nothing, no
 error). The engine does **NOT** *reject*
 out-of-range values, does **NOT** reject unknown 4-CCs in DEFINE_PARAMS,
 does **NOT** reject non-zero offsets in DEFINE_SETTINGS — direct evidence
@@ -1070,8 +1070,7 @@ within a 1 s quiet window.
 
 Schema notes:
 
-- The root carries only `power` + `selected_profile`, each written to
-  `config.toml` only when it diverges from factory — no `[state]` table
+- The root carries only `power` + `selected_profile` — no `[state]` table
   header, no root param keys.
 - Profiles and EQ presets are keyed by id using table-per-id syntax
   (`[profile.music]`, `[eq_preset.rich]`), not array-of-tables. The id
