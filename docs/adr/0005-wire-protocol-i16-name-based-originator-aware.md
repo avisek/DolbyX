@@ -18,14 +18,12 @@ one — no wire id, no handshake, just an internal `ConnId` skipped in the
 fan-out. This protects the originator's in-flight edits (a live GEQ/slider
 drag) from a lagging echoed snapshot; its own `ack` is the authoritative
 confirmation. `vis` events (keyed `vnbg` / `vnbe` / `vcbg` / `vcbe`)
-broadcast unconditionally. Validation is asymmetric by design: the
-daemon owns range validation up front and rejects with
-`INVALID_REQUEST` — its only rejection code — while engine status
-errors surface as `ENGINE_REJECTED`. The engine *does* silently clamp
-an out-of-range write — but only in its AK registry, to its
-own bounds (which differ from the published table for some params), while
-the raw value lingers in the settings cache; see
+broadcast unconditionally. Validation is asymmetric by design: the daemon
+owns range validation up front and rejects with `INVALID_REQUEST` — its only
+rejection code — while engine status errors surface as `ENGINE_REJECTED`.
+The engine *does* silently clamp an out-of-range write — silently, to its own
+AK-registry bounds; see
 [`tools/ddp_probe/`](../../tools/ddp_probe/README.md) section 7 and
 [ddp/03 → Engine validation behavior](../ddp/03-binary-protocol.md#engine-validation-behavior).
-Host-side validation keeps behavior predictable instead of relying on that
+Host-side validation keeps behavior predictable rather than relying on that
 hidden clamp.

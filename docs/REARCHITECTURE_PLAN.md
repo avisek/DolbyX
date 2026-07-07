@@ -574,16 +574,12 @@ state-change broadcasts.
 
 **Originator-aware broadcast.** While handling a command from connection
 *C*, the daemon broadcasts the resulting `state` to every connection
-**except *C***. There is no wire-level id and no handshake — the daemon
-holds *C*'s connection handle during dispatch and skips it in the fan-out
-(an internal monotonic `ConnId` tags connections purely for this
-exclusion; clients never see it). This isn't about a feedback loop — it
-protects the originator's own **in-flight edits**: the decisive case is a
-continuous GEQ/slider drag, where an echoed snapshot lags the local drag
-by a round-trip and would fight it (re-triggering the inverse-smoother
-every frame). The originator's authoritative feedback is the
-request-matched `ack`; the `state` broadcast informs the *other* clients.
-`vis` events broadcast to everyone (see
+**except *C*** — no wire id, no handshake, just an internal `ConnId`
+skipped in the fan-out. This isn't echo-loop avoidance: it protects *C*'s
+own **in-flight edits**. The decisive case is a continuous GEQ/slider
+drag, where a round-trip-lagged snapshot would fight the local drag. *C*'s
+authoritative feedback is the request-matched `ack`; the broadcast informs
+the *other* clients. `vis` events go to everyone (see
 [docs/ddp/04-ui-data-flow.md](ddp/04-ui-data-flow.md#originator-handle-echo-suppression)).
 
 Commands (client → daemon):
@@ -614,11 +610,11 @@ EQ preset); `edit_*` writes a param-map to a named item; `add` /
 client-generated `request_id`, echoed verbatim in the resulting `ack` /
 `error` — replies on a multiplexed WebSocket aren't positionally paired
 with requests, so the id is what lets a client (or a test) await its
-outcome, promise-style. `edit_profile` and `edit_eq_preset` are the two
-param-write commands; both funnel into the trait's single `set_params`
-batch (a different layer — Decision 1), so a bulk edit (profile switch,
-GEQ drag frame) lands as one atomic engine batch. `edit_profile`,
-`edit_eq_preset`, and the `vis` event all share one payload shape:
+outcome, promise-style. The two param-write commands, `edit_profile` and
+`edit_eq_preset`, both funnel into the trait's single `set_params` batch
+(a different layer — Decision 1), so a bulk edit (profile switch, GEQ drag
+frame) lands as one atomic engine batch. `edit_profile`, `edit_eq_preset`,
+and the `vis` event all share one payload shape:
 `params: { "<4-CC>": [i16, …] }`. Scoping is explicit: `set_profile` is
 global (the one active profile), while `set_eq_preset { profile_id, id }`
 names its target because EQ selection is per-profile — same
@@ -638,8 +634,7 @@ Events (daemon → client):
 on the `ack` (`id` field), so the originator applies the addition locally
 without waiting for an echoed snapshot. Channels stay separate: every
 command gets exactly one `ack` / `error` (request/reply); `state` and
-`vis` are server→client pub/sub — a state snapshot never doubles as a
-command reply.
+`vis` are server→client pub/sub.
 
 The full `state` snapshot is also sent on `get_state`, on connect, and any
 time the daemon's internal state mutates from a non-WS source (e.g. config
@@ -1024,17 +1019,16 @@ The two files split by base (Decision 3): `defaults.toml` stores deltas
 over `ParameterDef.default`; `config.toml` stores only what **diverges
 from whatever resolves beneath it** in the cascade (the `defaults`
 layers, plus any hand-edited config-shared layer) — i.e. only what the
-user changed relative to the factory result. Each has **two namespaces**
-— `[profile]` and `[eq_preset]` — parsed by one uniform rule: a sub-table
-(`[profile.<id>]`, `[eq_preset.<id>]`) holds one item's params; any
-other key in the namespace table is a **shared** param applying to
-*every* item — the shared operational config (the 20-band setup,
-`ven`, …) is stated exactly once in `[profile]`. The root holds only
-`power` and `selected_profile`, and `config.toml` carries each only when
-it diverges from factory (fresh install: neither — the root is empty). A param may live
-in both namespaces (`genb` is part of each profile's band structure
-*and* each preset's). A param resolves through five layers, later
-shadowing earlier:
+user changed relative to the factory result. Each has **two namespaces** —
+`[profile]` and `[eq_preset]` — parsed by one rule: a sub-table
+(`[profile.<id>]`, `[eq_preset.<id>]`) holds one item's params; any other
+key in the namespace table is a **shared** param applying to *every* item
+(the shared operational config — the 20-band setup, `ven`, … — is stated
+once in `[profile]`). The root holds only `power` and `selected_profile`,
+each written to `config.toml` only when it diverges from factory (fresh
+install: the root is empty). A param may live in both namespaces (`genb`
+is part of each profile's band structure *and* each preset's). A param
+resolves through five layers, later shadowing earlier:
 
 ```
 ParameterDef.default → defaults.toml shared → defaults.toml [item]
