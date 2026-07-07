@@ -83,8 +83,6 @@ build a cleaner foundation that:
    `libdseffect.so`), ReadOnly-Dynamic (4 — live per-block monitoring), and
    ReadOnly-Static (8 — the rate-derived native grid plus build-version /
    license readouts; `ak_get_bulk` reads any leaf, so nothing is unreadable).
-   The `ver` param is the engine-version readout — the UI formats its
-   4×i16 as "2.0.4.0".
    (The engine's 64 real root leaves are *not* Java's
    64-name list — Java registers two phantoms and omits two real leaves; see
    [docs/ddp/02](ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves).)
@@ -1972,7 +1970,7 @@ CSS-grid layout.
 5. [ ] ReadOnly-Dynamic cards (`vnbg`, `vnbe`, `vcbg`, `vcbe`)
        live-update from `vis` events.
 6. [ ] ReadOnly-Static cards render the snapshot `readouts`; the `ver`
-       card shows the formatted "2.0.4.0".
+       card shows 2.0.4.0.
 7. [ ] `aobg` widget renders the channel-id-prefixed layout
        (Decision 3), not header + interleaved pairs.
 8. [ ] Long arrays (`aobg ≤ 329`, `arbi`/`arbl`/`arbh`/`aobf`/`arbf`
@@ -2131,10 +2129,14 @@ of the plugin in EqualizerAPO / PipeWire.
 
 ## Code quality standards
 
-**Rust**: `#![deny(missing_docs, warnings)]` at crate roots.
-`cargo clippy -- -D warnings -W clippy::pedantic -W clippy::nursery`.
-`cargo fmt --check`. `#![forbid(unsafe_code)]` everywhere except the engine
-FFI boundary; that boundary has `// SAFETY:` comments on every invariant.
+**Rust**: lints centralized in `[workspace.lints]` (root `Cargo.toml`; each
+crate opts in with `[lints] workspace = true`) — `missing_docs` and
+`clippy::pedantic` at `warn`, allow-list grown as friction appears.
+`#![forbid(unsafe_code)]` in every crate except the engine FFI boundary,
+which carries `// SAFETY:` comments. `cargo fmt`. Warnings are kept out of
+source and elevated to errors in CI only (`RUSTFLAGS=-D warnings`,
+`cargo clippy --workspace --all-targets -- -D warnings`), so a toolchain bump
+never reddens a local build.
 
 **Tests**: unit tests live next to the code in `#[cfg(test)] mod
 tests`. Integration tests in `tests/`. Property tests via `proptest`
@@ -2163,9 +2165,8 @@ where engine I/O isn't the point. CI provisions
 `qemu-user-static` via apt; `libdseffect.so` is bundled.
 
 **CI**: GitHub Actions runs the full test matrix on Linux + Windows for every
-push and PR. Required checks before merge: `cargo test`,
-`cargo clippy -- -D warnings`, `cargo fmt --check`, `pnpm run lint`,
-`pnpm run test`.
+push and PR. Required checks before merge: `cargo test` (under `RUSTFLAGS=-D warnings`), `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --check`, `pnpm run lint`, `pnpm run test`.
 
 **Documentation**: every public Rust item has a `///` doc comment with an
 example where reasonable. The `ui/` directory has a README describing the
