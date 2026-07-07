@@ -22,7 +22,7 @@ endp ocf ven vol vcnb vcbf scpe test`), **ReadOnly-Dynamic** (4 — `vnbg
 vnbe vcbg vcbe`, riding every `vis` event), **ReadOnly-Static** (8 —
 `vnnb vnbf` + `bver bndl ver lcmf lcvd lcpt`, read once after
 `SET_CONFIG`; `vnnb`/`vnbf` are rate-derived, hence the re-read on
-reconfig). Nothing is dropped — `ak_get`
+reconfig). Nothing is dropped — `ak_get_bulk`
 ([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)) reads any leaf, so
 the build/license slots are plain ReadOnly-Static cards and `ver` is
 the engine-version readout.

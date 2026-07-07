@@ -9,14 +9,18 @@ machine-wide, as is the plugin socket (`/run/dolbyx/dolbyx.sock`).
 Each file has two namespaces parsed by one rule: a sub-table
 (`[profile.<id>]` / `[eq_preset.<id>]`) holds one item's params; any
 other key in the `[profile]` / `[eq_preset]` table is shared by
-**every** item. The root level is exactly `power` + `selected_profile`.
+**every** item. The root level is exactly `power` + `selected_profile` —
+each written to `config.toml` only when it diverges from factory.
 Resolution is a five-layer cascade — `ParameterDef.default →
 defaults.toml shared → defaults.toml item → config.toml shared →
 config.toml item` — and a param absent everywhere resolves to its
-`ParameterDef.default`. Write-back is always per-item: the shared
-layers are a hand-edit affordance the daemon never writes. `is_factory`
-is derived at load time from `defaults.toml` presence, not stored on
-disk.
+`ParameterDef.default`. Write-back is always per-item and sparse by base:
+`defaults.toml` stores deltas over `ParameterDef.default`, while
+`config.toml` stores only what diverges from whatever resolves beneath it
+— so a fresh install (nothing diverged) writes an **empty** `config.toml`.
+The shared layers are a hand-edit affordance the daemon never writes.
+`is_factory` is derived at load time from `defaults.toml` presence, not
+stored on disk.
 
 A `notify`-based watcher subscribes to `config.toml` **only**;
 `defaults.toml` and `parameters.toml` (the metadata table,

@@ -323,6 +323,10 @@ int main(int argc, char *argv[]) {
             if (v != sweep[s].exp[e]) fmatch = 0;
         }
         printf("   [%s]\n", fmatch ? "matches .constdata array" : "DIFFERS !!");
+        if (sweep[s].n < 20)   /* short rate: characterize the unused 20th slot */
+            printf("           slot20 pad: vnbf[19]=%d vnbg[19]=%d vnbe[19]=%d "
+                   "vcbg[19]=%d vcbe[19]=%d\n", akv("vnbf",19), akv("vnbg",19),
+                   akv("vnbe",19), akv("vcbg",19), akv("vcbe",19));
     }
     printf("    => native vnnb/vnbf track the rate (20/20/19 bands @48k/44.1k/32k);\n"
            "       only the sample rate moves them — they're read-only otherwise.\n");

@@ -6,8 +6,8 @@ methods: `create_session`, `destroy_session`, `set_enabled`,
 batch-only — a single-control edit is a 1-entry batch — and is served
 by the engine's AK accessors directly, not the cmd protocol — the
 AK-direct binding ([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)) —
-so `get_params` is a real read of the live registry via `ak_get` /
-`ak_get_bulk`, and one `set_params` lands a profile or EQ-preset
+so `get_params` is a real read of the live registry via `ak_get_bulk`,
+and one `set_params` lands a profile or EQ-preset
 switch on one audio block. The visualizer needs no read call at all:
 every `process` reply carries the four ReadOnly-Dynamic arrays as its
 `VisFrame` (the vis tail, ADR-0010).
