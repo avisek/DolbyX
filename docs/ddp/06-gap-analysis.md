@@ -639,8 +639,8 @@ This is the foundation for the planned "every parameter is exposable"
 goal. It also means adding a new parameter is a one-place edit
 (`g_ddp_params` table) and the UI auto-discovers it.
 
-> **Superseded by v2 plan.** [`docs/REARCHITECTURE_PLAN.md`](../REARCHITECTURE_PLAN.md)
-> Decisions 4 and 6 supersede the `/params.json` proposal above: the v2 daemon
+> **Superseded by v2 plan.** The v2 epic ([`docs/issues/00-epic.md`](../issues/00-epic.md))
+> supersedes the `/params.json` proposal above: the v2 daemon
 > injects parameter metadata (and the initial state snapshot) into the served
 > `index.html` as `window.__BOOTSTRAP__`, eliminating the pre-paint HTTP
 > round-trip. The single-source-of-truth and auto-discovery properties are
@@ -695,7 +695,7 @@ engine tree, not from Java** — `ddp_probe dump tree` enumerates the real
 root leaves with authoritative ranges, frac bits, and descriptions. Drop
 `mxou`/`lcsz`; add `scpe`/`test` (DolbyX v2 classifies both as
 Experimental — engine-surfaced, hidden by the original UI). The v2 plan
-bakes this in: [REARCHITECTURE_PLAN → Slice 0](../REARCHITECTURE_PLAN.md).
+bakes this in: [Slice 03 — parameter metadata](../issues/03-parameter-metadata.md).
 
 ---
 
@@ -1194,10 +1194,10 @@ See that issue.
 ## Architectural target diagram
 
 > **Note.** The diagram below is the gap-analysis-era target. The actual v2
-> design in [`docs/REARCHITECTURE_PLAN.md`](../REARCHITECTURE_PLAN.md)
+> design ([`docs/issues/00-epic.md`](../issues/00-epic.md))
 > supersedes the `/params.json` delivery shown here — metadata and initial
-> state are injected into `index.html` as `window.__BOOTSTRAP__` (Decisions 4
-> and 6).
+> state are injected into `index.html` as `window.__BOOTSTRAP__`
+> (bootstrap injection).
 
 After applying the high-impact fixes, the structural target is:
 

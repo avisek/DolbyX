@@ -1,7 +1,7 @@
 # `ddp_probe` — libdseffect.so evidence harness
 
 This harness is the empirical source of truth for everything the
-`docs/ddp/` reference and `docs/REARCHITECTURE_PLAN.md` say about how
+`docs/ddp/` reference and the v2 epic (`docs/issues/00-epic.md`) say about how
 `libdseffect.so` actually behaves at the AudioEffect HAL boundary.
 
 Run it whenever you want to verify a claim, debug a regression after
@@ -267,8 +267,8 @@ its silent stub; this is purely for development.
 
 ## Verifying a doc citation
 
-Every claim in the updated `docs/ddp/` files or
-`docs/REARCHITECTURE_PLAN.md` that's empirical can be re-checked:
+Every claim in the updated `docs/ddp/` files or the v2 epic/issues
+(`docs/issues/`) that's empirical can be re-checked:
 
 ```bash
 make run-log

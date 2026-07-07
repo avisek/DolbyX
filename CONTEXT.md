@@ -195,7 +195,7 @@ heading; "slice" is the unit a TDD session targets).
 ### Architecture vocabulary
 
 The architecture vocabulary from
-[LANGUAGE.md](.agents/skills/improve-codebase-architecture/LANGUAGE.md)
+[the improve-codebase-architecture skill](.agents/skills/improve-codebase-architecture/SKILL.md)
 applies verbatim: **module**, **interface**, **implementation**,
 **depth**, **seam**, **adapter**, **leverage**, **locality**. Do not
 substitute "component", "service", "API", or "boundary".
