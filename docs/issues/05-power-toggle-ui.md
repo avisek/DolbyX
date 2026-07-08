@@ -39,8 +39,9 @@ layer.
 4. [ ] An `error` event triggers a `get_state` reconcile.
 5. [ ] Socket drop → badge shows reconnecting; reconnect → `get_state`
        issued, badge shows connected, state reconciled.
-6. [ ] Manual demo: `just dev`, flip toggle in two tabs — each tab's
-       change appears in the other; daemon restart → both tabs recover.
+6. [ ] Manual demo (post-merge HITL, not an AFK gate): `just dev`, flip
+       toggle in two tabs — each tab's change appears in the other;
+       daemon restart → both tabs recover.
 
 ## Tracer bullet
 

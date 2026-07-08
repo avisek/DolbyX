@@ -22,7 +22,8 @@ This epic is the shared context for every slice. Each sub-issue
    sanctioned seam (`StubBackend`). HTTP/WS run real; persistence runs
    against a real tempdir.
 4. From Slice 10 on, every feature slice's acceptance includes replaying its
-   integration tests under `cargo test --features qemu`.
+   integration tests under `cargo test --features qemu` (Windows-path
+   slices 12–13 exempt — no qemu on that runner).
 5. Tick behavior checkboxes in the issue as RED → GREEN; update the slice
    index below when a slice transitions; finish with `/code-review`, full
    test suite, commit.
@@ -489,23 +490,23 @@ Order = execution order. Update Status as slices transition
 | 03 | Parameter metadata SoT (`parameters.toml` + parser + twin + CI gate) | 01 | AFK | not started |
 | 04 | Power toggle over the wire (tracer bullet pt. 1) | 03 | AFK | not started |
 | 05 | Power toggle in the browser (tracer bullet pt. 2) | 02, 04 | AFK | not started |
-| 06 | `ddp-engine-arm`: lifecycle + process + probe CI | 01 | HITL | not started |
-| 07 | `ddp-engine-arm`: AK-direct params + vis tail | 06 | AFK | not started |
+| 06 | `ddp-engine-arm`: protocol + session lifecycle + process | 01 | HITL | not started |
+| 07 | `ddp-engine-arm`: AK-direct params + commit leaf + vis tail | 06 | AFK | not started |
 | 08 | `QemuBackend` + supervisor respawn + swap & replay | 04, 07 | HITL | not started |
 | 09 | Playwright E2E harness | 05, 08 | AFK | not started |
-| 10 | Factory profiles + cascade persistence — *first authentic DDP sound* | 05, 08 | AFK | not started |
+| 10 | Factory profiles + `defaults.toml` + cascade persistence — *first authentic DDP sound* | 05, 08 | AFK | not started |
 | 11 | `AudioServer` + plugin protocol (both adapters) | 08 | AFK | not started |
 | 12 | Windows daemon bring-up (native + wsl.exe engine) | 10 | HITL | not started |
 | 13 | VST2 plugin + EqualizerAPO — **daily-driver milestone** | 11, 12 | HITL | not started |
 | 14 | Master controls (SV / DE / VL) + unit helpers | 10 | AFK | not started |
-| 15 | Factory EQ presets | 10 | AFK | not started |
-| 16 | Event-driven visualizer | 05, 08, 09, 11 | AFK | not started |
-| 17 | GEQ editing: smoother + inverse + EqCurve | 15, 16 | HITL | not started |
+| 15 | Factory EQ presets apply as overlays | 10 | AFK | not started |
+| 16 | Event-driven visualizer | 05, 08, 09, 10, 11 | AFK | not started |
+| 17 | GEQ editing: smoother + inverse + EqCurve | 14, 15, 16 | HITL | not started |
 | 18 | Custom profiles & EQ presets (CRUD) | 15 | AFK | not started |
 | 19 | `config.toml` watcher | 18 | AFK | not started |
-| 20 | Advanced panel (all 64 params) | 10, 16 | AFK | not started |
+| 20 | Advanced panel (all 64 params) | 10, 14, 16 | AFK | not started |
 | 21 | LV2 plugin + PipeWire | 11 | HITL | not started |
-| 22 | Release packaging | 13, 21 | HITL | not started |
+| 22 | Release packaging | 13, 17, 19, 20, 21 | HITL | not started |
 
 Slices are provisional in scope, firm in contract: split further if one
 threatens a session's context budget; never merge into bigger bangs.

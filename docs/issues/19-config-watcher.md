@@ -38,7 +38,8 @@ startup-only reads (an edit there takes a daemon restart — deliberate).
 4. [ ] Rapid successive edits collapse into one reload (debounce).
 5. [ ] Malformed TOML mid-run: state unchanged, warning logged, next
        valid edit recovers.
-6. [ ] Manual demo: edit the file in an editor, watch the UI catch up.
+6. [ ] Manual demo (post-merge HITL, not an AFK gate): edit the file in
+       an editor, watch the UI catch up.
 7. [ ] qemu replay: behavior 1 against the real engine — read-back
        confirms the new `dvla`.
 

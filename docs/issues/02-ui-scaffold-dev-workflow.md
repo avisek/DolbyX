@@ -113,7 +113,9 @@ placeholders; component files arrive with their slices. Add a short
 - [ ] `pnpm -C ui build` produces a singlefile `dist/index.html` with the
       `<!--BOOTSTRAP-->` placeholder intact
 - [ ] `pnpm run lint` / `pnpm run test` green (one trivial Vitest spec)
-- [ ] `just dev` starts both processes; editing a TS file hot-reloads
+- [ ] `just dev` starts both processes; a TS edit triggers a Vite HMR
+      update (log-level check — in-browser verification lands with
+      Slice 04's real daemon)
 - [ ] `main.tsx` :5173 guard redirects to :9876
 - [ ] CI runs UI lint + test + build on both platforms
 - [ ] `ui/README.md` written

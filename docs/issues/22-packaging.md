@@ -5,7 +5,8 @@ and Linux: daemon + UI + engine + plugins + TOMLs laid out per ADR-0009,
 registered as a system service, with a quickstart a stranger can follow.
 Completes v2.0.
 
-**Blocked by:** Slices 13, 21 (packages everything).
+**Blocked by:** Slices 13, 17, 19, 20, 21 (all leaf slices — packages
+everything).
 **Mode:** HITL — install smoke on real machines.
 
 ## What to build

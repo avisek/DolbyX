@@ -23,6 +23,9 @@ EqualizerAPO on the dev machine.
   - `effEditOpen`: `ShellExecuteW` → `http://localhost:9876` (the plugin
     has no editor of its own).
   - Disconnect / suspend → `Goodbye`.
+- The plugin-client core (connect / `Hello` / convert / dry-fallback /
+  `Goodbye`) is shared with the LV2 shim (Slice 21): whichever slice
+  lands second extracts it into a common crate.
 - Rate changes from the host = `Goodbye` + fresh `Hello` (sessions are
   rate-immutable — epic invariant).
 - Build as a Windows cross/native target; artifact name `DolbyX.dll`.

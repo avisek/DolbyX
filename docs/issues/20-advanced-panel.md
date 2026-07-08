@@ -6,7 +6,7 @@ nothing hand-listed. Settable/Experimental widgets write back;
 ReadOnly-Dynamic cards live-update from `vis`; ReadOnly-Static cards show
 the snapshot `readouts`.
 
-**Blocked by:** Slices 10, 16.
+**Blocked by:** Slices 10, 14, 16 (14: `lib/units.ts`).
 **Mode:** AFK.
 
 ## What to build

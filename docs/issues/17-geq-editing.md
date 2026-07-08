@@ -5,7 +5,7 @@ writes throttled at ≤ 60 ms; the cyan curve + thumbs render and feel like
 the original; switching EQ presets keeps the next drag continuous via the
 inverse-smoother matrix.
 
-**Blocked by:** Slices 15, 16.
+**Blocked by:** Slices 14, 15, 16 (14: `lib/units.ts` dB↔i16).
 **Mode:** HITL — golden snapshots from the Java reference need one manual
 visual verification before locking in.
 

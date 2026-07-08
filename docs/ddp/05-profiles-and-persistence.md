@@ -32,8 +32,14 @@ Each profile has 4 IEQ-preset slots, indexed 0..3:
 | ----- | ---------------------------- | --------------------------------------------- |
 | 0     | `ieon=0`                     | "Off" — IEQ disabled, GEQ may still be active |
 | 1     | `ieon=1`, `iebt=ieq_open`    | "Open" — airy, bright                         |
-| 2     | `ieon=1`, `iebt=ieq_rich`    | "Rich" — warm, full (default)                 |
+| 2     | `ieon=1`, `iebt=ieq_rich`    | "Rich" — warm, full (default staged curve)    |
 | 3     | `ieon=1`, `iebt=ieq_focused` | "Focused" — vocal-forward                     |
+
+Out of the box IEQ is **Off**: every shipped profile has `ieon = 0`, and
+`DsProfileSettings` derives the preset index from `ieon` (`0` → Off,
+overriding the parsed preset). A profile's `include preset` (Rich for
+most, Open for Game) only pre-stages `iebt` — the curve you land on when
+first enabling IEQ.
 
 The UI's "Custom" 4th cell (in mobile layout) is **not** an IEQ preset —
 it is a UI-layer convention meaning "use preset 0 (Off) and let the user

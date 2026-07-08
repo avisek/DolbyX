@@ -37,9 +37,12 @@ field.
 
 ### `defaults.toml` — presets portion
 
-Add the `[eq_preset]` shared block + 3 factory presets, and the factory
-`selected_eq_preset` keys omitted in Slice 10 (`music` → `"rich"`; others
-per `vendored/ds1-default.xml`):
+Add the `[eq_preset]` shared block + 3 factory presets. **No factory
+profile selects a preset out of the box** — the shipped XML has `ieon = 0`
+on every profile; its `include preset = ieq_rich` only pre-stages the
+curve (`DsProfileSettings` maps `ieon = 0` → preset Off —
+`docs/ddp/05-profiles-and-persistence.md`). Factory `selected_eq_preset`
+stays `None` (key absent) everywhere:
 
 ```toml
 [eq_preset]          # → every EQ preset: band structure, so presets resolve standalone
@@ -64,9 +67,6 @@ name = "Focused"
 ieon = 1
 iebt = [-419, -112,  75, 116, 113, 160, 165,  80,  61,  79,
           98,  121,  64,  70,  44, -71, -33,-100,-238,-411]
-
-[profile.music]
-selected_eq_preset = "rich"
 ```
 
 ### Commands + UI
@@ -94,8 +94,8 @@ selected_eq_preset = "rich"
 5. [ ] `set_eq_preset` targeting a non-selected profile persists without
        an engine call.
 6. [ ] `selected_eq_preset` persists per-profile as an `Option`.
-7. [ ] Music arrives from factory with Rich selected (first-run parity
-       with the original).
+7. [ ] No factory profile has a preset selected (first-run parity: the
+       original ships `ieon = 0` on every profile).
 8. [ ] qemu replay: after `set_eq_preset` rich, `get_params("iebt")`
        returns Rich's curve.
 

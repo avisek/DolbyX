@@ -14,8 +14,10 @@ desktop (or WSLg) with audio.
   ports — all control via the Web UI), mirroring the VST shim's behavior:
   connect `/run/dolbyx/dolbyx.sock`, `Hello` at the host rate,
   float32 ↔ int16 at the boundary, dry pass-through + reconnect when the
-  daemon is down, `Goodbye` on deactivate. Reuse/extract the shared
-  plugin-client logic from Slice 13 rather than duplicating it.
+  daemon is down, `Goodbye` on deactivate. The plugin-client core
+  (connect / `Hello` / convert / dry-fallback / `Goodbye`) is shared with
+  the VST shim (Slice 13): whichever slice lands second extracts it into
+  a common crate rather than duplicating it.
 - Example PipeWire `filter-chain` config, checked in and documented
   (smoke-only — Slice 22 packages it).
 
@@ -43,5 +45,5 @@ fast tests, real engine for behavior 5.
 ## References
 
 - Epic: plugin protocol
-- Slice 13 — shared plugin-client behavior to reuse
+- Slice 13 — VST twin; mirrors this plugin-client core
 - Slice 11 — AF_UNIX adapter (already CI-tested)
