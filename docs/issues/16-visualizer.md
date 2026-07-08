@@ -4,8 +4,8 @@
 per-block `vis` events from the main session. When audio stops, the client
 freezes and fades on its own — no suspend protocol, no daemon pump.
 
-**Blocked by:** Slices 05, 08. (Real-audio demo needs 13 or 21; automated
-tests don't.)
+**Blocked by:** Slices 05, 08, 09, 11 (09 Playwright harness + 11 audio
+server gate only behavior 9; real-audio demo needs 13 or 21).
 **Mode:** AFK.
 
 ## What to build

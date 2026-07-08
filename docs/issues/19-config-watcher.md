@@ -39,6 +39,8 @@ startup-only reads (an edit there takes a daemon restart — deliberate).
 5. [ ] Malformed TOML mid-run: state unchanged, warning logged, next
        valid edit recovers.
 6. [ ] Manual demo: edit the file in an editor, watch the UI catch up.
+7. [ ] qemu replay: behavior 1 against the real engine — read-back
+       confirms the new `dvla`.
 
 ## Tracer bullet
 
@@ -46,7 +48,8 @@ Integration test: start daemon on a tempdir, append
 `[profile.music]\ndvla = 7` to `config.toml` externally, await the
 broadcast snapshot carrying `dvla = 7` and the Stub `set_params`.
 
-**Mock policy.** Stub engine; real filesystem + real watcher (tempdir).
+**Mock policy.** Stub engine; real filesystem + real watcher (tempdir);
+behavior 7 real.
 
 ## References
 

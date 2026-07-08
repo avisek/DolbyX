@@ -30,7 +30,7 @@ everything persists.
   reset on custom ids with `INVALID_REQUEST`; the UI shows Reset only on
   factory items.
 - Custom profiles have **no category** — just the user's name in the list
-  (plan Decision 8: the original's category drove only an icon; dropped).
+  (epic data model: the original's category drove only an icon; dropped).
 - Persistence: custom items live entirely in `config.toml`
   (`[profile.user_a3f1]`, `[eq_preset.user_91c2]` — id is the table key,
   `name` a key inside).

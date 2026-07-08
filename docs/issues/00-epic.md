@@ -203,18 +203,18 @@ Commands (client → daemon):
 { "cmd": "set_power", "request_id": "r2", "on": true }
 { "cmd": "set_profile", "request_id": "r3", "id": "music" }
 { "cmd": "edit_profile", "request_id": "r4", "id": "music", "params": { "dvla": [4] } }
-{ "cmd": "set_eq_preset", "request_id": "r6", "profile_id": "music", "id": "rich" }  // id: null → profile's own EQ
+{ "cmd": "set_eq_preset", "request_id": "r5", "profile_id": "music", "id": "rich" }  // id: null → profile's own EQ
 
-{ "cmd": "add_profile", "request_id": "r7", "from": "music", "name": "My Music" }
-{ "cmd": "rename_profile", "request_id": "r8", "id": "user_a3f1", "name": "Late Night" }
-{ "cmd": "remove_profile", "request_id": "r9", "id": "user_a3f1" }
-{ "cmd": "reset_profile", "request_id": "r10", "id": "music" }
+{ "cmd": "add_profile", "request_id": "r6", "from": "music", "name": "My Music" }
+{ "cmd": "rename_profile", "request_id": "r7", "id": "user_a3f1", "name": "Late Night" }
+{ "cmd": "remove_profile", "request_id": "r8", "id": "user_a3f1" }
+{ "cmd": "reset_profile", "request_id": "r9", "id": "music" }
 
-{ "cmd": "add_eq_preset", "request_id": "r11", "from": "rich", "name": "Vocal Forward" }
-{ "cmd": "rename_eq_preset", "request_id": "r12", "id": "user_91c2", "name": "Vocal" }
-{ "cmd": "edit_eq_preset", "request_id": "r13", "id": "user_91c2", "params": { "gebg": [/*20*/] } }
-{ "cmd": "remove_eq_preset", "request_id": "r14", "id": "user_91c2" }
-{ "cmd": "reset_eq_preset", "request_id": "r15", "id": "rich" }
+{ "cmd": "add_eq_preset", "request_id": "r10", "from": "rich", "name": "Vocal Forward" }
+{ "cmd": "rename_eq_preset", "request_id": "r11", "id": "user_91c2", "name": "Vocal" }
+{ "cmd": "edit_eq_preset", "request_id": "r12", "id": "user_91c2", "params": { "gebg": [/*20*/] } }
+{ "cmd": "remove_eq_preset", "request_id": "r13", "id": "user_91c2" }
+{ "cmd": "reset_eq_preset", "request_id": "r14", "id": "rich" }
 ```
 
 Families: `set_*` picks a selection/scalar; `edit_*` writes a param-map;
@@ -499,7 +499,7 @@ Order = execution order. Update Status as slices transition
 | 13 | VST2 plugin + EqualizerAPO — **daily-driver milestone** | 11, 12 | HITL | not started |
 | 14 | Master controls (SV / DE / VL) + unit helpers | 10 | AFK | not started |
 | 15 | Factory EQ presets | 10 | AFK | not started |
-| 16 | Event-driven visualizer | 05, 08 | AFK | not started |
+| 16 | Event-driven visualizer | 05, 08, 09, 11 | AFK | not started |
 | 17 | GEQ editing: smoother + inverse + EqCurve | 15, 16 | HITL | not started |
 | 18 | Custom profiles & EQ presets (CRUD) | 15 | AFK | not started |
 | 19 | `config.toml` watcher | 18 | AFK | not started |

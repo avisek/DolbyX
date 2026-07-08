@@ -139,7 +139,7 @@ _Avoid_: built-in, default item, preset flag.
 **GEQ**:
 "Graphic EQ" — the user-driven curve. Backed by AK params `gebg[20]` (band
 gains) and `geon` (enable). Edited via the Visualizer/Equalizer overlay
-(see Decision 10).
+([ADR-0008](docs/adr/0008-visualizer-equalizer-rendering-spec.md); Slice 17).
 
 **Master control**:
 One of the three main-screen controls — Surround Virtualizer

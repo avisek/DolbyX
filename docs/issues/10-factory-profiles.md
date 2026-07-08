@@ -113,8 +113,8 @@ dea = 6
 - `reset_profile { id }` = remove that id's `config.toml` overrides
   (factory rows in `defaults.toml` untouched); fresh snapshot broadcast.
 - UI: `ProfileTabs.tsx` — factory profiles with their category-derived
-  display names (custom profiles, later, are just named — no category,
-  per plan Decision 8).
+  display names (custom profiles, later, are just named — no category;
+  epic data model).
 
 ## Behaviors to test
 
