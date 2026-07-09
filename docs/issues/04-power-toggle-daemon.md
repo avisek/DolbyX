@@ -17,7 +17,10 @@ state → engine → persistence. Every later slice extends one axis.
 
 - `Engine` trait + `VisFrame` + `SessionId` in `ddp-engine`, plus
   `StubBackend` — records calls, fabricates replies; the one sanctioned
-  test seam.
+  test seam. Pin its `process` contract here for every later slice:
+  enabled → deterministic marker transform on the PCM (e.g. bitwise NOT;
+  ferried audio stays distinguishable from dry passthrough), disabled →
+  echo (bypass identity), vis tail fabricated.
 - `State` (`ddp-state`) — just `power` + `selected_profile = "music"` for
   now; `apply(Command) → Result<StateDiff, ValidationError>` shape from
   day one.

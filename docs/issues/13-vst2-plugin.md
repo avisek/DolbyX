@@ -52,8 +52,8 @@ EqualizerAPO on the dev machine.
 
 Harness test: load the cdylib's VST entry, drive
 resume → processReplacing with a sine → assert output ≠ input while the
-daemon (Stub or real engine) is up, and output == input (dry) when it's
-down.
+daemon is up (Stub's marker transform — Slice 04 — or the real engine),
+and output == input (dry) when it's down.
 
 **Mock policy.** Synthetic host for automated tests; real EqualizerAPO for
 the manual smoke. Real daemon + real engine for the audible checks.

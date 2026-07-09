@@ -36,8 +36,8 @@ desktop (or WSLg) with audio.
 ## Tracer bullet
 
 Synthetic host: run one block of a sine through the plugin against a live
-daemon (Stub), assert the `Process`/`Processed` round-trip and sample
-fidelity.
+daemon (Stub), assert the `Process`/`Processed` round-trip and exact PCM
+against the Stub's marker transform (Slice 04).
 
 **Mock policy.** Synthetic host automated; real PipeWire manual. Stub for
 fast tests, real engine for behavior 5.

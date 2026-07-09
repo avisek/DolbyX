@@ -61,7 +61,8 @@ Slice 13; LV2: Slice 21).
 
 Loopback integration test: start daemon, connect a synthetic plugin over
 the platform socket, push silence frames, assert `Processed` returns the
-frames (within engine-applied transient bounds).
+expected PCM (Stub: Slice 04's marker contract; real engine: within
+transient bounds).
 
 **Mock policy.** Real socket both platforms. Stub engine for Windows CI
 and fast tests; real engine behind `--features qemu` on Linux.

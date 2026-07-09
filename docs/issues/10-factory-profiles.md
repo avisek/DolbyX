@@ -19,8 +19,8 @@ beside the daemon binary (source of truth in `crates/ddp-daemon/`,
 `build.rs` copies it). Each factory profile stores its **delta over
 `ParameterDef.default`**; the shared operational config is stated once.
 This slice writes the root keys, the shared `[profile]` block, and the 4
-`[profile.<id>]` tables (omit `selected_eq_preset` keys — Slice 15 adds
-them with the presets). Abbreviated target:
+`[profile.<id>]` tables (no `selected_eq_preset` keys — preset selection
+is Slice 15's, and factory selection ships `None`). Abbreviated target:
 
 ```toml
 power = true

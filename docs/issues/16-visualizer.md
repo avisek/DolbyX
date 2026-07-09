@@ -78,6 +78,8 @@ edges adapts automatically.
 8. [ ] dB mapping asymmetric `[−12, +36]`.
 9. [ ] Playwright: with a synthetic plugin pushing a tone through the
        real engine, bricks move on screen.
+10. [ ] qemu replay: behaviors 1–2 with the real engine — `vis` events
+        carry the reply tails verbatim.
 
 ## Tracer bullet
 
@@ -87,7 +89,7 @@ subscribe via WS; assert one `vis` event per `process()` with the
 fabricated arrays verbatim, and zero events after calls stop.
 
 **Mock policy.** Stub fabricated frames for the fan-out + UI tests; the
-real vis tail was verified in Slice 07; behavior 9 real.
+real vis tail was verified in Slice 07; behaviors 9–10 real.
 
 ## References
 
