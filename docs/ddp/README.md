@@ -79,5 +79,4 @@ The decompiled sources live in `decompiled/` at the repo root:
 ## Status
 
 These documents reflect the state of the original DDP module as shipped in
-the v8.1-20211005 Magisk module. They are version-pinned to that build and
-should be revisited if a different DDP build is ever adopted.
+the v8.1-20211005 Magisk module, and are version-pinned to that build.

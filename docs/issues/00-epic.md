@@ -401,7 +401,7 @@ DolbyX/
 │   ├── ddp-vst-windows/             # VST2 cdylib
 │   └── ddp-lv2-linux/               # LV2 cdylib + dolbyx.ttl
 ├── ui/                              # Solid SPA — independent pnpm project (vite, dev.html, src/)
-├── vendored/                        # libdseffect.so (v8.1) + ds1-default.xml
+├── vendored/                        # libdseffect.so (v2.0.4.0) + ds1-default.xml
 └── scripts/                         # build-release.sh, package-*.{sh,ps1}, setup-windows.bat
 ```
 

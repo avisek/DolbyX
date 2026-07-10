@@ -90,6 +90,17 @@ later Unicorn / static translation
 ([ADR-0002](docs/adr/0002-backend-agnostic-engine-qemu-default.md)).
 _Avoid_: engine (that's `libdseffect.so`).
 
+**DDP module** (`v8.1-20211005`):
+The reverse-engineered Magisk module — source-of-truth artifact every
+`docs/ddp/` fact derives from.
+_Avoid_: tagging the engine or `.so` "v8.1".
+
+**Engine version** (`2.0.4.0`):
+`libdseffect.so`'s own version, reported by cmd 6 (`DS_PARAM_VERSION`)
+/ the `ver` readout. Long-EOL and frozen — no newer version expected.
+_Avoid_: v8.1 (the module), `bver` (opaque build blob), `1.8.0.0`
+(`DS_VERSION_INTERNAL`, Java-side).
+
 ### Daemon & wire
 
 **Supervisor**:
