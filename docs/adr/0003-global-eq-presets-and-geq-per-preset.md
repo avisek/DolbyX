@@ -1,26 +1,19 @@
 # Global EQ presets as optional overlays
 
-Profiles are canonical: a profile stores values for any of the 52
-non-readonly params. An EQ preset is an **optional overlay** owning
-exactly the nine EQ params (`genb gebf geon gebg` + `ienb iebf ieon
-iebt iea`); preset-eligibility is derived — `category ∈ {Ieq, Geq}` —
-not a separate flag. While a profile has a preset attached, the preset's
-nine values shadow the profile's own entirely (the preset resolves
-complete through its own cascade layers,
-[ADR-0007](0007-toml-overlay-persistence-with-file-watcher.md)); with
-`selected_eq_preset = None` the profile's own EQ params apply. EQ edits
-route to the attached preset, or to the profile when detached.
+Profiles are canonical — a profile can store any of the 52 non-readonly
+params. An EQ preset is an **optional overlay** owning exactly the nine
+EQ params (`genb gebf geon gebg` + `ienb iebf ieon iebt iea`;
+eligibility is derived — `category ∈ {Ieq, Geq}` — not a flag). A
+selected preset's nine values shadow the profile's own entirely; with
+`None` selected the profile's own apply; EQ edits route to whichever is
+effective.
 
-Presets are top-level, global objects — a profile stores only the **id**
-of its selection. This diverges from the original DDP, which carried a
-6 × 4 × 20 matrix (profiles × presets × bands): editing "Rich" in the
-Music profile left "Rich" in Movie untouched. In DolbyX an edit to
-"Rich" propagates to every profile that has it currently selected,
-matching the user's mental model that "Rich" is one preset, not four.
-The price is loss of per-profile preset memory; we judge that an
-acceptable simplification because the original UI never exposed it as a
-user-discoverable feature.
-
-Factory presets are Open, Rich, Focused. The original's Off preset dies:
-no-preset is `None`, and deleting a selected preset falls back to `None`
-— the profile's own EQ curve — not to a magic entry.
+Presets are top-level global objects — a profile stores only the selected
+**id**. The original DDP instead kept a 6 × 4 × 20 matrix (profiles ×
+presets × bands): editing "Rich" under Music left "Rich" under Movie
+untouched. DolbyX drops that per-profile preset memory — an edit to
+"Rich" propagates to every profile currently selecting it — matching the
+mental model that "Rich" is one preset, not four. Acceptable because the
+original UI never exposed the matrix as a discoverable feature. The
+original's "Off" preset dies too: no-preset is `None`, and deleting a
+selected preset falls back to `None`, not a magic entry.

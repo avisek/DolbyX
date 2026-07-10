@@ -1,24 +1,13 @@
 # Backend-agnostic engine, QEMU subprocess as v2.0 default
 
-The daemon talks to the engine through a narrow `trait Engine` (six
-methods: `create_session`, `destroy_session`, `set_enabled`,
-`set_params`, `get_params`, `process`). The parameter surface is
-batch-only — a single-control edit is a 1-entry batch — and is served
-by the engine's AK accessors directly, not the cmd protocol — the
-AK-direct binding ([ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)) —
-so `get_params` is a real read of the live registry via `ak_get_bulk`,
-and one `set_params` lands a profile or EQ-preset
-switch on one audio block. The visualizer needs no read call at all:
-every `process` reply carries the four ReadOnly-Dynamic arrays as its
-`VisFrame` (the vis tail, ADR-0010).
-v2.0 ships one implementation: `QemuBackend`, which runs a single shared
-`qemu-arm-static` subprocess holding `libdseffect.so` and multiplexing N
-sessions internally, eliminating v1's per-stream subprocess startup and
-memory duplication. Every session init sends `EFFECT_CMD_SET_CONFIG`
-(cmd 1) inside the backend — the explicit `create_session` rate
-(host-validated), stereo + PCM16 + WRITE — never relying on the
-engine's 44100 Hz power-on default; the trait surface stays
-rate-agnostic. Future backends (`UnicornBackend` for in-process JIT,
-`StaticBinaryBackend` for ARM→x86_64 translation) slot in behind the
-same trait without touching daemon code. The trade-off is a WSL2
-dependency on Windows for v2.0; v2.1 (Unicorn) removes it.
+The daemon reaches the engine only through the narrow `trait Engine`
+(session create/destroy, enable, batch-only param set/get, process — the
+param surface is AK-direct,
+[ADR-0010](0010-ak-direct-params-cmd-lifecycle.md)). v2.0 ships one
+implementation, `QemuBackend`: a single shared `qemu-arm-static`
+subprocess holds `libdseffect.so` and multiplexes all sessions,
+eliminating v1's per-stream subprocess startup and memory duplication.
+Future backends (`UnicornBackend` in-process JIT, `StaticBinaryBackend`
+ARM→x86_64 translation) slot in behind the same trait without touching
+daemon code. Trade-off: v2.0 needs WSL2 on Windows; v2.1 (Unicorn)
+removes it.
