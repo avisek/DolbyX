@@ -18,11 +18,6 @@ The goal of these documents is twofold:
    service, and engine contract — while leaving room for the planned
    Advanced section that exposes every `libdseffect.so` parameter.
 
-For a short, high-level introduction to what the module is and the DSP
-pipeline at a conceptual level, see `docs/DDP_Reverse_Engineering_Analysis.md`
-in the parent folder. That document predates this folder and is correct as
-far as it goes; the documents here go deeper and more prescriptive.
-
 ## How to read these in order
 
 If you want the full picture, read them in numeric order. Each one builds on
