@@ -1,8 +1,9 @@
 # `ddp_probe` — libdseffect.so evidence harness
 
 This harness is the empirical source of truth for everything the
-`docs/ddp/` reference and the v2 epic ([#8](https://github.com/avisek/DolbyX/issues/8)) say about how
-`libdseffect.so` actually behaves at the AudioEffect HAL boundary.
+`docs/ddp/` reference and the v2 epic ([#8](https://github.com/avisek/DolbyX/issues/8))
+say about how `libdseffect.so` actually behaves at the AudioEffect
+HAL boundary.
 
 Run it whenever you want to verify a claim, debug a regression after
 swapping the engine binary, or generate fresh evidence to support a

@@ -559,7 +559,7 @@ DolbyX v2 collapses the empirical evidence above into a four-bucket
 classification of the **64 params it surfaces** — every engine root leaf,
 nothing dropped
 ([ADR-0004](../adr/0004-parameter-metadata-as-single-source-of-truth.md);
-implemented in [Slice 03](../issues/03-parameter-metadata.md)):
+implemented in [Slice 03 (#11)](https://github.com/avisek/DolbyX/issues/11)):
 
 - **Settable** (42 params) — every param with `settable = yes` above.
   Daemon validates against metadata; the shim writes via `ak_set`.

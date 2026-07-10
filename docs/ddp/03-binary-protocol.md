@@ -441,7 +441,8 @@ What it establishes (see [ddp_probe](../../tools/ddp_probe/README.md) #9):
   slot the DSP writes.)
 
 v2 exposes this to the daemon as the `GetParams` opcode over the
-[binary protocol](../issues/00-epic.md#daemon--engine-subprocess-binary-length-prefixed-little-endian) (the AK-direct binding,
+[binary protocol](https://github.com/avisek/DolbyX/issues/8#daemon--engine-subprocess-binary-length-prefixed-little-endian)
+(the AK-direct binding,
 [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)), giving a true
 read-back (verification, defaults, engine-computed state) on top of the
 daemon's own state model. Caveat: it only works where `libdseffect.so` is

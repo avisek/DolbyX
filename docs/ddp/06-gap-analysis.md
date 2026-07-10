@@ -695,7 +695,7 @@ engine tree, not from Java** — `ddp_probe dump tree` enumerates the real
 root leaves with authoritative ranges, frac bits, and descriptions. Drop
 `mxou`/`lcsz`; add `scpe`/`test` (DolbyX v2 classifies both as
 Experimental — engine-surfaced, hidden by the original UI). The v2 plan
-bakes this in: [Slice 03 — parameter metadata](../issues/03-parameter-metadata.md).
+bakes this in: [Slice 03 — parameter metadata (#11)](https://github.com/avisek/DolbyX/issues/11).
 
 ---
 
