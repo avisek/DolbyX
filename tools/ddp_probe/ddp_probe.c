@@ -10,7 +10,7 @@
  *   docs/ddp/03-binary-protocol.md
  *   docs/ddp/05-profiles-and-persistence.md
  *   docs/ddp/07-ak-api.md
- *   docs/issues/00-epic.md
+ *   the v2 epic (https://github.com/avisek/DolbyX/issues/8)
  *
  * Experiments
  * -----------

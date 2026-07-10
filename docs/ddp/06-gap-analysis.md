@@ -639,7 +639,7 @@ This is the foundation for the planned "every parameter is exposable"
 goal. It also means adding a new parameter is a one-place edit
 (`g_ddp_params` table) and the UI auto-discovers it.
 
-> **Superseded by v2 plan.** The v2 epic ([`docs/issues/00-epic.md`](../issues/00-epic.md))
+> **Superseded by v2 plan.** The v2 epic ([#8](https://github.com/avisek/DolbyX/issues/8))
 > supersedes the `/params.json` proposal above: the v2 daemon
 > injects parameter metadata (and the initial state snapshot) into the served
 > `index.html` as `window.__BOOTSTRAP__`, eliminating the pre-paint HTTP
@@ -1194,7 +1194,7 @@ See that issue.
 ## Architectural target diagram
 
 > **Note.** The diagram below is the gap-analysis-era target. The actual v2
-> design ([`docs/issues/00-epic.md`](../issues/00-epic.md))
+> design ([the v2 epic, #8](https://github.com/avisek/DolbyX/issues/8))
 > supersedes the `/params.json` delivery shown here — metadata and initial
 > state are injected into `index.html` as `window.__BOOTSTRAP__`
 > (bootstrap injection).
