@@ -12,13 +12,13 @@ The engine exports the AK functions as ordinary symbols, so a process that
 (experiment 9) and enumerates the engine's true metadata + descriptions (the
 `dump` command).
 
-> **Scope.** Reverse-engineered from the v8.1 `libdseffect.so` and
-> **version-pinned to that binary** — the symbol behaviour and context offsets
-> below are not a stable ABI. DolbyX v2 drives the **parameter surface** through
-> these AK accessors in production (the AK-direct binding,
-> [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)) and keeps the cmd
-> protocol only for **lifecycle** (init / config / enable / `process`); the
-> offset + symbol coupling is pinned to this binary and encapsulated behind the
+> **Scope.** Reverse-engineered from the long-EOL `libdseffect.so` (v2.0.4.0,
+> bundled in the v8.1-20211005 module) and **version-pinned to that binary** —
+> the symbol behaviour and context offsets below are not a stable ABI. DolbyX
+> v2 drives the **parameter surface** through these AK accessors in production
+> (the AK-direct binding, [ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md))
+> and keeps the cmd protocol only for **lifecycle** (init / config / enable / `process`);
+> the offset + symbol coupling is pinned to this binary and encapsulated behind the
 > backend FFI boundary. The dump / introspection uses below double as the
 > offline metadata-table generator. See the
 > [AK registry read path](03-binary-protocol.md#the-ak-registry-read-path) in 03.
@@ -237,7 +237,7 @@ frac_bits and `dump defaults` the power-on values — the exact data a
 `dump docs` adds the field the others omit: the engine's **long help string**
 (`ak_get_string` idx 2), present on 75 of the 248 defs.
 
-## Symbol offsets (v8.1 `libdseffect.so`)
+## Symbol offsets (v2.0.4.0 `libdseffect.so`)
 
 For re-derivation against this build (`.text` offsets):
 

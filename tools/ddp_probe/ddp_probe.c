@@ -10,7 +10,7 @@
  *   docs/ddp/03-binary-protocol.md
  *   docs/ddp/05-profiles-and-persistence.md
  *   docs/ddp/07-ak-api.md
- *   docs/REARCHITECTURE_PLAN.md
+ *   docs/issues/00-epic.md
  *
  * Experiments
  * -----------

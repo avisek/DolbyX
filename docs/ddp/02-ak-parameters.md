@@ -555,9 +555,11 @@ but they are there.
 > ([ADR-0010](../adr/0010-ak-direct-params-cmd-lifecycle.md)). The buckets
 > below classify *which* params v2 surfaces; the binding is AK throughout.
 
-The rearchitecture plan's Decision 3 collapses the empirical evidence
-above into a four-bucket classification of the **64 params DolbyX v2
-surfaces** — every engine root leaf, nothing dropped:
+DolbyX v2 collapses the empirical evidence above into a four-bucket
+classification of the **64 params it surfaces** — every engine root leaf,
+nothing dropped
+([ADR-0004](../adr/0004-parameter-metadata-as-single-source-of-truth.md);
+implemented in [Slice 03](../issues/03-parameter-metadata.md)):
 
 - **Settable** (42 params) — every param with `settable = yes` above.
   Daemon validates against metadata; the shim writes via `ak_set`.
