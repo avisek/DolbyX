@@ -1,6 +1,8 @@
 [package]
 name = "ddp-daemon"
 description = "DolbyX daemon: HTTP/WS server + audio-plugin IPC + engine supervision in one binary"
+# `gen_param_twin` (dev tool) would otherwise make `cargo run` ambiguous.
+default-run = "ddp-daemon"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
