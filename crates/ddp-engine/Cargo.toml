@@ -10,3 +10,8 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[features]
+# Binds the integration tests to the real engine under qemu-arm-static
+# (builds ddp-engine-arm + stages tools/ddp_probe's proven stub libs).
+qemu = []

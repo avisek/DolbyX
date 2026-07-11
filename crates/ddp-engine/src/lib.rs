@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod protocol;
 pub mod stub;
 
 pub use stub::{Call, StubBackend};

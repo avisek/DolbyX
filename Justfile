@@ -24,6 +24,16 @@ test: _ui-deps
     cargo test --workspace
     pnpm -C ui test
 
+# Cross-compile the ARMv7 engine shim (rustup target + gcc-arm-linux-gnueabihf linker)
+arm-build:
+    rustup target add armv7-unknown-linux-gnueabihf
+    cargo build -p ddp-engine-arm --target armv7-unknown-linux-gnueabihf --release
+
+# apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static
+# Engine integration tests — real libdseffect.so under qemu-arm-static
+qemu-test: arm-build
+    cargo test -p ddp-engine --features qemu
+
 # Regenerate parameters.engine.toml from the live engine (probe dumps)
 param-twin:
     mkdir -p target/param-twin

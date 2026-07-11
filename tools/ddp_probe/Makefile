@@ -62,9 +62,13 @@ SYSROOT_LIBS = libc.so libdl.so libm.so libstdc++.so
 STAGED       = $(LIBDIR)/libdseffect.so \
                $(addprefix $(LIBDIR)/,$(STUB_LIBS) $(SYSROOT_LIBS))
 
-.PHONY: all run run-log akctl setconfig reshape vis lifecycle dump-tree dump-defaults dump-types dump-docs clean
+.PHONY: all stage check run run-log akctl setconfig reshape vis lifecycle dump-tree dump-defaults dump-types dump-docs clean
 
 all: $(PROBES) $(STAGED)
+
+# Staged libs only (engine + stubs + sysroot symlinks), no probes — what
+# external engine hosts (the ddp-engine qemu harness) stage from.
+stage: $(STAGED)
 
 $(PROBES): $(BUILDDIR)/%: %.c audio_effect_defs.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $< -ldl -lm
@@ -90,6 +94,37 @@ $(BUILDDIR):
 
 $(LIBDIR):
 	mkdir -p $(LIBDIR)
+
+# The CI regression gate (issue #14): the engine behaviors the v2
+# design load-bears on — cmd 3 ≡ ak_set (akctl_probe), the SET_CONFIG
+# rate-swap (setconfig_probe), cache-raw vs registry-clamped, and the
+# 7560/5512-sample crossfades (ddp_probe). A miss means the engine
+# binary changed behavior — re-review docs/ddp/ before touching greps.
+CHECKDIR = $(BUILDDIR)/check
+check: all
+	@mkdir -p $(CHECKDIR)
+	@echo "check: ddp_probe — cache-raw vs registry-clamped + crossfades"
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(PROBE) $(LIBDIR)/libdseffect.so >$(CHECKDIR)/probe.out 2>$(CHECKDIR)/probe.log
+	@grep -q "cache(raw)=210 .*ak_get(clamped)=10" $(CHECKDIR)/probe.out \
+	  || { echo "check FAILED: raw-cache/clamped-registry divergence gone ($(CHECKDIR)/probe.out)"; exit 1; }
+	@grep -q "DSP READS CLAMPED REGISTRY" $(CHECKDIR)/probe.out \
+	  || { echo "check FAILED: DSP no longer reads the clamped registry ($(CHECKDIR)/probe.out)"; exit 1; }
+	@grep -q "Starting graceful enable over 7560 samples" $(CHECKDIR)/probe.log \
+	  || { echo "check FAILED: 7560-sample enable crossfade gone ($(CHECKDIR)/probe.log)"; exit 1; }
+	@grep -q "Starting graceful disable over 5512 samples" $(CHECKDIR)/probe.log \
+	  || { echo "check FAILED: 5512-sample disable crossfade gone ($(CHECKDIR)/probe.log)"; exit 1; }
+	@echo "check: akctl_probe — cmd 3 ≡ ak_set"
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(AKCTL) $(LIBDIR)/libdseffect.so >$(CHECKDIR)/akctl.out 2>/dev/null
+	@grep -q "EQUIVALENT (bit-for-bit)" $(CHECKDIR)/akctl.out \
+	  || { echo "check FAILED: cmd 3 / ak_set equivalence gone ($(CHECKDIR)/akctl.out)"; exit 1; }
+	@echo "check: setconfig_probe — SET_CONFIG rate-swap"
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(SETCFG) $(LIBDIR)/libdseffect.so >$(CHECKDIR)/setconfig.out 2>/dev/null
+	@grep -q "DSP now runs at 48000" $(CHECKDIR)/setconfig.out \
+	  || { echo "check FAILED: SET_CONFIG 48000 rate-swap gone ($(CHECKDIR)/setconfig.out)"; exit 1; }
+	@echo "check: all engine regressions green"
 
 run: all
 	@echo "Running ddp_probe — stdout is the summary, stderr is the engine log."
