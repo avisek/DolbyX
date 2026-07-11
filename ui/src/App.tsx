@@ -1,10 +1,16 @@
 import type { Component } from 'solid-js'
+import ConnectionBadge from './components/ConnectionBadge'
+import PowerToggle from './components/PowerToggle'
 import './App.css'
 
-/** Root shell. The first real control lands with Slice 05 (#13). */
+/** Root shell — the tracer bullet's control surface (Slice 05, #13). */
 const App: Component = () => (
   <main class="app">
-    <h1 class="app__title">DolbyX</h1>
+    <header class="app__header">
+      <h1 class="app__title">DolbyX</h1>
+      <ConnectionBadge />
+    </header>
+    <PowerToggle />
   </main>
 )
 
