@@ -29,6 +29,16 @@ A leaf directly under the engine's AK tree root — the real parameter
 universe (64), which differs from Java's registered list
 ([ddp/02](docs/ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves)).
 
+**Power-on default**:
+The value a root leaf holds in a fresh AK registry — `ParameterDef.default`,
+the cascade's base layer. Deterministic and rate-independent; may sit
+outside the param's own write bounds (bounds clamp writes, not storage).
+Only the six DSP-owned visualizer slots ever move later, at the first
+process blocks
+([ADR-0004](docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
+_Avoid_: boot value, initial value, factory default (collides with
+Factory item).
+
 **Settability bucket**:
 The classification of every AK parameter into exactly one of `Settable`,
 `Experimental`, `ReadOnly-Dynamic`, or `ReadOnly-Static`
