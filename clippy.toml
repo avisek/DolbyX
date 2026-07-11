@@ -1,0 +1,3 @@
+# Words `clippy::doc_markdown` must not demand backticks for.
+# ".." keeps clippy's built-in list.
+doc-valid-idents = ["DolbyX", "EqualizerAPO", "PipeWire", "ARMv7", ".."]

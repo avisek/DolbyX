@@ -1,0 +1,9 @@
+[package]
+name = "ddp-engine-arm"
+description = "The engine shim: ARMv7 binary that dlopens libdseffect.so, routes sessions, serves the engine protocol"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
