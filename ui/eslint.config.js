@@ -1,8 +1,14 @@
 // @ts-check
 import js from '@eslint/js'
 import { defineConfig } from 'eslint/config'
-import solid from 'eslint-plugin-solid/configs/typescript'
+import solidTypeChecked from 'eslint-plugin-solid/configs/typescript'
 import tseslint from 'typescript-eslint'
+
+// eslint-plugin-solid 0.14 ships rule typings predating ESLint 9's core
+// ones — runtime-compatible, type-incompatible. Cast until it updates.
+const solid = /** @type {import('eslint').Linter.Config} */ (
+  /** @type {unknown} */ (solidTypeChecked)
+)
 
 export default defineConfig(
   { ignores: ['dist/'] },
@@ -18,6 +24,7 @@ export default defineConfig(
       },
     },
   },
-  // The config file itself sits outside the tsconfigs — lint it untyped.
+  // This config file itself: type-checked by tsc (tsconfig.node.json),
+  // linted untyped.
   { files: ['**/*.js'], extends: [tseslint.configs.disableTypeChecked] },
 )
