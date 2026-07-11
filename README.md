@@ -41,13 +41,15 @@ Or browse any v1 file in place: `git show v1:daemon/main.c`.
 Prerequisites: [rustup](https://rustup.rs) (the toolchain is pinned by
 `rust-toolchain.toml`), [just](https://just.systems), Node ≥ 22 +
 [pnpm](https://pnpm.io), and `cargo install cargo-watch` (for `just
-dev`). For the probe harness only: `apt install gcc-arm-linux-gnueabihf
-g++-arm-linux-gnueabihf qemu-user-static`.
+dev`). For anything driving the ARM engine (`just qemu-test`, the probe
+harness): `apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+qemu-user-static`.
 
 ```bash
-just lint    # cargo fmt --check + clippy (-D warnings) + UI lint
-just test    # cargo test --workspace + UI tests
-just dev     # daemon + UI dev loop with hot reload
+just lint       # cargo fmt --check + clippy (-D warnings) + UI lint
+just test       # cargo test --workspace + UI tests
+just qemu-test  # engine shim vs real libdseffect.so under qemu
+just dev        # daemon + UI dev loop with hot reload
 ```
 
 Reading order for contributors:

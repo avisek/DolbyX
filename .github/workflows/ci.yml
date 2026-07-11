@@ -24,6 +24,22 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo fmt --all --check
 
+  qemu:
+    name: qemu (arm shim + probe regressions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y
+          gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static
+      - run: rustup target add armv7-unknown-linux-gnueabihf
+      - run: cargo build -p ddp-engine-arm --target armv7-unknown-linux-gnueabihf --release
+      # Drives the shim (real engine, nothing mocked) over the framed protocol
+      - run: cargo test -p ddp-engine --features qemu
+      - run: cargo clippy -p ddp-engine --features qemu --all-targets -- -D warnings
+      # The documented engine behaviors the design load-bears on
+      - run: make -C tools/ddp_probe check
+
   ui:
     name: ui (${{ matrix.os }})
     strategy:
