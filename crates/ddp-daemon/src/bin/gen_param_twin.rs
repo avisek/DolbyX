@@ -5,9 +5,10 @@
 //! three arguments are files holding the output of `make -C tools/ddp_probe
 //! dump-tree / dump-defaults / dump-docs`. Run via `just param-twin`.
 //!
-//! The twin is committed, never loaded; CI diffs the engine-fact fields
-//! (`name length min max frac_bits default`) of `parameters.toml` against
-//! it and fails on drift
+//! The twin is committed, never loaded — the engine-truth reference
+//! `parameters.toml` is curated from. CI checks that table's structure
+//! against it: names 1:1, lengths equal, ranges within the engine
+//! envelope
 //! ([ADR-0004](https://github.com/avisek/DolbyX/blob/main/docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
 
 #![forbid(unsafe_code)]
@@ -51,12 +52,13 @@ struct DocEntry {
 }
 
 const HEADER: &str = "\
-# parameters.engine.toml — probe-generated engine-fact twin of
+# parameters.engine.toml — probe-generated engine-truth twin of
 # parameters.toml. DO NOT HAND-EDIT; regenerate with `just param-twin`.
-# Never loaded by the daemon: CI diffs the engine-fact fields
-# (name length min max frac_bits default) against parameters.toml and
-# fails on drift (ADR-0004). label/description/help are the engine's own
-# strings, kept as the seeding reference — not diffed.
+# Never loaded by the daemon: it is the reference parameters.toml is
+# curated from — CI checks that table's structure against this one:
+# names 1:1, lengths equal, ranges within the engine envelope (ADR-0004).
+# label/description/help are the engine's own strings, kept as the
+# seeding reference.
 
 ";
 

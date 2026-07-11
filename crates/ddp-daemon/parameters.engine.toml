@@ -1,9 +1,10 @@
-# parameters.engine.toml — probe-generated engine-fact twin of
+# parameters.engine.toml — probe-generated engine-truth twin of
 # parameters.toml. DO NOT HAND-EDIT; regenerate with `just param-twin`.
-# Never loaded by the daemon: CI diffs the engine-fact fields
-# (name length min max frac_bits default) against parameters.toml and
-# fails on drift (ADR-0004). label/description/help are the engine's own
-# strings, kept as the seeding reference — not diffed.
+# Never loaded by the daemon: it is the reference parameters.toml is
+# curated from — CI checks that table's structure against this one:
+# names 1:1, lengths equal, ranges within the engine envelope (ADR-0004).
+# label/description/help are the engine's own strings, kept as the
+# seeding reference.
 
 [[param]]
 name = "bver"

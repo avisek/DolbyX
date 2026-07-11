@@ -2,16 +2,15 @@
 # parameters (ADR-0004). Ships next to the daemon binary; parsed +
 # validated at startup only; malformed => the daemon refuses to start.
 #
-# Engine-fact fields (name length min max frac_bits default) are CI-gated
-# against the probe-generated parameters.engine.toml — regenerate it with
-# `just param-twin`. Product fields (kind category access label
-# description help) are free to hand-edit.
-#
-# Exception: the by-ref vis arrays (vnbg vnbe vcbg vcbe) carry corrected
-# min/max/frac_bits — the engine API reports no metadata for by-ref slots
-# (frac 0, full-int16 bounds); its own help pins the coding ("scaled by
-# 16 ie. 16 = 1 dB") and ddp/02 the in-contract output range [-192, 576].
-# The twin gate skips exactly those fields there (tests/parameters.rs).
+# The whole table is curated and validation-clean: every default slot in
+# [min, max]. Engine truth lives in the probe-generated
+# parameters.engine.toml twin (`just param-twin`); CI checks structure
+# against it — names 1:1, lengths equal, every range within the engine
+# envelope (tests/parameters.rs). Deliberate divergences from power-on
+# truth: inactive band slots clamp to min, vnnb curates 20, and the
+# by-ref vis arrays (vnbg vnbe vcbg vcbe) carry the real dB coding the
+# API doesn't report (help: "scaled by 16 ie. 16 = 1 dB"; output range
+# [-192, 576], ddp/02).
 
 [[param]]
 name = "bver"
@@ -351,7 +350,7 @@ length = 40
 min = 20
 max = 20000
 frac_bits = 0
-default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
 category = "ieq"
 access = "settable"
@@ -491,7 +490,7 @@ length = 40
 min = 20
 max = 20000
 frac_bits = 0
-default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
 category = "geq"
 access = "settable"
@@ -547,7 +546,7 @@ length = 40
 min = 20
 max = 20000
 frac_bits = 0
-default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
 category = "audio_optimizer"
 access = "settable"
@@ -612,7 +611,7 @@ length = 40
 min = 20
 max = 20000
 frac_bits = 0
-default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
 category = "audio_regulator"
 access = "settable"
@@ -762,7 +761,7 @@ length = 1
 min = 1
 max = 20
 frac_bits = 0
-default = [0]
+default = [20]
 kind = "integer"
 category = "visualizer"
 access = "read_only_static"
@@ -832,7 +831,7 @@ length = 20
 min = 20
 max = 20000
 frac_bits = 0
-default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+default = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
 category = "visualizer"
 access = "experimental"

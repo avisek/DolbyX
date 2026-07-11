@@ -4,10 +4,10 @@
 //! Everything downstream — wire validation, engine init, persistence, UI
 //! generation, ranges — derives from this table
 //! ([ADR-0004](https://github.com/avisek/DolbyX/blob/main/docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
-//! Engine-fact fields (`name`, `length`, `min`, `max`, `frac_bits`,
-//! `default`) are probe-sourced and CI-gated against the committed
-//! `parameters.engine.toml` twin; product fields (`kind`, `category`,
-//! `access`, `label`, `description`, `help`) are free to hand-edit.
+//! The table is curated and validation-clean — every `default` slot in
+//! `[min, max]`; CI checks its structure against the committed
+//! `parameters.engine.toml` twin: names 1:1, lengths equal, ranges
+//! within the engine envelope.
 
 use serde::Deserialize;
 
@@ -26,7 +26,8 @@ pub struct ParameterDef {
     pub max: i16,
     /// Fixed-point scale: display = raw / 2^`frac_bits` (4 ⇒ 1/16 dB).
     pub frac_bits: u8,
-    /// `length`-sized engine power-on value (probe `dump-defaults`).
+    /// `length`-sized base value, every slot in `[min, max]` (power-on
+    /// truth lives in the twin).
     pub default: Vec<i16>,
     /// Drives UI widget choice + unit label.
     pub kind: ParamKind,
@@ -158,6 +159,20 @@ pub enum ParseError {
     /// `length` is zero.
     #[error("parameter `{0}`: length must be at least 1")]
     ZeroLength(String),
+    /// A `default` slot lies outside `[min, max]`.
+    #[error("parameter `{name}`: default[{index}] = {value} outside [{min}, {max}]")]
+    DefaultOutOfBounds {
+        /// The offending parameter.
+        name: String,
+        /// The first out-of-bounds slot.
+        index: usize,
+        /// Its value.
+        value: i16,
+        /// The declared lower bound.
+        min: i16,
+        /// The declared upper bound.
+        max: i16,
+    },
     /// A tristate's `on` value is neither 1 nor 2.
     #[error("parameter `{name}`: tristate `on` must be 1 or 2, got {on}")]
     BadTristateOn {
@@ -229,10 +244,24 @@ fn validate(def: &ParameterDef) -> Result<(), ParseError> {
             actual: def.default.len(),
         });
     }
-    // No default-within-[min, max] check: the bounds govern *writes*; the
-    // engine's power-on state legitimately sits outside them (band-array
-    // zero-padding under `gebf`'s min = 20; `vnnb` = 0 until process blocks
-    // populate the native grid — see ADR-0004 / `make lifecycle`).
+    // The engine's power-on state legitimately sits outside the write
+    // bounds; the curated table corrects those slots, the twin keeps the
+    // engine truth (ADR-0004).
+    let bounds = def.min..=def.max;
+    if let Some((index, &value)) = def
+        .default
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !bounds.contains(value))
+    {
+        return Err(ParseError::DefaultOutOfBounds {
+            name: def.name.clone(),
+            index,
+            value,
+            min: def.min,
+            max: def.max,
+        });
+    }
     Ok(())
 }
 
@@ -344,15 +373,22 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_default_outside_the_write_bounds() {
-        // Bounds govern writes, not power-on state: the engine's own
-        // defaults sit outside them (`gebf` zero-padding under min = 20,
-        // `vnnb` = 0 before SET_CONFIG).
+    fn rejects_a_default_outside_the_write_bounds() {
+        // The table is curated: the engine's own out-of-bounds power-on
+        // values (`gebf` zero-tails under min = 20, `vnnb` = 0 in [1..20])
+        // stay in the twin; every `parameters.toml` slot must be usable.
         let doc = minimal("gebf")
             .replace("min = 0", "min = 20")
             .replace("max = 10", "max = 20000")
-            .replace("default = [7]", "default = [0]");
-        assert!(parse(&doc).is_ok());
+            .replace("default = [7]", "default = [40, 0]")
+            .replace("length = 1", "length = 2");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(err, ParseError::DefaultOutOfBounds { .. }));
+        let message = err.to_string();
+        assert!(
+            message.contains("gebf") && message.contains("[1]") && message.contains("20"),
+            "unhelpful error: {message}"
+        );
     }
 
     #[test]
@@ -409,7 +445,8 @@ mod tests {
                 .replace("min = 0", &format!("min = {}", value.min(0)))
                 .replace("default = [7]", "default = [0]");
             let as_max = minimal("dvla")
-                .replace("max = 10", &format!("max = {}", value.max(0)));
+                .replace("max = 10", &format!("max = {}", value.max(0)))
+                .replace("default = [7]", "default = [0]");
             let as_default = minimal("dvla")
                 .replace("min = 0", &format!("min = {}", i16::MIN))
                 .replace("max = 10", &format!("max = {}", i16::MAX))
