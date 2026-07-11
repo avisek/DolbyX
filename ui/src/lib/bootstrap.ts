@@ -1,5 +1,5 @@
 import type { ParameterDef } from './parameters'
-import type { StateSnapshot } from '../store/state'
+import type { StateSnapshot } from './ws'
 
 /**
  * The daemon replaces `<!--BOOTSTRAP-->` in the served HTML at request

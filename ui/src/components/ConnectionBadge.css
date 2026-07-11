@@ -1,0 +1,12 @@
+.connection-badge {
+  padding: 0.25rem 0.625rem;
+  border-radius: 1rem;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.connection-badge--connected {
+  color: var(--color-accent);
+}

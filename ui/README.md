@@ -29,13 +29,24 @@ hot-reload through the daemon's origin. Inside `ui/`: `pnpm dev` /
 
 ## Architecture
 
-- `src/main.tsx` — bootstrap guard + mount
+- `src/main.tsx` — bootstrap guard + mount + background WS connect
 - `src/App.tsx` — root shell
-- `src/store/` — `solid-js/store` state (no third-party state lib)
-- `src/lib/` — bootstrap contract, parameter metadata, WS client, unit
-  helpers (arriving with their slices)
+- `src/store/state.ts` — `solid-js/store` snapshot, hydrated from the
+  bootstrap at module init (no third-party state lib)
+- `src/store/ws.ts` — WS ↔ store glue: connection signal + the command
+  actions components call (local-first: the originator applies its own
+  change on `ack`; the `state` broadcast goes to other tabs)
+- `src/lib/ws.ts` — typed wire vocabulary + `WsClient`: fresh
+  `request_id` per command settled promise-style, `get_state` reconcile
+  on every open and on any `error`, auto-reconnect with backoff
+- `src/lib/` also: bootstrap contract, parameter metadata, unit helpers
+  (arriving with their slices)
+- `src/components/` — `PowerToggle`, `ConnectionBadge`, … one `.tsx` +
+  BEM `.css` per component
+- `src/test/` — shared fixtures + the mocked `WebSocket` (the sanctioned
+  UI test seam; real-daemon E2E lands in Slice 09, #17)
 - `src/styles/` — `theme.css` design tokens (skins swap variables, not
-  code) + `base.css` resets; components carry their own BEM `.css` files
+  code) + `base.css` resets
 
 Conventions: strict TS (`noUncheckedIndexedAccess`,
 `exactOptionalPropertyTypes`); ESLint `strict-type-checked` +
