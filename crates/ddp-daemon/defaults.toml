@@ -1,0 +1,5 @@
+# DolbyX factory defaults — read once at startup, never watched.
+# Root keys only until Slice 10 (#18) brings factory profiles + EQ presets.
+
+power = true
+selected_profile = "music"

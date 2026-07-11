@@ -7,7 +7,11 @@
 #![forbid(unsafe_code)]
 
 pub mod param_def;
+pub mod profile;
+pub mod state;
 
 pub use param_def::{
     ParamAccess, ParamCategory, ParamKind, ParameterDef, ParseError, lookup, parse,
 };
+pub use profile::ProfileId;
+pub use state::{Command, Defaults, State, StateDiff, ValidationError};

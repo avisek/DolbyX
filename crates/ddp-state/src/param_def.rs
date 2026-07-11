@@ -9,10 +9,11 @@
 //! `parameters.engine.toml` twin: names 1:1, lengths equal, ranges
 //! within the engine envelope.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Metadata for one AK parameter (one root leaf of the engine's AK tree).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// (`Serialize` feeds the UI bootstrap; the wire shape mirrors the TOML.)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParameterDef {
     /// 4-CC name: `"dvla"`, `"iebt"`, … (1–4 lowercase ASCII alphanumerics).
@@ -45,7 +46,7 @@ pub struct ParameterDef {
 }
 
 /// What a parameter *is* for the UI — widget choice + unit label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParamKind {
     /// 0/1 switch.
@@ -76,7 +77,7 @@ pub enum ParamKind {
 
 /// Settability bucket — DSP semantics + UI presentation, not engine
 /// acceptance (the engine forwards a SET against any declared param).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamAccess {
     /// Well-defined DSP behavior; editable widgets (Java's whitelist).
@@ -90,7 +91,7 @@ pub enum ParamAccess {
 }
 
 /// UI grouping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamCategory {
     /// Intelligent EQ.
