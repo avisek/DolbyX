@@ -27,7 +27,7 @@ pub struct ParameterDef {
     /// Fixed-point scale: display = raw / 2^`frac_bits` (4 ⇒ 1/16 dB).
     pub frac_bits: u8,
     /// `length`-sized base value, every slot in `[min, max]` (power-on
-    /// truth lives in the twin).
+    /// truth lives in the param twin).
     pub default: Vec<i16>,
     /// Drives UI widget choice + unit label.
     pub kind: ParamKind,

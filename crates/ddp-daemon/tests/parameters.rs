@@ -97,7 +97,7 @@ fn vis_arrays_carry_corrected_db_facts() {
 }
 
 /// The engine boots 10-band — `genb` 10, band-freq actives the ISO octave
-/// centres — but its power-on state holds out-of-bounds zeros (twin
+/// centres — but its power-on state holds out-of-bounds zeros (param-twin
 /// truth). The curated table corrects exactly those slots: inactive band
 /// slots clamp to min, `vnnb` curates 20 — the rate-derived native-grid
 /// count at 44.1/48 kHz (ADR-0004).

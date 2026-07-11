@@ -68,7 +68,7 @@ fn main() -> ExitCode {
         eprintln!("usage: gen_param_twin <tree> <defaults> <docs> <out>");
         return ExitCode::FAILURE;
     };
-    let read = |path: &String| {
+    let read = |path: &str| {
         std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))
     };
     let generate = || -> Result<String, String> {
