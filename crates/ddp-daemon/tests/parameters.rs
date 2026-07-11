@@ -110,7 +110,7 @@ fn curated_defaults_correct_the_oob_power_on_slots() {
         let def = lookup(&defs, name).unwrap();
         assert_eq!(def.default[..10], iso, "`{name}` active centres");
         assert!(
-            def.default[10..].iter().all(|&v| v == 20),
+            def.default[10..].iter().all(|&v| v == def.min),
             "`{name}` tail must clamp to min"
         );
     }

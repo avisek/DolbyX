@@ -270,7 +270,7 @@ param writes** before F. Verdict: **keep the post-open capture**.
   garbage measurements.
 - **Boot OOB never heals.** The band-array zero-tails and `vcbf` stay outside
   `[min, max]` through every stage, rate, and vis state; only `vnnb`/`vnbf`
-  become in-bounds (at E). So the twin's power-on defaults legitimately
+  become in-bounds (at E). So the param twin's power-on defaults legitimately
   violate the write bounds — bounds clamp writes, not storage;
   `parameters.toml` curates those slots in-bounds
   ([ADR-0004](../../docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
