@@ -1,12 +1,8 @@
 # DolbyX
 
-Run the legendary **Dolby Digital Plus** audio effect from Android on your
-PC — system-wide, on all audio. Uses the original ARM DSP binary via QEMU
-emulation with zero quality compromise.
-
-## What Does It Sound Like?
-
-DolbyX processes audio through a 28-node filterbank DSP pipeline:
+Run Android's legendary **Dolby Digital Plus** audio effect on your PC —
+system-wide, on all audio. The original ARM DSP binary (`libdseffect.so`)
+runs under QEMU emulation with zero quality compromise:
 
 - **Spatial audio** — HRTF-based headphone virtualizer with crossfeed
 - **Intelligent EQ** — content-adaptive spectral shaping
@@ -14,101 +10,76 @@ DolbyX processes audio through a 28-node filterbank DSP pipeline:
 - **Dialog enhancement** — vocal isolation and boost
 - **Dynamic range control** — fatigue-free listening for hours
 
-## Quick Start (Windows)
+## Status: v2 rebuild in progress
 
-### Prerequisites
+`main` carries the ground-up v2 rearchitecture
+([epic #8](https://github.com/avisek/DolbyX/issues/8)): a Rust daemon
+(HTTP/WS server + audio-plugin IPC + engine supervision in one binary), a
+Solid.js Web UI, and thin platform plugins (VST2 for Windows, LV2 for
+Linux) — faithful to the original DDP's sound, look, and feel, then
+extending it with custom profiles, custom EQ presets, and every engine
+parameter exposed.
 
-- Windows 10/11 with [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) + Ubuntu
-- [EqualizerAPO](https://sourceforge.net/projects/equalizerapo/) installed
-
-### Setup
-
-```bash
-cd ~/DolbyX
-chmod +x scripts/setup_wsl.sh
-./scripts/setup_wsl.sh
-
-# Copy VST to EqualizerAPO
-cp windows/vst/DolbyDDP.dll "/mnt/c/Program Files/EqualizerAPO/VSTPlugins/"
-```
-
-### Usage
-
-**Step 1:** Start the daemon (keep terminal open):
+**To use DolbyX today**, check out the working v1 (Windows + EqualizerAPO
++ WSL2) and follow its README:
 
 ```bash
-cd /mnt/c && ~/DolbyX/daemon/dolbyx.exe /home/$USER/DolbyX/arm
+git checkout v1
 ```
 
-Or double-click `scripts/start-dolbyx.bat` from Windows Explorer.
+Or browse any v1 file in place: `git show v1:daemon/main.c`.
 
-**Step 2:** In EqualizerAPO Configuration Editor, add DolbyDDP as a VST plugin.
+| Version | Platform                        | Status      |
+| ------- | ------------------------------- | ----------- |
+| v1      | Windows (EqualizerAPO + WSL2)   | Archived    |
+| v2.0    | Windows + Linux, Web UI         | In progress |
+| v2.1    | Native emulation (drops WSL2)   | Planned     |
+| v3.0    | macOS (AudioServerPlugin)       | Planned     |
 
-**Step 3:** Put on headphones and play music.
+## Development
 
-### Process Audio Files Offline
+Prerequisites: [rustup](https://rustup.rs) (the toolchain is pinned by
+`rust-toolchain.toml`) and [just](https://just.systems). For the probe
+harness only: `apt install gcc-arm-linux-gnueabihf
+g++-arm-linux-gnueabihf qemu-user-static`.
 
 ```bash
-cd ~/DolbyX/arm
-python3 test_ddp.py input.wav              # Creates input_ddp.wav
-python3 test_ddp.py input.wav output.wav   # Custom output name
+just lint    # cargo fmt --check + clippy (-D warnings)
+just test    # cargo test --workspace
+just dev     # daemon + UI dev loop (arrives in Slice 02)
 ```
 
-## Architecture
+Reading order for contributors:
+
+1. [Epic #8](https://github.com/avisek/DolbyX/issues/8) — architecture,
+   cross-slice invariants, wire protocol, slice index
+2. [`CONTEXT.md`](CONTEXT.md) — the project glossary; use its terms exactly
+3. [`docs/adr/`](docs/adr/) — one decision per file
+4. [`docs/ddp/`](docs/ddp/README.md) — the complete `libdseffect.so`
+   reverse engineering
+
+## Layout
 
 ```
-Audio App → EqualizerAPO → DolbyDDP.dll (VST) → \\.\pipe\DolbyX → dolbyx daemon
-                                                                       │
-                                                        qemu-arm-static + libdseffect.so
+crates/
+├── ddp-engine/        Engine trait + backends (stub, QEMU)
+├── ddp-state/         pure state model — profiles, EQ presets, params (no I/O)
+├── ddp-persistence/   TOML load/save + file watcher
+├── ddp-daemon/        the daemon binary — HTTP/WS + plugin IPC + supervision
+├── ddp-engine-arm/    the engine shim — ARMv7, dlopens libdseffect.so
+├── ddp-vst-windows/   thin VST2 plugin (EqualizerAPO)
+└── ddp-lv2-linux/     thin LV2 plugin (PipeWire)
+docs/ddp/              engine reverse engineering — the reference
+docs/adr/              architecture decision records
+tools/ddp_probe/       evidence harness proving every docs/ddp claim
+vendored/              libdseffect.so v2.0.4.0 + ds1-default.xml (ADR-0009)
+samples/               test audio
+decompiled/            original DDP app artifacts (RE source material)
 ```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full technical deep-dive.
-
-## Project Structure
-
-```
-DolbyX/
-├── arm/                     # ARM processor + Android ABI stubs
-│   ├── ddp_processor.c      # Main processor with gain staging
-│   ├── ddp_protocol.h       # Shared protocol definitions
-│   ├── test_ddp.py          # Offline WAV file processor
-│   ├── stubs/               # Android library stubs
-│   └── lib/                 # libdseffect.so + ds1-default.xml
-├── daemon/                  # DolbyX daemon (background process)
-│   └── main.c               # Named pipe server + processor management
-├── windows/
-│   └── vst/                 # VST2 plugin for EqualizerAPO
-├── ui/                      # Web UI (Phase 2 — coming soon)
-│   └── src/                 # HTML, CSS, JS sources
-├── linux/                   # LV2 plugin + PipeWire config (Phase 5)
-├── macos/                   # AudioServerPlugin driver (Phase 7)
-├── nix/                     # Nix flake modules (Phases 5, 7)
-├── scripts/
-│   ├── setup_wsl.sh         # Build automation
-│   └── start-dolbyx.bat     # One-click Windows launcher
-└── docs/                    # Architecture, reverse engineering, plans
-```
-
-## Performance
-
-| Metric             | Value                               |
-| ------------------ | ----------------------------------- |
-| Offline processing | 12× realtime                        |
-| Real-time latency  | ~10ms perceived                     |
-| Sample rates       | 32000, 44100, **48000** Hz (native) |
-
-## Roadmap
-
-| Version | Platform                      | Status      |
-| ------- | ----------------------------- | ----------- |
-| v1.x    | Windows (EqualizerAPO + WSL2) | ✅ Working  |
-| v2.0    | Windows + Web UI              | In progress |
-| v2.1    | Linux / NixOS (PipeWire)      | Planned     |
-| v3.0    | macOS (AudioServerPlugin)     | Planned     |
-
-See [docs/CROSS_PLATFORM_PLAN.md](docs/CROSS_PLATFORM_PLAN.md) for the full plan.
 
 ## License
 
-DolbyX is a wrapper/bridge for personal and educational use. `libdseffect.so`
-is proprietary Dolby code — supply your own from a legally obtained Magisk module.
+DolbyX is for personal and educational use. It drives the proprietary
+Dolby `libdseffect.so`, bundled for ease of install
+([ADR-0009](docs/adr/0009-bundle-libdseffect-so.md)); everything around it
+is original work.

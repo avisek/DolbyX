@@ -1,17 +1,17 @@
 # ═══════════════════════════════════════════════════════════════════════
 # Makefile — Build the libdseffect.so evidence harness for QEMU.
 #
-# Cross-compiles ddp_probe (ARMv7-A) and a noisy liblog override.
-# Reuses the same toolchain and library staging as arm/.
+# Standalone: cross-compiles the probes (ARMv7-A) and every Android stub
+# lib, stages the vendored libdseffect.so, and symlinks the libc family
+# from the ARM Linux sysroot — no other build required.
 #
 # Prerequisites:
-#   apt install gcc-arm-linux-gnueabihf qemu-user-static
-#   The harness loads libdseffect.so from arm/build/lib/, so run
-#   `make -C ../../arm` first (or any equivalent that produces
-#   ../../arm/build/lib/libdseffect.so and the other stub libs).
+#   apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+#               qemu-user-static
+#   libdseffect.so comes from ../../vendored/.
 #
 # Usage:
-#   make           — build the probe binary and the noisy liblog
+#   make           — build the probe binaries and the staged libs
 #   make run       — build then run under qemu-arm-static; stdout is
 #                    the test summary, stderr is the engine's own log
 #   make run-log   — like run but redirects engine log to engine.log
@@ -32,13 +32,14 @@
 #   make clean
 # ═══════════════════════════════════════════════════════════════════════
 
-CC      = arm-linux-gnueabihf-gcc
-CFLAGS  = -O0 -Wall -Wno-misleading-indentation -g \
-          -march=armv7-a -mfpu=neon -mfloat-abi=hard
+CC       = arm-linux-gnueabihf-gcc
+CXX      = arm-linux-gnueabihf-g++
+CFLAGS   = -O0 -Wall -Wno-misleading-indentation -g \
+           -march=armv7-a -mfpu=neon -mfloat-abi=hard
+CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 
-ARMDIR  = $(abspath ../../arm)
-ARMHDR  = $(ARMDIR)/audio_effect_defs.h
-ARMLIB  = $(ARMDIR)/build/lib
+VENDORED = $(abspath ../../vendored)
+SYSROOT  = /usr/arm-linux-gnueabihf/lib
 
 BUILDDIR = build
 LIBDIR   = $(BUILDDIR)/lib
@@ -48,37 +49,37 @@ AKCTL    = $(BUILDDIR)/akctl_probe
 SETCFG   = $(BUILDDIR)/setconfig_probe
 RESHAPE  = $(BUILDDIR)/reshape_probe
 VIS      = $(BUILDDIR)/vis_native_probe
-LIBLOG   = $(LIBDIR)/liblog.so
+PROBES   = $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(VIS)
 
-# All other arm libs come from arm/build/lib/ unchanged. We just
-# override liblog.so with our noisy version.
-STAGED_LIBS = libdseffect.so libc.so libcutils.so libdl.so libm.so \
-              libstdc++.so libutils.so
+# Staged alongside the engine: the noisy liblog override (root) plus the
+# silent Android stubs (stubs/), plus sysroot symlinks for the libc family.
+STUB_LIBS    = liblog.so libutils.so libcutils.so
+SYSROOT_LIBS = libc.so libdl.so libm.so libstdc++.so
+STAGED       = $(LIBDIR)/libdseffect.so \
+               $(addprefix $(LIBDIR)/,$(STUB_LIBS) $(SYSROOT_LIBS))
 
 .PHONY: all run run-log akctl setconfig reshape vis dump-tree dump-defaults dump-types dump-docs clean
 
-all: $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(VIS) $(LIBLOG) $(addprefix $(LIBDIR)/,$(STAGED_LIBS))
+all: $(PROBES) $(STAGED)
 
-$(PROBE): ddp_probe.c $(ARMHDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
+$(PROBES): $(BUILDDIR)/%: %.c audio_effect_defs.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $< -ldl -lm
 
-$(AKCTL): akctl_probe.c $(ARMHDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
-
-$(SETCFG): setconfig_probe.c $(ARMHDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
-
-$(RESHAPE): reshape_probe.c $(ARMHDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
-
-$(VIS): vis_native_probe.c $(ARMHDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -I$(ARMDIR) -o $@ $< -ldl -lm
-
-$(LIBLOG): liblog_stub.c | $(LIBDIR)
+$(LIBDIR)/liblog.so: liblog_stub.c | $(LIBDIR)
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
 
-$(LIBDIR)/%.so: $(ARMLIB)/%.so | $(LIBDIR)
+$(LIBDIR)/libutils.so: stubs/libutils_stub.cpp | $(LIBDIR)
+	$(CXX) $(CXXFLAGS) -shared -fPIC -o $@ $<
+
+$(LIBDIR)/libcutils.so: stubs/libcutils_stub.c | $(LIBDIR)
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
+
+$(LIBDIR)/libdseffect.so: $(VENDORED)/libdseffect.so | $(LIBDIR)
 	cp $< $@
+
+# Android soname → ARM Linux sysroot symlinks
+$(addprefix $(LIBDIR)/,$(SYSROOT_LIBS)): $(LIBDIR)/%.so: | $(LIBDIR)
+	ln -sf "$$(find $(SYSROOT) -name '$*.so.*' -not -name '*.py' | head -1)" $@
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)

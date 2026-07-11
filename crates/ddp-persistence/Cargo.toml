@@ -1,0 +1,9 @@
+[package]
+name = "ddp-persistence"
+description = "TOML overlay persistence: defaults/config cascade, debounced write-back, file watcher"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+[package]
+name = "ddp-engine"
+description = "Engine seam: the Engine trait plus stub and QEMU backends"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

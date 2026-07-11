@@ -1,0 +1,9 @@
+[package]
+name = "ddp-daemon"
+description = "DolbyX daemon: HTTP/WS server + audio-plugin IPC + engine supervision in one binary"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

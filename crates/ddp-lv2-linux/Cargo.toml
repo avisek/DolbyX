@@ -1,0 +1,12 @@
+[package]
+name = "ddp-lv2-linux"
+description = "Thin LV2 plugin for Linux hosts (PipeWire) — audio over AF_UNIX to the daemon"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
