@@ -1,8 +1,8 @@
-//! `StubBackend` — records calls, fabricates replies; the one
-//! sanctioned test seam (issue #12 mock policy). Its `process` contract
-//! is pinned for every later slice: enabled → deterministic marker
-//! transform (bitwise NOT — ferried audio stays distinguishable from
-//! dry passthrough), disabled → echo (bypass identity), vis tail
+//! `StubBackend` — records lifecycle/enable calls, fabricates replies;
+//! the one sanctioned test seam (issue #12 mock policy). Its `process`
+//! contract is pinned for every later slice: enabled → deterministic
+//! marker transform (bitwise NOT — ferried audio stays distinguishable
+//! from dry passthrough), disabled → echo (bypass identity), vis tail
 //! fabricated.
 
 use std::collections::HashMap;
@@ -10,7 +10,8 @@ use std::sync::Mutex;
 
 use crate::{Engine, EngineError, Result, SessionId, VisFrame};
 
-/// One recorded backend call, in issue order.
+/// One recorded backend call, in issue order — session lifecycle and
+/// `set_enabled` only; param/process traffic is not recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Call {
     /// `create_session` — carries the id it returned.

@@ -70,7 +70,14 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
     let command = match serde_json::from_str::<WsCommand>(text) {
         Ok(command) => command,
         Err(error) => {
-            return vec![invalid_request(None, error.to_string()).to_text()];
+            // Best-effort id recovery: a structured-but-invalid frame
+            // (unknown cmd, shape mismatch) still settles promise-style.
+            let frame: Option<serde_json::Value> = serde_json::from_str(text).ok();
+            let request_id = frame
+                .as_ref()
+                .and_then(|frame| frame.get("request_id"))
+                .and_then(serde_json::Value::as_str);
+            return vec![invalid_request(request_id, error.to_string()).to_text()];
         }
     };
     match command {

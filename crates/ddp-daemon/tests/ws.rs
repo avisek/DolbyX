@@ -54,7 +54,7 @@ async fn set_power_flips_state_and_acks_the_request_id() {
 async fn tracer_bullet_set_power_records_one_set_enabled_on_the_stub() {
     let daemon = start_daemon().await;
     let session = daemon
-        .daemon
+        .handle
         .supervisor()
         .create_session(48000)
         .expect("session");
@@ -135,10 +135,13 @@ async fn malformed_json_yields_invalid_request_without_dropping_the_connection()
     assert_eq!(error["code"], "INVALID_REQUEST");
     assert_eq!(error["request_id"], serde_json::Value::Null);
 
+    // A structured frame carries its id even when the cmd is bogus —
+    // promise-style clients must be able to settle the request.
     send_json(&mut ws, &json!({ "cmd": "warp_ten", "request_id": "r9" })).await;
     let error = recv_json(&mut ws).await;
     assert_eq!(error["type"], "error");
     assert_eq!(error["code"], "INVALID_REQUEST");
+    assert_eq!(error["request_id"], "r9");
 
     // The connection survives and still serves commands.
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r10" })).await;

@@ -23,7 +23,7 @@ pub const UI_HTML: &str =
 /// An in-process daemon plus the tempdir it lives in.
 pub struct TestDaemon {
     /// The running daemon.
-    pub daemon: Daemon,
+    pub handle: Daemon,
     /// The injected recording backend.
     pub stub: Arc<StubBackend>,
     /// Holds `parameters.toml`, `defaults.toml`, `index.html`, and the
@@ -34,7 +34,7 @@ pub struct TestDaemon {
 impl TestDaemon {
     /// The daemon's bound address.
     pub fn addr(&self) -> SocketAddr {
-        self.daemon.addr()
+        self.handle.addr()
     }
 }
 
@@ -75,8 +75,8 @@ pub async fn start_over(dir: &TempDir) -> (Daemon, Arc<StubBackend>) {
 /// Starts an in-process daemon over a fresh fixture dir, engine stubbed.
 pub async fn start_daemon() -> TestDaemon {
     let dir = fixture_dir();
-    let (daemon, stub) = start_over(&dir).await;
-    TestDaemon { daemon, stub, dir }
+    let (handle, stub) = start_over(&dir).await;
+    TestDaemon { handle, stub, dir }
 }
 
 /// One raw `GET` over a real TCP connection; returns (status, body).

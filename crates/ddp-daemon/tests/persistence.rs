@@ -63,7 +63,7 @@ async fn graceful_shutdown_flushes_a_pending_write() {
     // Shut down inside the debounce window: the write is still pending.
     assert_eq!(std::fs::read(&config).expect("readable").len(), 0);
     drop(ws);
-    daemon.daemon.shutdown().await;
+    daemon.handle.shutdown().await;
 
     assert_eq!(
         std::fs::read_to_string(&config).expect("readable"),
@@ -143,7 +143,7 @@ async fn a_restart_reloads_power_from_the_config_overlay() {
     assert_config_becomes(&config, "power = false\n").await;
 
     drop(ws);
-    daemon.daemon.shutdown().await;
+    daemon.handle.shutdown().await;
 
     let (restarted, _stub) = start_over(&daemon.dir).await;
     let mut ws = ws_connect(restarted.addr()).await;

@@ -165,16 +165,14 @@ impl Daemon {
             ui_path: config.ui_path,
         });
 
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port))
-            .await
-            .map_err(|source| StartError::Bind {
-                port: config.port,
-                source,
-            })?;
-        let addr = listener.local_addr().map_err(|source| StartError::Bind {
+        let bind_error = |source| StartError::Bind {
             port: config.port,
             source,
-        })?;
+        };
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port))
+            .await
+            .map_err(bind_error)?;
+        let addr = listener.local_addr().map_err(bind_error)?;
 
         let router = http_server::router(app);
         let server = tokio::spawn(async move {
