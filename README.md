@@ -39,14 +39,15 @@ Or browse any v1 file in place: `git show v1:daemon/main.c`.
 ## Development
 
 Prerequisites: [rustup](https://rustup.rs) (the toolchain is pinned by
-`rust-toolchain.toml`) and [just](https://just.systems). For the probe
-harness only: `apt install gcc-arm-linux-gnueabihf
+`rust-toolchain.toml`), [just](https://just.systems), Node ≥ 22 +
+[pnpm](https://pnpm.io), and `cargo install cargo-watch` (for `just
+dev`). For the probe harness only: `apt install gcc-arm-linux-gnueabihf
 g++-arm-linux-gnueabihf qemu-user-static`.
 
 ```bash
-just lint    # cargo fmt --check + clippy (-D warnings)
-just test    # cargo test --workspace
-just dev     # daemon + UI dev loop (arrives in Slice 02)
+just lint    # cargo fmt --check + clippy (-D warnings) + UI lint
+just test    # cargo test --workspace + UI tests
+just dev     # daemon + UI dev loop with hot reload
 ```
 
 Reading order for contributors:
@@ -69,6 +70,7 @@ crates/
 ├── ddp-engine-arm/    the engine shim — ARMv7, dlopens libdseffect.so
 ├── ddp-vst-windows/   thin VST2 plugin (EqualizerAPO)
 └── ddp-lv2-linux/     thin LV2 plugin (PipeWire)
+ui/                    Solid.js Web UI — independent pnpm project
 docs/ddp/              engine reverse engineering — the reference
 docs/adr/              architecture decision records
 tools/ddp_probe/       evidence harness proving every docs/ddp claim
