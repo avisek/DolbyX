@@ -79,6 +79,9 @@ this uses the engine's **own** accessors (the probe `dlopen`s
 read straight after open, before any SET, so the registry still holds the
 engine's intrinsic defaults. That set is the *correct* one (experiment 10):
 `scpe`/`test` present, `mxou`/`lcsz` absent (node params Java mis-listed).
+The capture point is proven canonical: the open-state registry is
+deterministic, rate-independent, and bit-identical through the DEFINE
+handshake, SET_CONFIG, and ENABLE (`make lifecycle` below).
 
 `dump types` is the same per-leaf metadata as a quick **flat table of the root
 leaves** — the def `type` (`3` = value, `2` = opaque/by-ref), the instance
@@ -112,9 +115,9 @@ defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
 
 ## Companion probes
 
-Three focused probes sit alongside `ddp_probe`, sharing the same build (the
-`build/lib/` staging, `qemu-arm-static`, the noisy `liblog_stub`). All three underpin the
-AK-direct binding decision
+Focused probes sit alongside `ddp_probe`, sharing the same build (the
+`build/lib/` staging, `qemu-arm-static`, the noisy `liblog_stub`). The first
+three underpin the AK-direct binding decision
 ([ADR-0010](../../docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
 
 ### `akctl_probe` — AK-direct parameter control (`make akctl`)
@@ -237,6 +240,41 @@ Neither family is redundant: `vn*` is the zero-config ground truth, `vc*` the
 host-configurable view. See
 [02 — Visualizer bands](../../docs/ddp/02-ak-parameters.md).
 
+### `lifecycle_probe` — where do "power-on defaults" live? (`make lifecycle`)
+
+Should `dump defaults` capture later in the lifecycle? Slice 03
+([#11](https://github.com/avisek/DolbyX/issues/11)) found power-on defaults outside
+their own write bounds (`gebf`/`iebf`/`aobf`/`arbf` zero-tails < min 20,
+`vnnb`=0 in `[1..20]`, `vnbf`/`vcbf` all-zero) — maybe the capture ran before
+the engine finished initializing. The probe snapshots **all 64 root leaves**
+(full length, per-element `ak_get` — the accessor `dump defaults` prints) at
+six stages — A post-open, B post-DEFINE-handshake (today's capture), C
+post-SET_CONFIG, D post-ENABLE, E after 40 process blocks, F vis-enabled
+(+`ven=1`) + 40 more — one full run per rate {44.1k, 48k, 32k}, **no host
+param writes** before F. Verdict: **keep the post-open capture**.
+
+- **A == B == C, bit-for-bit, at every rate.** The handshake reads only;
+  SET_CONFIG at an unchanged rate doesn't rebuild, and at 48k/32k it tears
+  down and re-runs `ak_open` (engine log `ak closed` → `ak_started`) yet
+  regenerates the *identical* registry — power-on defaults are deterministic
+  constdata, and stage-C state carries **zero rate dependence**.
+- **Only the six DSP-owned visualizer slots ever move, and only at E** (first
+  process blocks — not SET_CONFIG, not ENABLE): `vnnb`/`vnbf` fill with the
+  rate's native grid (20/20/19 @48k/44.1k/32k — refines `vis_native_probe` §C:
+  cmd 1 *selects* the grid, processing *populates* it). No non-visualizer leaf
+  moves anywhere.
+- **Pre-`ven` measurement slots are junk.** At E, `vnbg`/`vnbe`/`vcbg`/`vcbe`
+  hold a constant smear equal to the grid's last frequency (18777 @44.1k,
+  19688 @48k; still 0 @32k); real data appears only after `ven=1` (F). A
+  later capture point would trade determinism for rate-dependent grids plus
+  garbage measurements.
+- **Boot OOB never heals.** The band-array zero-tails and `vcbf` stay outside
+  `[min, max]` through every stage, rate, and vis state; only `vnnb`/`vnbf`
+  become in-bounds (at E). So the param twin's power-on defaults legitimately
+  violate the write bounds — bounds clamp writes, not storage;
+  `parameters.toml` curates those slots in-bounds
+  ([ADR-0004](../../docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
+
 ## Prerequisites
 
 - `apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static`
@@ -255,6 +293,7 @@ make akctl      # akctl_probe — AK-direct param control (see Companion probes)
 make setconfig  # setconfig_probe — EFFECT_CMD_SET_CONFIG / sample rate
 make reshape    # reshape_probe — runtime reshape of structural constants (commit gates it; order is free)
 make vis        # vis_native_probe — native vs custom bands (vc* is vn* resampled; native grid rate-derived)
+make lifecycle  # lifecycle_probe — defaults capture point (post-open is canonical; see Companion probes)
 ```
 
 The root `liblog_stub.c` is a verbose drop-in replacement for the silent
@@ -292,6 +331,9 @@ make run 2>/dev/null | grep -E "mxou -> ref 0|scpe -> ref"           # exp 10: J
 make dump-tree     | grep -E "^# 248 defs"                           # engine self-describes 248 defs (full metadata)
 make dump-defaults | grep -E "^scpe |^test "                         # correct host set: scpe/test present, mxou/lcsz gone
 make dump-docs     | grep -E "^# 248 defs, 75 with help"             # 75 of 248 defs carry the long help string
+make lifecycle 2>/dev/null | grep -c "no leaf changed"               # = 5: A→B→C→D static + stage C rate-independent ×2
+make lifecycle 2>/dev/null | grep -E "vnnb vnbf vnbg vnbe vcbg vcbe" # the ONLY lifecycle movers (all visualizer, at E)
+make lifecycle 2>/dev/null | grep -c "deterministic open"            # = 2: 48k/32k runs boot bit-identical to baseline
 ```
 
 If any of these come back empty, the engine binary has changed
@@ -309,6 +351,7 @@ tools/ddp_probe/
 ├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
 ├── reshape_probe.c      # runtime reshape of structural constants (gebg commit; order-free)
 ├── vis_native_probe.c   # native (vn*) vs custom (vc*) bands — vc* is vn* resampled; native grid rate-derived
+├── lifecycle_probe.c    # defaults capture point — open-state deterministic; only vis slots move (at process)
 ├── liblog_stub.c        # verbose __android_log_print → stderr
 └── stubs/               # silent Android stubs: liblog, libutils, libcutils
 ```

@@ -25,6 +25,9 @@
 #   make vis       — run the native-vs-custom visualizer experiment (vis_native_probe):
 #                    prove vc* is the native vn* data resampled onto a host-set band grid,
 #                    and that the native grid (vnnb/vnbf) is itself rate-derived (sec C)
+#   make lifecycle — run the defaults capture-point experiment (lifecycle_probe):
+#                    snapshot all root leaves at open / handshake / SET_CONFIG /
+#                    ENABLE / 40 blocks / vis-on, diff the stages (issue #11)
 #   make dump-tree     — branch-drawn AK tree: full per-param metadata + descriptions
 #   make dump-defaults — print each root param's power-on default (4-CC = value)
 #   make dump-types    — root leaves as a flat table + write-protection probe
@@ -49,7 +52,8 @@ AKCTL    = $(BUILDDIR)/akctl_probe
 SETCFG   = $(BUILDDIR)/setconfig_probe
 RESHAPE  = $(BUILDDIR)/reshape_probe
 VIS      = $(BUILDDIR)/vis_native_probe
-PROBES   = $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(VIS)
+LIFE     = $(BUILDDIR)/lifecycle_probe
+PROBES   = $(PROBE) $(AKCTL) $(SETCFG) $(RESHAPE) $(VIS) $(LIFE)
 
 # Staged alongside the engine: the noisy liblog override (root) plus the
 # silent Android stubs (stubs/), plus sysroot symlinks for the libc family.
@@ -58,7 +62,7 @@ SYSROOT_LIBS = libc.so libdl.so libm.so libstdc++.so
 STAGED       = $(LIBDIR)/libdseffect.so \
                $(addprefix $(LIBDIR)/,$(STUB_LIBS) $(SYSROOT_LIBS))
 
-.PHONY: all run run-log akctl setconfig reshape vis dump-tree dump-defaults dump-types dump-docs clean
+.PHONY: all run run-log akctl setconfig reshape vis lifecycle dump-tree dump-defaults dump-types dump-docs clean
 
 all: $(PROBES) $(STAGED)
 
@@ -116,6 +120,11 @@ vis: all
 	@echo "Running vis_native_probe — stdout is the summary, stderr is the engine log."
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
 	  $(VIS) $(LIBDIR)/libdseffect.so
+
+lifecycle: all
+	@echo "Running lifecycle_probe — stdout is the summary, stderr is the engine log."
+	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \
+	  $(LIFE) $(LIBDIR)/libdseffect.so
 
 dump-tree: all
 	@LD_LIBRARY_PATH=$(LIBDIR) qemu-arm-static -L /usr/arm-linux-gnueabihf \

@@ -24,5 +24,15 @@ test: _ui-deps
     cargo test --workspace
     pnpm -C ui test
 
+# Regenerate parameters.engine.toml from the live engine (probe dumps)
+param-twin:
+    mkdir -p target/param-twin
+    make -sC tools/ddp_probe dump-tree > target/param-twin/tree.txt
+    make -sC tools/ddp_probe dump-defaults > target/param-twin/defaults.txt
+    make -sC tools/ddp_probe dump-docs > target/param-twin/docs.txt
+    cargo run -p ddp-daemon --bin gen_param_twin -- \
+        target/param-twin/tree.txt target/param-twin/defaults.txt \
+        target/param-twin/docs.txt crates/ddp-daemon/parameters.engine.toml
+
 _ui-deps:
     @test -d ui/node_modules || pnpm -C ui install

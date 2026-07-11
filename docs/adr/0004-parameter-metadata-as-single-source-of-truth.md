@@ -16,10 +16,34 @@ against any declared param regardless of Java's whitelist
 ([`tools/ddp_probe/`](../../tools/ddp_probe/README.md)). Nothing is
 dropped; even the build/license slots are plain ReadOnly-Static cards.
 
-The committed **param twin**, `parameters.engine.toml`, is
-probe-generated and never loaded; CI diffs the engine-fact fields (`name
-length min max frac_bits default`) to block drift while the product
-fields (`kind category access label description help`) stay free.
+The table is **curated and validation-clean**: every `default` slot lies
+in `[min, max]`, parser-enforced. Engine truth lives in the committed
+**param twin**, `parameters.engine.toml` — probe-generated, never loaded.
+CI checks the table's structure against it — names 1:1, `length` equal,
+every range within the **engine envelope** (the twin's `[min, max]`) —
+and leaves the values to curation. The deliberate divergences:
+
+- **Inactive band slots** (`iebf gebf aobf arbf` tails, all of `vcbf`)
+  clamp the engine's out-of-bounds power-on zeros to min — behaviorally
+  inert: the engine ignores inactive slots and clamps writes.
+- **`vnnb`** curates 20 — the rate-derived native-grid count at
+  44.1/48 kHz — for the power-on 0 outside `[1..20]`.
+- **The by-ref vis arrays** (`vnbg vnbe vcbg vcbe`) record the real dB
+  coding the API doesn't report (by-ref slots read back frac 0 +
+  full-int16 bounds): the engine's own help pins "scaled by 16 ie.
+  16 = 1 dB", ddp/02 the output range `[-192, 576]`. The remaining
+  by-ref slots (`vnbf`, build/license identity) stay API-verbatim —
+  nothing consumes their bounds.
+
+**Power-on defaults live in the twin**: the fresh-`ak_open` registry
+state (`make dump-defaults`) — deterministic, rate-independent, stable
+until the first process blocks fill the six DSP-owned visualizer slots
+([lifecycle probe](../../tools/ddp_probe/README.md)). The engine
+legitimately boots values outside its own write bounds (bounds clamp
+writes, not storage); the table corrects exactly those slots — startup
+readouts and the cascade base need usable in-bounds values — and
+acceptance tests pin each correction
+(`crates/ddp-daemon/tests/parameters.rs`).
 
 Master-control membership is deliberately *not* metadata — it's a curated
 UI overlay; those params also appear in the Advanced panel under their

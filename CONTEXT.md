@@ -29,6 +29,16 @@ A leaf directly under the engine's AK tree root — the real parameter
 universe (64), which differs from Java's registered list
 ([ddp/02](docs/ddp/02-ak-parameters.md#javas-list-vs-the-engines-root-leaves)).
 
+**Power-on default**:
+The value a root leaf holds in a fresh AK registry — recorded in the
+param twin, not `ParameterDef.default`. Deterministic and
+rate-independent; may sit outside the param's own write bounds (bounds
+clamp writes, not storage). Only the six DSP-owned visualizer slots ever
+move later, at the first process blocks
+([ADR-0004](docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
+_Avoid_: boot value, initial value, factory default (collides with
+Factory item).
+
 **Settability bucket**:
 The classification of every AK parameter into exactly one of `Settable`,
 `Experimental`, `ReadOnly-Dynamic`, or `ReadOnly-Static`
@@ -140,10 +150,18 @@ config.toml item` — later shadows earlier
 ([ADR-0007](docs/adr/0007-toml-overlay-persistence-with-file-watcher.md)).
 
 **Param twin**:
-`parameters.engine.toml` — probe-generated, committed, never loaded; CI
-diffs its engine-fact fields against `parameters.toml` to block drift
+`parameters.engine.toml` — probe-generated, committed, never loaded; the
+engine-truth reference `parameters.toml` is curated from. CI checks
+`parameters.toml` against it structurally — names 1:1, lengths equal,
+every range within the engine envelope
 ([ADR-0004](docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
 _Avoid_: twin (unqualified).
+
+**Engine envelope**:
+A param's `[min, max]` as the param twin records it — curation may
+narrow a range inside the envelope, never exceed it.
+_Avoid_: engine bounds (ambiguous with `parameters.toml`'s own
+`min`/`max`).
 
 ### Profiles & UI
 

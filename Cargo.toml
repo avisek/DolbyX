@@ -7,6 +7,12 @@ version = "2.0.0-alpha"
 edition = "2024"
 publish = false
 
+[workspace.dependencies]
+proptest = "1.11.0"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+toml = "1.1.2"
+
 [workspace.lints.rust]
 missing_docs = "warn"
 
