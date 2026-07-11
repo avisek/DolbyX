@@ -38,7 +38,8 @@ hot-reload through the daemon's origin. Inside `ui/`: `pnpm dev` /
   change on `ack`; the `state` broadcast goes to other tabs)
 - `src/lib/ws.ts` — typed wire vocabulary + `WsClient`: fresh
   `request_id` per command settled promise-style, `get_state` reconcile
-  on every open and on any `error`, auto-reconnect with backoff
+  on every open and on any `error` (except a failed reconcile itself —
+  no loop), auto-reconnect with backoff
 - `src/lib/` also: bootstrap contract, parameter metadata, unit helpers
   (arriving with their slices)
 - `src/components/` — `PowerToggle`, `ConnectionBadge`, … one `.tsx` +

@@ -38,7 +38,6 @@ export class MockWebSocket {
   onopen: ((event: Event) => void) | null = null
   onmessage: ((event: MessageEvent) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
 
   constructor(readonly url: string | URL) {
     MockWebSocket.instances.push(this)

@@ -3,7 +3,7 @@ import { state } from '../store/state'
 import { setPower } from '../store/ws'
 import './PowerToggle.css'
 
-/** Master power switch: renders store truth, flips local-first on ack. */
+/** The master power toggle: renders store truth, flips local-first on ack. */
 const PowerToggle: Component = () => (
   <button
     type="button"
