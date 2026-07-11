@@ -27,6 +27,7 @@ result
 # Node
 node_modules/
 package-lock.json
+/ui/dist/
 
 # Local files
 *.local

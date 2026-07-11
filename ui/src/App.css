@@ -1,0 +1,11 @@
+.app {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+.app__title {
+  color: var(--color-accent);
+  font-size: 2rem;
+  letter-spacing: 0.2em;
+}
