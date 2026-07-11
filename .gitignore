@@ -1,11 +1,7 @@
 # Build artifacts
-arm/build/
 tools/ddp_probe/build/
 *.o
 *.core
-
-# UI build output
-ui/dist/
 
 # Python
 __pycache__/
@@ -27,7 +23,6 @@ result
 
 # Node
 node_modules/
-package-lock.json
 package-lock.json
 
 # Local files

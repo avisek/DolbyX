@@ -112,8 +112,8 @@ defaults: `dvla=7`, `dvle=1`, `dssf=20`, `dhsb=dssb=96`, `dssa=10`,
 
 ## Companion probes
 
-Three focused probes sit alongside `ddp_probe`, sharing the same build (`arm/`
-staging, `qemu-arm-static`, the noisy `liblog_stub`). All three underpin the
+Three focused probes sit alongside `ddp_probe`, sharing the same build (the
+`build/lib/` staging, `qemu-arm-static`, the noisy `liblog_stub`). All three underpin the
 AK-direct binding decision
 ([ADR-0010](../../docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
 
@@ -239,14 +239,11 @@ host-configurable view. See
 
 ## Prerequisites
 
-- `apt install gcc-arm-linux-gnueabihf qemu-user-static`
-- The `arm/` build (libstdc++/libm/libc/libdl stubs and a copy of
-  `libdseffect.so`) must already exist at `../../arm/build/lib/`. If
-  not, run `make -C ../../arm` from the repo root first.
-
-The harness deliberately reuses the existing `arm/` library staging
-rather than duplicating it, so the engine binary and stub libraries
-stay in lockstep with the production v1 build.
+- `apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static`
+- The engine, `libdseffect.so`, is vendored at `../../vendored/`
+  ([ADR-0009](../../docs/adr/0009-bundle-libdseffect-so.md)). The harness
+  is standalone: it stages that file, builds every Android stub lib
+  itself, and symlinks the libc family from the ARM Linux sysroot.
 
 ## Running it
 
@@ -260,11 +257,12 @@ make reshape    # reshape_probe — runtime reshape of structural constants (com
 make vis        # vis_native_probe — native vs custom bands (vc* is vn* resampled; native grid rate-derived)
 ```
 
-The `liblog_stub.c` here is a verbose drop-in replacement for
-`arm/stubs/liblog_stub.c`. It forwards `__android_log_print` calls to
+The root `liblog_stub.c` is a verbose drop-in replacement for the silent
+`stubs/liblog_stub.c`. It forwards `__android_log_print` calls to
 stderr so the engine's `DS_PARAM_*`, `ak_set`, `ak_get`, and
-`EFFECT_CMD_*` traces become visible. The production v1 daemon keeps
-its silent stub; this is purely for development.
+`EFFECT_CMD_*` traces become visible. The harness always stages the
+noisy one; the silent stub is the faithful Android ABI set (relocated
+from v1's `arm/stubs/`) for engine hosts that don't want the firehose.
 
 ## Verifying a doc citation
 
@@ -304,15 +302,13 @@ behavior — the docs need an updated review.
 ```
 tools/ddp_probe/
 ├── README.md            # this file
-├── Makefile             # cross-compile + qemu-arm-static invocation
+├── Makefile             # cross-compile + staging + qemu-arm-static invocation
+├── audio_effect_defs.h  # canonical AudioEffect ABI (effect_param_t, audio_buffer_t, …)
 ├── ddp_probe.c          # the consolidated probe (10 experiments + dump)
 ├── akctl_probe.c        # AK-direct param control (cmd 3 ≡ ak_set, no handshake)
 ├── setconfig_probe.c    # EFFECT_CMD_SET_CONFIG / sample-rate RE
 ├── reshape_probe.c      # runtime reshape of structural constants (gebg commit; order-free)
 ├── vis_native_probe.c   # native (vn*) vs custom (vc*) bands — vc* is vn* resampled; native grid rate-derived
-└── liblog_stub.c        # verbose __android_log_print → stderr
+├── liblog_stub.c        # verbose __android_log_print → stderr
+└── stubs/               # silent Android stubs: liblog, libutils, libcutils
 ```
-
-The harness re-uses `arm/audio_effect_defs.h` via `-I` rather than
-duplicating it — there's one canonical ABI definition for
-`effect_param_t`, `audio_buffer_t`, `effect_descriptor_t`, etc.
