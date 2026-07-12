@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 ddp-state = { path = "../ddp-state" }
+indexmap.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

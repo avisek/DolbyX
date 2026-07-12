@@ -1,5 +1,91 @@
 # DolbyX factory defaults — read once at startup, never watched.
-# Root keys only until Slice 10 (#18) brings factory profiles + EQ presets.
+# Derived from the original DDP module's ds1-default.xml (vendored/;
+# param reference: docs/ddp/05-profiles-and-persistence.md). Values are
+# deltas over ParameterDef.default, resolved through the ADR-0007
+# cascade; anything unstated runs the parameters.toml default.
 
 power = true
 selected_profile = "music"
+
+# Shared operational config — applies to every profile, stated once
+# (the original XML repeated it per profile). The standard 20-band
+# stereo config and leveler calibration from the XML <constant> block
+# (iebf rides the gebf grid — this build's parser used it for GEQ, IEQ,
+# and visualizer alike), the SPEAKER-endpoint tuning tables from
+# <tuning> (loaded but dormant at the pinned headphone endpoint), and
+# two v2 pins: endp = 1 fixes the original's GENERIC →
+# DEVICE_WIRED_HEADPHONE endpoint (vdhe = 2 "auto" engages, the speaker
+# tuning never does); ven = 1 keeps the visualizer feed on (v1's cmd-7
+# VISUALIZER_ENABLE, retired).
+[profile]
+genb = 20
+ienb = 20
+aonb = 20
+arnb = 20
+aocc = 2
+gebf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
+iebf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
+dvli = -320
+dvlo = -320
+dvmc = 0
+aobf = [46, 140, 234, 328, 468, 656, 843, 1031, 1312, 1687, 2250, 3000, 3750, 4687, 5812, 7125, 9000, 11250, 13875, 19687]
+aobg = [2, -10, 116, 194, 218, 226, 190, 110, 142, 94, 72, 58, 100, 112, 190, 238, 182, 192, 98, 20, -202, 3, -10, 116, 206, 236, 236, 200, 110, 142, 94, 72, 58, 100, 112, 190, 238, 182, 192, 98, 20, -202]
+arbf = [47, 141, 234, 328, 469, 656, 844, 1031, 1313, 1688, 2250, 3000, 3750, 4688, 5813, 7125, 9000, 11250, 13875, 19688]
+arbi = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+arbl = [-960, -726, -597, -511, -405, -519, -312, -192, -362, -395, -384, -353, -363, -299, -298, -320, -407, -313, -405, -362]
+arbh = [-960, -534, -405, -319, -213, -327, -120, 0, -170, -203, -192, -161, -171, -107, -106, -128, -215, -121, -213, -170]
+arod = 0
+artp = 12
+dssa = 10
+endp = 1
+ven = 1
+
+# The four factory profiles — each row its delta over
+# ParameterDef.default, per the XML <profile> blocks. No
+# selected_eq_preset keys: factory selection ships None (Slice 15).
+
+[profile.movie]
+name = "Movie"
+dvle = 0
+deon = 1
+dea = 3
+vdhe = 2
+dssf = 200
+vmon = 0
+aoon = 2
+
+[profile.music]
+name = "Music"
+dvla = 4
+dvle = 0
+deon = 1
+dea = 2
+vdhe = 2
+dhsb = 48
+dssb = 0
+dssf = 200
+vmon = 0
+aoon = 2
+
+[profile.game]
+name = "Game"
+dvla = 0
+dea = 7
+vdhe = 2
+dhsb = 0
+vspe = 2
+dssb = 0
+dssf = 200
+aoon = 2
+
+[profile.voice]
+name = "Voice"
+dvla = 0
+dvle = 0
+deon = 1
+dea = 10
+dhsb = 0
+dssb = 0
+dssf = 200
+vmon = 0
+aoon = 2

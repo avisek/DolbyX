@@ -90,6 +90,26 @@ pub enum ParamAccess {
     ReadOnlyStatic,
 }
 
+impl ParamAccess {
+    /// Whether a profile owns the param — the Settable + Experimental
+    /// buckets (the 52 non-readonly params).
+    #[must_use]
+    pub const fn is_writable(self) -> bool {
+        matches!(self, Self::Settable | Self::Experimental)
+    }
+}
+
+/// The complete writable-param map at `ParameterDef.default` — the
+/// cascade's base layer, seeding every profile before the overlay
+/// layers apply (ADR-0007).
+#[must_use]
+pub fn base_params(defs: &[ParameterDef]) -> std::collections::HashMap<String, Vec<i16>> {
+    defs.iter()
+        .filter(|def| def.access.is_writable())
+        .map(|def| (def.name.clone(), def.default.clone()))
+        .collect()
+}
+
 /// UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -85,35 +85,74 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             vec![state_event(app).await, ack(&request_id).to_text()]
         }
         WsCommand::SetPower { request_id, on } => {
-            let mut state = app.state.write().await;
-            let diff = state
-                .apply(Command::SetPower { on })
-                .unwrap_or_else(|error| match error {});
-            let mut engine_failure = None;
-            if let Some(power) = diff.power {
-                if let Err(error) = app.supervisor.set_power(power) {
-                    tracing::error!(%error, "engine set_power failed");
-                    engine_failure = Some(error);
-                }
-                // State stays authoritative even when the engine is
-                // down — persist and broadcast the flip; the supervisor
-                // replays it onto the engine once it recovers.
-                app.persistence.flush(&state);
-                // Serialize + queue under the write lock so broadcast
-                // order always matches state order.
-                let event = WsEvent::State {
-                    snapshot: app.snapshot_json_of(&state),
-                }
-                .to_text();
-                let _ = app.updates.send((conn_id, event.into()));
-            }
-            drop(state);
-            vec![match engine_failure {
-                None => ack(&request_id).to_text(),
-                Some(error) => engine_rejected(&request_id, &error).to_text(),
-            }]
+            mutate(app, conn_id, &request_id, Command::SetPower { on }).await
+        }
+        WsCommand::SetProfile { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::SetProfile { id }).await
+        }
+        WsCommand::EditProfile {
+            request_id,
+            id,
+            params,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::EditProfile { id, params },
+            )
+            .await
+        }
+        WsCommand::ResetProfile { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::ResetProfile { id }).await
         }
     }
+}
+
+/// Applies one mutation command: validate → engine → persist →
+/// broadcast → reply. State stays authoritative even when the engine
+/// is down — the flip persists and broadcasts, and the supervisor
+/// replays it onto the engine once it recovers.
+async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) -> Vec<String> {
+    let mut state = app.state.write().await;
+    let diff = match state.apply(command, &app.params) {
+        Ok(diff) => diff,
+        // Validation leaves state untouched — nothing to fan out.
+        Err(error) => return vec![invalid_request(Some(request_id), error.to_string()).to_text()],
+    };
+    if diff.is_empty() {
+        return vec![ack(request_id).to_text()];
+    }
+    let mut engine_failure = None;
+    if let Some(power) = diff.power
+        && let Err(error) = app.supervisor.set_power(power)
+    {
+        tracing::error!(%error, "engine set_power failed");
+        engine_failure = Some(error);
+    }
+    if let Some(batch) = diff.params {
+        // The engine hears the diff (full set on switch/reset, edited
+        // entries on a live edit); the replay set for future session
+        // inits and crash recovery is the full resolved profile.
+        let resolved = state.resolved_batch(&app.params);
+        if let Err(error) = app.supervisor.apply_params(&batch, resolved) {
+            tracing::error!(%error, "engine set_params failed");
+            engine_failure = Some(error);
+        }
+    }
+    app.persistence.flush(&state);
+    // Serialize + queue under the write lock so broadcast order always
+    // matches state order.
+    let event = WsEvent::State {
+        snapshot: app.snapshot_json_of(&state),
+    }
+    .to_text();
+    let _ = app.updates.send((conn_id, event.into()));
+    drop(state);
+    vec![match engine_failure {
+        None => ack(request_id).to_text(),
+        Some(error) => engine_rejected(request_id, &error).to_text(),
+    }]
 }
 
 /// The full-snapshot `state` event as wire text.

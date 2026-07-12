@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::engine_supervisor::SupervisorError;
 
 /// A client → daemon command frame. Unknown `cmd` values and shape
-/// mismatches fail serde and surface as `INVALID_REQUEST`.
+/// mismatches fail serde and surface as `INVALID_REQUEST` (i16 bounds
+/// included — an out-of-i16 value never reaches validation).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum WsCommand {
@@ -22,6 +23,29 @@ pub(crate) enum WsCommand {
         request_id: String,
         /// The requested power state.
         on: bool,
+    },
+    /// Select the active profile.
+    SetProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to select.
+        id: ddp_state::ProfileId,
+    },
+    /// Write a param map into one profile.
+    EditProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to edit.
+        id: ddp_state::ProfileId,
+        /// The edited entries: `{ "<4-CC>": [i16, …] }`.
+        params: std::collections::HashMap<String, Vec<i16>>,
+    },
+    /// Drop a profile's own overrides, restoring its baseline.
+    ResetProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to reset.
+        id: ddp_state::ProfileId,
     },
 }
 

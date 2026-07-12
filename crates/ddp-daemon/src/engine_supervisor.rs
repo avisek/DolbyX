@@ -221,6 +221,72 @@ impl EngineSupervisor {
         Ok(())
     }
 
+    /// Fans one atomic param batch to every live session and stores
+    /// `resolved` — the selected profile's full set — as the batch
+    /// every future session init and crash recovery replays. Zero
+    /// sessions ⇒ store only, no engine call.
+    ///
+    /// # Errors
+    ///
+    /// [`SupervisorError::EngineCrashed`] when the engine crashed and
+    /// recovery failed (recovery itself replays `resolved` onto every
+    /// rebuilt session); [`SupervisorError::Engine`] on any other
+    /// backend failure.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the supervisor lock is not poisoned.
+    pub fn apply_params(
+        &self,
+        batch: &[(String, Vec<i16>)],
+        resolved: Vec<(String, Vec<i16>)>,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("supervisor lock");
+        inner.resolved_params = resolved;
+        let borrowed: Vec<(&str, &[i16])> = batch
+            .iter()
+            .map(|(name, values)| (name.as_str(), values.as_slice()))
+            .collect();
+        for index in 0..inner.sessions.len() {
+            match self
+                .engine
+                .set_params(inner.sessions[index].backend, &borrowed)
+            {
+                Ok(()) => {}
+                // Recovery re-inits every session with the just-stored
+                // resolved set — the fan-out is done when it returns.
+                Err(EngineError::Crashed(_)) => return self.recover(&mut inner),
+                Err(error) => return Err(SupervisorError::Engine(error)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads params from a session (by its external id) — the live
+    /// clamped registry, the only true per-param getter. Diagnostics
+    /// and the e2e suites use this to prove what the engine holds.
+    ///
+    /// # Errors
+    ///
+    /// [`SupervisorError::SessionNotFound`] when `id` names no live
+    /// session; [`SupervisorError::Engine`] on a backend failure (no
+    /// recovery — a read loses nothing).
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the supervisor lock is not poisoned.
+    pub fn get_params(&self, id: SessionId, names: &[&str]) -> Result<Vec<Vec<i16>>> {
+        let inner = self.inner.lock().expect("supervisor lock");
+        let session = inner
+            .sessions
+            .iter()
+            .find(|session| session.external == id)
+            .ok_or(SupervisorError::SessionNotFound(id))?;
+        self.engine
+            .get_params(session.backend, names)
+            .map_err(SupervisorError::Engine)
+    }
+
     /// Processes one interleaved-stereo PCM block on a session (by its
     /// external id), returning the block's vis tail.
     ///
@@ -442,6 +508,87 @@ mod tests {
 
     fn crashed() -> EngineError {
         EngineError::Crashed("killed".into())
+    }
+
+    /// Slice 10 (issue #18): a param batch fans out to every live
+    /// session, and the stored resolved set feeds later session inits.
+    #[test]
+    fn apply_params_fans_out_and_reseeds_future_inits() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(
+            stub.clone(),
+            true,
+            vec![("dvla".into(), vec![4])],
+            Vec::new(),
+        );
+        let a = supervisor.create_session(48000).unwrap();
+        let b = supervisor.create_session(44100).unwrap();
+
+        let edit = vec![("dvla".to_string(), vec![7_i16])];
+        supervisor.apply_params(&edit, edit.clone()).unwrap();
+        let fanned: Vec<_> = stub
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, Call::SetParams(_, batch) if *batch == edit))
+            .collect();
+        assert_eq!(
+            fanned,
+            vec![
+                Call::SetParams(a, edit.clone()),
+                Call::SetParams(b, edit.clone()),
+            ],
+            "every live session hears the batch"
+        );
+
+        // A later session initializes on the new resolved set.
+        let c = supervisor.create_session(48000).unwrap();
+        assert!(stub.calls().contains(&Call::SetParams(c, edit)));
+    }
+
+    /// Zero sessions ⇒ a param change is state-only; it lands at the
+    /// next session init (epic invariant).
+    #[test]
+    fn apply_params_with_zero_sessions_stores_without_an_engine_call() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub.clone(), true, Vec::new(), Vec::new());
+        let batch = vec![("dvla".to_string(), vec![9_i16])];
+        supervisor.apply_params(&batch, batch.clone()).unwrap();
+        assert!(stub.calls().is_empty(), "no engine call without sessions");
+
+        supervisor.create_session(48000).unwrap();
+        assert!(stub.calls().contains(&Call::SetParams(SessionId(0), batch)));
+    }
+
+    /// A crash mid-fan-out recovers onto the *new* resolved set — the
+    /// store-then-fan order is load-bearing.
+    #[test]
+    fn a_crash_during_apply_params_replays_the_new_values() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(
+            stub.clone(),
+            true,
+            vec![("dvla".into(), vec![4])],
+            Vec::new(),
+        );
+        supervisor.create_session(48000).unwrap();
+
+        let switched = vec![("dvla".to_string(), vec![7_i16])];
+        stub.fail_next(crashed());
+        supervisor
+            .apply_params(&switched, switched.clone())
+            .unwrap();
+
+        // The rebuilt session was initialised with the new set, not the
+        // one it was created under.
+        assert_eq!(
+            stub.calls().last(),
+            Some(&Call::SetEnabled(SessionId(1), true)),
+            "recovery re-ran the full init"
+        );
+        assert!(
+            stub.calls()
+                .contains(&Call::SetParams(SessionId(1), switched))
+        );
     }
 
     /// Respawn on crash (issue #16): the supervisor recreates every

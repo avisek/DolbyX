@@ -112,3 +112,61 @@ it('updates the toggle on a broadcast state event', () => {
   })
   expect(powerToggle().getAttribute('aria-checked')).toBe('false')
 })
+
+const profileTab = (name: string) => screen.getByRole('tab', { name })
+const isSelected = (name: string) =>
+  profileTab(name).getAttribute('aria-selected')
+
+// Behavior 10 (#18): the four factory tabs render from the snapshot,
+// the factory selection marked.
+it('renders the four factory profile tabs with the selection marked', () => {
+  render(() => <App />)
+  const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent)
+  expect(tabs).toEqual(['Movie', 'Music', 'Game', 'Voice'])
+  expect(isSelected('Music')).toBe('true')
+  expect(isSelected('Movie')).toBe('false')
+})
+
+// Behavior 10 (#18): switching updates via the ack (the broadcast goes
+// to *other* clients — ADR-0005).
+it('sends set_profile on click and applies the switch on the ack', async () => {
+  const socket = renderConnected()
+
+  profileTab('Movie').click()
+  const sent = socket
+    .sentCommands()
+    .filter((frame) => frame.cmd === 'set_profile')
+  expect(sent).toEqual([
+    {
+      cmd: 'set_profile',
+      request_id: expect.any(String) as string,
+      id: 'movie',
+    },
+  ])
+
+  // Not yet acked — the tabs still show daemon truth.
+  expect(isSelected('Music')).toBe('true')
+
+  socket.serverMessage({
+    type: 'ack',
+    request_id: sent[0]?.request_id,
+    ok: true,
+  })
+  await waitFor(() => {
+    expect(isSelected('Movie')).toBe('true')
+    expect(isSelected('Music')).toBe('false')
+  })
+})
+
+// Behavior 10 (#18): another client switched — its broadcast `state`
+// event moves this tab's selection.
+it('updates the selected tab on a broadcast state event', () => {
+  const socket = renderConnected()
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ selected_profile: 'game' }),
+  })
+  expect(isSelected('Game')).toBe('true')
+  expect(isSelected('Music')).toBe('false')
+})

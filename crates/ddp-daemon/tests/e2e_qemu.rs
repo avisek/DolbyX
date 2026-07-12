@@ -1,7 +1,9 @@
 //! Slice 08 e2e suite (#16): the daemon against the **real** engine —
 //! nothing mocked past the wire. Behavior 2 (Slice 04's power toggle
 //! replayed over `QemuBackend`), behavior 4 (supervisor respawn), 5
-//! (live readouts), 6 (power-off session init).
+//! (live readouts), 6 (power-off session init). Slice 10 (#18) adds
+//! behavior 11: the resolved-profile init reshape, read back from the
+//! live registry.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -173,6 +175,84 @@ async fn snapshot_readouts_carry_live_engine_values() {
         json!([0]),
         "the engine's power-on value, live — not the table's [20]"
     );
+}
+
+/// Behavior 11 (issue #18): after session init the engine really is
+/// 20-band with Music's character applied — the shim's commit-leaf
+/// touch reshaped the 10-band power-on state in the same write. Read
+/// back from the live clamped registry (`get_params` — the only true
+/// per-param getter).
+#[tokio::test]
+async fn session_init_reshapes_the_engine_to_the_music_profile() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(44_100)
+        .expect("session");
+
+    let names = [
+        "genb", "ienb", "gebf", "dvla", "dvle", "dea", "deon", "dhsb", "vdhe", "endp", "ven",
+    ];
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &names)
+        .expect("get_params");
+    let by_name: std::collections::HashMap<&str, &[i16]> = names
+        .iter()
+        .zip(&values)
+        .map(|(name, values)| (*name, values.as_slice()))
+        .collect();
+
+    assert_eq!(by_name["genb"], [20], "20-band — not the 10-band power-on");
+    assert_eq!(by_name["ienb"], [20]);
+    assert_eq!(
+        by_name["gebf"][..20],
+        [
+            43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063,
+            8958, 11025, 13781, 18777
+        ],
+        "the original DDP band grid"
+    );
+    assert_eq!(by_name["dvla"], [4], "Music's leveler amount");
+    assert_eq!(by_name["dvle"], [0], "Music ships the leveler off");
+    assert_eq!(by_name["dea"], [2], "Music's dialog enhancer amount");
+    assert_eq!(by_name["deon"], [1]);
+    assert_eq!(by_name["dhsb"], [48], "Music's surround boost");
+    assert_eq!(by_name["vdhe"], [2], "headphone virtualizer on auto");
+    assert_eq!(by_name["endp"], [1], "pinned to the headphone endpoint");
+    assert_eq!(by_name["ven"], [1], "visualizer feed on");
+}
+
+/// Behavior 11 (issue #18), switch half: the tracer bullet against the
+/// real engine — WS `set_profile` lands Movie's values in the registry.
+#[tokio::test]
+async fn set_profile_lands_movies_values_on_the_real_engine() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+
+    let mut ws = connected(daemon.handle.addr()).await;
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "set_profile", "request_id": "r1", "id": "movie" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla", "dea", "dhsb", "genb"])
+        .expect("get_params");
+    assert_eq!(values[0], [7], "Movie's leveler amount");
+    assert_eq!(values[1], [3], "Movie's dialog enhancer amount");
+    assert_eq!(values[2], [96], "Movie's surround boost");
+    assert_eq!(values[3], [20], "still 20-band after the switch");
 }
 
 /// Behavior 6 (issue #16): a session created while power is off starts
