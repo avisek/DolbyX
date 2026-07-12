@@ -112,6 +112,17 @@ pub async fn start_daemon() -> TestDaemon {
     TestDaemon { handle, stub, dir }
 }
 
+/// The `set_params` batches an injected stub recorded, in issue order.
+pub fn set_params_batches(stub: &StubBackend) -> Vec<Vec<(String, Vec<i16>)>> {
+    stub.calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            ddp_engine::Call::SetParams(_, batch) => Some(batch),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Polls `condition` (up to 5 s) until it holds — the assertion
 /// primitive for effects the daemon lands asynchronously (e.g. session
 /// teardown after a disconnect it notices on its own).

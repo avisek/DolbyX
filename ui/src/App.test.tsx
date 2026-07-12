@@ -37,6 +37,8 @@ const powerToggle = () => screen.getByRole('switch', { name: 'Power' })
 it('renders the DolbyX shell', () => {
   render(() => <App />)
   expect(screen.getByRole('heading', { name: 'DolbyX' })).toBeTruthy()
+  // Behavior 1 (#22): the master controls sit on the main screen.
+  expect(screen.getByRole('region', { name: 'Master controls' })).toBeTruthy()
 })
 
 // Behavior 1 (#13): first paint comes fully populated from the
