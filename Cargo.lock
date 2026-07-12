@@ -266,6 +266,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "windows-sys",
 ]
 
 [[package]]
@@ -314,6 +315,15 @@ dependencies = [
 [[package]]
 name = "ddp-vst-windows"
 version = "2.0.0-alpha"
+dependencies = [
+ "ddp-daemon",
+ "ddp-engine",
+ "libloading",
+ "proptest",
+ "tempfile",
+ "tokio",
+ "windows-sys",
+]
 
 [[package]]
 name = "digest"

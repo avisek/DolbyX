@@ -6,7 +6,22 @@ edition.workspace = true
 publish.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+# cdylib is the shipped DolbyX.dll; lib lets the synthetic-host tests
+# drive the exported VST entry in-process (issue #21 behavior 2).
+crate-type = ["cdylib", "lib"]
 
 [lints]
 workspace = true
+
+[dependencies]
+ddp-engine = { path = "../ddp-engine" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+ddp-daemon = { path = "../ddp-daemon" }
+libloading.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

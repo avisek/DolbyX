@@ -160,9 +160,10 @@ fn the_shared_block_applies_to_every_profile() {
         assert_eq!(scalar(profile, "artp"), 12, "{id}: artp");
         assert_eq!(profile.params["arbi"][..4], [1, 1, 1, 1], "{id}: arbi");
         assert_eq!(profile.params["aobg"][0], 2, "{id}: aobg channel id");
-        // v2 pins: the original's GENERIC → DEVICE_WIRED_HEADPHONE
-        // endpoint, and the visualizer feed.
-        assert_eq!(scalar(profile, "endp"), 1, "{id}: endp");
+        // v2 pins: the engine's HEADPHONES endpoint (AK encoding 2 —
+        // probe-verified vdhe auto gate, v1's value; docs/ddp/02
+        // `endp`), and the visualizer feed.
+        assert_eq!(scalar(profile, "endp"), 2, "{id}: endp");
         assert_eq!(scalar(profile, "ven"), 1, "{id}: ven");
         // Band arrays stay allocated at engine capacity.
         assert_eq!(profile.params["gebf"].len(), 40, "{id}: gebf allocation");

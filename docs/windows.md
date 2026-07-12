@@ -12,6 +12,7 @@ requirement only; the v2.1 Unicorn backend drops it.
 | What                                                          | Where                                             |
 | ------------------------------------------------------------- | ------------------------------------------------- |
 | `ddp-daemon.exe` + `parameters.toml`, `defaults.toml`, `index.html` | one directory, anywhere on the Windows side |
+| `DolbyX.dll` (VST2 plugin)                                     | wherever EqualizerAPO loads it from — see below   |
 | Engine: `ddp-engine-arm`, `libdseffect.so`, stub `.so`s       | WSL side: `/opt/dolbyx/engine` (default `--engine-dir`) |
 | State                                                          | `%PROGRAMDATA%\DolbyX\config.toml`                |
 | Logs                                                           | stdout/stderr under `RUST_LOG`; rotating file lands with Slice 22 ([#30](https://github.com/avisek/DolbyX/issues/30)) |
@@ -34,12 +35,35 @@ Health check, standalone — exit 0 means qemu ran, the shim loaded
 wsl -e sh -c "qemu-arm-static -E LD_LIBRARY_PATH=/opt/dolbyx/engine -L /usr/arm-linux-gnueabihf /opt/dolbyx/engine/ddp-engine-arm < /dev/null"
 ```
 
+## VST plugin (EqualizerAPO)
+
+`DolbyX.dll` ferries system playback through the daemon's engine
+(issue [#21](https://github.com/avisek/DolbyX/issues/21)). Install:
+
+1. Copy `target\windows\DolbyX.dll` somewhere stable, e.g.
+   `C:\Program Files\EqualizerAPO\VSTPlugins\DolbyX.dll`.
+2. Add one line to `C:\Program Files\EqualizerAPO\config\config.txt`
+   (or pick the DLL in the Configuration Editor):
+
+   ```
+   VSTPlugin: Library "C:\Program Files\EqualizerAPO\VSTPlugins\DolbyX.dll"
+   ```
+
+EqualizerAPO reloads on save — audio flows immediately. Daemon down =
+clean pass-through; the plugin reconnects within a second of it
+returning. The plugin has no editor: "Open panel" on its config row
+opens the Web UI (`http://localhost:9876`).
+
+The plugin is deliberately silent — diagnose from the daemon's logs
+(`RUST_LOG=debug`). A daemon on a non-default `--socket-path` is
+reachable by setting `DOLBYX_SOCKET_PATH` for the host process.
+
 ## Dev loop: build on WSL2, run on Windows
 
 Prerequisite (in WSL): `apt install gcc-mingw-w64-x86-64`.
 
 ```bash
-just windows-build   # cross-build + stage target/windows/: daemon, TOMLs, UI, engine
+just windows-build   # cross-build + stage target/windows/: daemon, DolbyX.dll, TOMLs, UI, engine
 ```
 
 Run the staged daemon from the same WSL shell (interop runs it as a

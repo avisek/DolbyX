@@ -2,7 +2,9 @@
 //! in-process by `main` and by the integration tests (which inject a
 //! `StubBackend` — the one sanctioned seam).
 
-#![forbid(unsafe_code)]
+// deny, not forbid: `platform::windows` carries one expected unsafe
+// island (pipe security FFI).
+#![deny(unsafe_code)]
 
 pub mod audio_server;
 pub mod engine_supervisor;

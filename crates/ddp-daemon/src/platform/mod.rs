@@ -8,6 +8,10 @@
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "NULL-DACL pipe security — audiodg.exe (LOCAL SERVICE) must connect"
+)]
 mod windows;
 
 #[cfg(unix)]
