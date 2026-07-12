@@ -34,6 +34,22 @@ e2e: _ui-deps stage-engine
     pnpm -C ui exec playwright install chromium
     pnpm -C ui run e2e
 
+# Cross-build the native Windows daemon + stage everything it needs into
+# target/windows/ (apt install gcc-mingw-w64-x86-64); run the printed line
+# from Windows or straight from this WSL shell — see docs/windows.md
+windows-build: _ui-deps
+    rustup target add x86_64-pc-windows-gnu
+    pnpm -C ui build
+    cargo build -p ddp-daemon --target x86_64-pc-windows-gnu --release
+    mkdir -p target/windows
+    cp target/x86_64-pc-windows-gnu/release/ddp-daemon.exe \
+       target/x86_64-pc-windows-gnu/release/parameters.toml \
+       target/x86_64-pc-windows-gnu/release/defaults.toml \
+       ui/dist/index.html target/windows/
+    scripts/stage-engine.sh target/windows/engine
+    @echo "Staged. Run the Windows daemon:"
+    @echo "  target/windows/ddp-daemon.exe --engine-dir $(realpath target/windows/engine)"
+
 # Cross-compile the ARMv7 engine shim (rustup target + gcc-arm-linux-gnueabihf linker)
 arm-build:
     rustup target add armv7-unknown-linux-gnueabihf
