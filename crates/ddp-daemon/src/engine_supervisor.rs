@@ -338,6 +338,21 @@ impl EngineSupervisor {
         self.inner.lock().expect("supervisor lock").readouts.clone()
     }
 
+    /// The main session's external id — the oldest live session, which
+    /// sources the readouts (and, from Slice 16
+    /// [#24](https://github.com/avisek/DolbyX/issues/24), the `vis`
+    /// events). `None` with zero sessions. A change here means the
+    /// snapshot's `readouts` changed — the caller broadcasts.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the supervisor lock is not poisoned.
+    #[must_use]
+    pub fn main_session(&self) -> Option<SessionId> {
+        let inner = self.inner.lock().expect("supervisor lock");
+        inner.sessions.first().map(|session| session.external)
+    }
+
     /// Runs the init sequence against the backend, returning the
     /// backend session id. A handle that fails mid-init is released —
     /// never left half-alive engine-side.
@@ -483,8 +498,10 @@ mod tests {
         let engine = Arc::new(StubBackend::seeded(vec![("vnnb".into(), vec![0])]));
         let supervisor =
             EngineSupervisor::new(engine.clone(), true, Vec::new(), vec!["vnnb".into()]);
+        assert_eq!(supervisor.main_session(), None, "zero sessions ⇒ no main");
         let first = supervisor.create_session(48000).unwrap();
         let second = supervisor.create_session(44100).unwrap();
+        assert_eq!(supervisor.main_session(), Some(first), "oldest is main");
 
         // Sharpen the second session's registry so the handover is
         // observable ([20] once the grid has filled ≠ power-on [0]).
@@ -492,12 +509,18 @@ mod tests {
 
         supervisor.destroy_session(first).unwrap();
         assert_eq!(
+            supervisor.main_session(),
+            Some(second),
+            "next-oldest takes over"
+        );
+        assert_eq!(
             supervisor.readouts()["vnnb"],
             vec![20],
             "next-oldest session sources the readouts"
         );
 
         supervisor.destroy_session(second).unwrap();
+        assert_eq!(supervisor.main_session(), None);
         assert!(supervisor.readouts().is_empty(), "no sessions ⇒ cleared");
         assert_eq!(
             supervisor.destroy_session(second),

@@ -3,7 +3,8 @@
 //! replayed over `QemuBackend`), behavior 4 (supervisor respawn), 5
 //! (live readouts), 6 (power-off session init). Slice 10 (#18) adds
 //! behavior 11: the resolved-profile init reshape, read back from the
-//! live registry.
+//! live registry. Slice 11 (#19) adds behavior 9: plugin behaviors 2–5
+//! replayed over the real platform socket.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -13,10 +14,13 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{assert_config_becomes, connected, recv_json, send_json, set_power, ws_connect};
+use common::plugin::SyntheticPlugin;
+use common::{
+    assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for, ws_connect,
+};
 use ddp_daemon::Daemon;
-use ddp_engine::QemuBackend;
 use ddp_engine::test_support::staged_engine_dir;
+use ddp_engine::{QemuBackend, SessionId};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -253,6 +257,157 @@ async fn set_profile_lands_movies_values_on_the_real_engine() {
     assert_eq!(values[1], [3], "Movie's dialog enhancer amount");
     assert_eq!(values[2], [96], "Movie's surround boost");
     assert_eq!(values[3], [20], "still 20-band after the switch");
+}
+
+/// Behavior 9 / tracer bullet (issue #19), plugin behaviors 2 + 3: a
+/// synthetic plugin over the real platform socket — `Hello {48000}`
+/// acked, silence round-trips within transient bounds, power on
+/// transforms a tone, power off (bypass) echoes it exactly.
+#[tokio::test]
+async fn a_plugin_round_trips_audio_through_the_real_engine() {
+    let daemon = start_qemu_daemon().await;
+    let mut plugin = SyntheticPlugin::connect(&socket_path_for(&daemon.dir)).await;
+    let session = plugin.hello(48_000, 256).await;
+    assert_eq!(session, 0, "a fresh session id");
+
+    // Silence in ⇒ silence out, once the enable crossfade's transient
+    // has passed.
+    let silence = vec![0_i16; 512];
+    let mut output = Vec::new();
+    for _ in 0..CROSSFADE_BLOCKS {
+        output = plugin.process(&silence).await;
+        assert_eq!(output.len(), silence.len(), "Processed mirrors Process");
+    }
+    let peak = output.iter().map(|sample| sample.unsigned_abs()).max();
+    assert!(
+        peak.expect("nonempty") <= 64,
+        "silence stays within transient bounds, peak {peak:?}"
+    );
+
+    // Power on ⇒ the DSP audibly transforms a real tone…
+    let tone = test_block();
+    let mut processed = Vec::new();
+    for _ in 0..CROSSFADE_BLOCKS {
+        processed = plugin.process(&tone).await;
+    }
+    assert_ne!(processed, tone, "power on ⇒ processed PCM ≠ input");
+
+    // …and power off bypasses it exactly (epic: `EFFECT_CMD_DISABLE`,
+    // parameters survive), past the disable crossfade.
+    let mut ws = connected(daemon.handle.addr()).await;
+    set_power(&mut ws, false).await;
+    let mut echoed = Vec::new();
+    for _ in 0..CROSSFADE_BLOCKS {
+        echoed = plugin.process(&tone).await;
+    }
+    assert_eq!(echoed, tone, "power off ⇒ OUT == IN");
+    plugin.goodbye().await;
+}
+
+/// Behavior 9 (issue #19), plugin behavior 2's pitch-preservation
+/// half: the engine session really runs at the plugin's `Hello` rate —
+/// the rate-derived native grids of a 44.1 kHz and a 48 kHz session
+/// differ once filled (a silent 44.1 fallback would make them equal).
+#[tokio::test]
+async fn the_engine_session_runs_at_the_plugins_hello_rate() {
+    let daemon = start_qemu_daemon().await;
+    let socket = socket_path_for(&daemon.dir);
+    let mut at_44100 = SyntheticPlugin::connect(&socket).await;
+    let mut at_48000 = SyntheticPlugin::connect(&socket).await;
+    let a = SessionId(at_44100.hello(44_100, 256).await);
+    let b = SessionId(at_48000.hello(48_000, 256).await);
+
+    // The DSP-owned readout slots fill at the first process blocks.
+    let block = test_block();
+    for _ in 0..4 {
+        at_44100.process(&block).await;
+        at_48000.process(&block).await;
+    }
+    let grid = |session| {
+        daemon
+            .handle
+            .supervisor()
+            .get_params(session, &["vnbf"])
+            .expect("read the native grid")
+    };
+    assert_ne!(
+        grid(a),
+        grid(b),
+        "rate-derived native grids differ ⇒ SET_CONFIG ran at 48000, not a 44.1 fallback"
+    );
+}
+
+/// Behavior 9 (issue #19), plugin behavior 4: two plugins multiplex
+/// over the one shared engine subprocess with no crosstalk — in bypass
+/// each hears exactly its own tone back; enabled, distinct tones stay
+/// distinct.
+#[tokio::test]
+async fn two_plugins_multiplex_on_the_real_engine_without_crosstalk() {
+    let daemon = start_qemu_daemon().await;
+    // Power off first: both sessions are born disabled ⇒ dry from the
+    // first block, so any cross-routing shows up as an exact mismatch.
+    let mut ws = connected(daemon.handle.addr()).await;
+    set_power(&mut ws, false).await;
+
+    let socket = socket_path_for(&daemon.dir);
+    let mut a = SyntheticPlugin::connect(&socket).await;
+    let mut b = SyntheticPlugin::connect(&socket).await;
+    a.hello(48_000, 256).await;
+    b.hello(48_000, 256).await;
+
+    let tone_a = test_block();
+    let tone_b: Vec<i16> = test_block().iter().map(|sample| -sample).collect();
+    for _ in 0..8 {
+        assert_eq!(a.process(&tone_a).await, tone_a, "a hears exactly a");
+        assert_eq!(b.process(&tone_b).await, tone_b, "b hears exactly b");
+    }
+
+    // Enabled, the sessions process independently: distinct tones stay
+    // distinct.
+    set_power(&mut ws, true).await;
+    let (mut processed_a, mut processed_b) = (Vec::new(), Vec::new());
+    for _ in 0..CROSSFADE_BLOCKS {
+        processed_a = a.process(&tone_a).await;
+        processed_b = b.process(&tone_b).await;
+    }
+    assert_ne!(processed_a, tone_a, "a is transformed");
+    assert_ne!(processed_b, tone_b, "b is transformed");
+    assert_ne!(processed_a, processed_b, "distinct tones stay distinct");
+}
+
+/// Behavior 9 (issue #19), plugin behavior 5 (+ the handover): a
+/// `Goodbye` destroys the real session with the next-oldest taking
+/// over as main; an abrupt disconnect destroys the last one.
+#[tokio::test]
+async fn goodbye_and_disconnect_destroy_real_sessions() {
+    let daemon = start_qemu_daemon().await;
+    let socket = socket_path_for(&daemon.dir);
+    let mut a = SyntheticPlugin::connect(&socket).await;
+    let mut b = SyntheticPlugin::connect(&socket).await;
+    let session_a = SessionId(a.hello(44_100, 256).await);
+    let session_b = SessionId(b.hello(48_000, 256).await);
+    let supervisor = daemon.handle.supervisor();
+    assert_eq!(supervisor.main_session(), Some(session_a));
+
+    a.goodbye().await;
+    wait_for_main(supervisor, Some(session_b), "Goodbye hands main over").await;
+
+    drop(b); // no Goodbye — the host crashed / killed the plugin
+    wait_for_main(supervisor, None, "abrupt disconnect destroys").await;
+}
+
+/// Polls (up to 5 s) until the main session is `expected` — teardown
+/// after a disconnect lands asynchronously.
+async fn wait_for_main(
+    supervisor: &ddp_daemon::EngineSupervisor,
+    expected: Option<SessionId>,
+    what: &str,
+) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while supervisor.main_session() != expected {
+        assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 /// Behavior 6 (issue #16): a session created while power is off starts
