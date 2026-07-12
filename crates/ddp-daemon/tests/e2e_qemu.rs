@@ -229,7 +229,11 @@ async fn session_init_reshapes_the_engine_to_the_music_profile() {
     assert_eq!(by_name["deon"], [1]);
     assert_eq!(by_name["dhsb"], [48], "Music's surround boost");
     assert_eq!(by_name["vdhe"], [2], "headphone virtualizer on auto");
-    assert_eq!(by_name["endp"], [1], "pinned to the headphone endpoint");
+    assert_eq!(
+        by_name["endp"],
+        [2],
+        "pinned to the engine's HEADPHONES endpoint (AK encoding 2 — docs/ddp/02 `endp`)"
+    );
     assert_eq!(by_name["ven"], [1], "visualizer feed on");
 }
 
