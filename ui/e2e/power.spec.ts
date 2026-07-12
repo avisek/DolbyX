@@ -3,7 +3,7 @@
  * daemon, real engine. Selectors are the accessible roles the
  * components ship (`switch` = PowerToggle, `status` = ConnectionBadge).
  */
-import { expect, test } from './fixtures'
+import { countStateFrames, expect, test } from './fixtures'
 
 /** Behavior 1: the first paint is fully populated from the bootstrap. */
 test('first paint is fully populated straight from the bootstrap', async ({
@@ -44,9 +44,13 @@ test('a power flip survives a daemon restart and the page reconnects', async ({
   page,
   daemon,
 }) => {
+  const stateFrames = countStateFrames(page)
   await page.goto('/')
   const power = page.getByRole('switch', { name: 'Power' })
   await expect(power).toHaveAttribute('aria-checked', 'true')
+  // Connect traffic settles at exactly two `state` frames: the
+  // snapshot-on-connect plus the get_state reconcile reply.
+  await expect.poll(stateFrames).toBe(2)
 
   // Local-first: the originator's flip lands on its ack.
   await power.click()
@@ -58,9 +62,12 @@ test('a power flip survives a daemon restart and the page reconnects', async ({
   await expect(badge).toHaveText('Reconnecting…')
 
   // Up on the same port over the same config dir: the WS reconnects
-  // with backoff, get_state reconciles, and the flip is still there.
+  // with backoff and the flip is still there.
   await daemon.start()
   await expect(badge).toHaveText('Connected')
+  // Reconciled, not merely reconnected: fresh `state` frames beyond the
+  // pre-restart two carry the restarted daemon's truth to the page.
+  await expect.poll(stateFrames).toBeGreaterThan(2)
   await expect(power).toHaveAttribute('aria-checked', 'false')
 
   // A cold reload paints from the restarted daemon's bootstrap.
@@ -77,34 +84,26 @@ test('a flip in one page reaches the other, with no snapshot pushed at the origi
   page,
   context,
 }) => {
-  // Collect every `state` event the originator's WS receives.
-  const originatorStates: string[] = []
-  page.on('websocket', (ws) => {
-    ws.on('framereceived', (frame) => {
-      const payload = String(frame.payload)
-      if ((JSON.parse(payload) as { type: string }).type === 'state') {
-        originatorStates.push(payload)
-      }
-    })
-  })
+  const originatorStates = countStateFrames(page)
   await page.goto('/')
   const originatorPower = page.getByRole('switch', { name: 'Power' })
   await expect(page.getByRole('status')).toHaveText('Connected')
+  // The originator's connect traffic settles at exactly two `state`
+  // frames (snapshot-on-connect + get_state reconcile reply) — a
+  // deterministic baseline nothing below may grow.
+  await expect.poll(originatorStates).toBe(2)
 
   const peer = await context.newPage()
   await peer.goto('/')
   const peerPower = peer.getByRole('switch', { name: 'Power' })
   await expect(peerPower).toHaveAttribute('aria-checked', 'true')
 
-  // Baseline after both settle: connect snapshot + get_state reconcile
-  // (> 0 proves the tap sees frames — the final count can't pass vacuously).
-  const statesBefore = originatorStates.length
-  expect(statesBefore).toBeGreaterThan(0)
   await originatorPower.click()
 
   // The peer hears the broadcast; the originator applied its own ack…
   await expect(peerPower).toHaveAttribute('aria-checked', 'false')
   await expect(originatorPower).toHaveAttribute('aria-checked', 'false')
-  // …without a round-trip snapshot fighting its in-flight edit.
-  expect(originatorStates.length).toBe(statesBefore)
+  // …and got no snapshot pushed at it — not for the peer joining, not
+  // for its own flip: nothing fights the originator's in-flight edits.
+  expect(originatorStates()).toBe(2)
 })

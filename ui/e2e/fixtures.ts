@@ -8,7 +8,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test as base, expect } from '@playwright/test'
+import { test as base, expect, type Page } from '@playwright/test'
 
 const daemonBin = join(import.meta.dirname, '../../target/debug/ddp-daemon')
 const uiHtml = join(import.meta.dirname, '../dist/index.html')
@@ -81,12 +81,17 @@ class Daemon implements DaemonHandle {
         clearTimeout(timer)
         fail(`daemon exited with ${String(code)} before listening`)
       })
+      child.once('error', (error) => {
+        clearTimeout(timer)
+        fail(`daemon failed to spawn: ${error.message}`)
+      })
     })
   }
 
   async stop(): Promise<void> {
     const child = this.#child
-    if (!child || child.exitCode !== null) return
+    // No pid: the spawn itself failed — nothing to wait on.
+    if (!child || child.pid === undefined || child.exitCode !== null) return
     const exited = new Promise((resolve) => child.once('exit', resolve))
     child.kill('SIGTERM')
     const timer = setTimeout(() => child.kill('SIGKILL'), STOP_TIMEOUT_MS)
@@ -100,17 +105,38 @@ export const test = base.extend<{ daemon: DaemonHandle }>({
   daemon: async ({}, use, testInfo) => {
     const configDir = await mkdtemp(join(tmpdir(), 'dolbyx-e2e-'))
     const daemon = new Daemon(configDir)
-    await daemon.start()
-    await use(daemon)
-    await daemon.stop()
-    if (testInfo.status !== testInfo.expectedStatus) {
-      await testInfo.attach('daemon.log', { body: daemon.log })
+    try {
+      await daemon.start()
+      await use(daemon)
+    } finally {
+      // Runs on setup failures too — a daemon whose boot timed out is
+      // still alive and must not outlive its test, nor its tempdir.
+      await daemon.stop()
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('daemon.log', { body: daemon.log })
+      }
+      await rm(configDir, { recursive: true, force: true })
     }
-    await rm(configDir, { recursive: true, force: true })
   },
   baseURL: async ({ daemon }, use) => {
     await use(daemon.origin)
   },
 })
+
+/**
+ * Counts the `state` events a page's WS connections receive, across
+ * reconnects — specs pin reconciles and originator suppression on the
+ * real wire. Call before the first `goto`.
+ */
+export function countStateFrames(page: Page): () => number {
+  let count = 0
+  page.on('websocket', (ws) => {
+    ws.on('framereceived', (frame) => {
+      const event = JSON.parse(String(frame.payload)) as { type: string }
+      if (event.type === 'state') count += 1
+    })
+  })
+  return () => count
+}
 
 export { expect }
