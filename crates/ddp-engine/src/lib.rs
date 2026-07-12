@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod plugin;
 pub mod protocol;
 pub mod qemu;
 pub mod stub;

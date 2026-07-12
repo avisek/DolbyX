@@ -314,6 +314,14 @@ dependencies = [
 [[package]]
 name = "ddp-vst-windows"
 version = "2.0.0-alpha"
+dependencies = [
+ "ddp-daemon",
+ "ddp-engine",
+ "proptest",
+ "tempfile",
+ "tokio",
+ "windows-sys",
+]
 
 [[package]]
 name = "digest"
