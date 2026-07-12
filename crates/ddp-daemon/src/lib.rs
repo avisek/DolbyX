@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{RwLock, broadcast};
 use tokio::task::JoinHandle;
 
-pub use engine_supervisor::EngineSupervisor;
+pub use engine_supervisor::{EngineSupervisor, SupervisorError};
 
 use crate::ws_server::ConnId;
 
@@ -101,14 +101,19 @@ impl App {
     }
 
     /// The full snapshot of `state` as wire JSON: user state + the
-    /// `readouts` map. With zero sessions the 8 ReadOnly-Static values
-    /// come from `ParameterDef.default` (real values: Slice 08, #16).
+    /// `readouts` map — the 8 ReadOnly-Static values live from the
+    /// main session, `ParameterDef.default` while zero sessions (or
+    /// for a dead ref the engine reads empty).
     pub(crate) fn snapshot_json_of(&self, state: &State) -> serde_json::Value {
+        let live = self.supervisor.readouts();
         let readouts: serde_json::Map<String, serde_json::Value> = self
             .params
             .iter()
             .filter(|def| def.access == ddp_state::ParamAccess::ReadOnlyStatic)
-            .map(|def| (def.name.clone(), serde_json::json!(def.default)))
+            .map(|def| {
+                let value = live.get(&def.name).unwrap_or(&def.default);
+                (def.name.clone(), serde_json::json!(value))
+            })
             .collect();
         serde_json::json!({
             "power": state.power,
@@ -153,7 +158,19 @@ impl Daemon {
 
         let persistence = Arc::new(Persistence::open(&config.config_dir, defaults)?);
         let state = persistence.load();
-        let supervisor = Arc::new(EngineSupervisor::new(engine, state.power));
+        let readout_names = params
+            .iter()
+            .filter(|def| def.access == ddp_state::ParamAccess::ReadOnlyStatic)
+            .map(|def| def.name.clone())
+            .collect();
+        // Resolved active profile: `State` resolves no params before
+        // Slice 10 (#18), so sessions init on engine power-on defaults.
+        let supervisor = Arc::new(EngineSupervisor::new(
+            engine,
+            state.power,
+            Vec::new(),
+            readout_names,
+        ));
         let app = Arc::new(App {
             params_json: serde_json::to_value(&params).expect("defs always serialize"),
             params,

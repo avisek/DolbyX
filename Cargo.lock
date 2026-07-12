@@ -273,6 +273,7 @@ name = "ddp-engine"
 version = "2.0.0-alpha"
 dependencies = [
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -25,6 +25,20 @@ struct Args {
     /// platform data dir.
     #[arg(long)]
     config_dir: Option<PathBuf>,
+    /// Engine backend. The default is the real engine (issue #16);
+    /// `stub` fabricates replies — inner-loop dev/tests only.
+    #[arg(long, value_enum, default_value_t = EngineKind::Qemu)]
+    engine: EngineKind,
+}
+
+/// Which `Engine` implementation the daemon binds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum EngineKind {
+    /// `QemuBackend`: `libdseffect.so` under `qemu-arm-static`, staged
+    /// beside the daemon binary (`just stage-engine` in dev).
+    Qemu,
+    /// `StubBackend`: no subprocess, no real audio processing.
+    Stub,
 }
 
 /// The platform data dir carrying `config.toml`
@@ -102,12 +116,27 @@ async fn shutdown_signal() {
     }
 }
 
-/// Resolves paths, starts the daemon, and serves until interrupted.
+/// Resolves paths, starts the engine + daemon, and serves until
+/// interrupted.
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let daemon_dir = std::env::current_exe()?
         .parent()
         .ok_or("cannot resolve the daemon binary's directory")?
         .to_path_buf();
+    // The engine shim + libdseffect.so resolve beside the daemon
+    // binary, like the runtime TOMLs. Refuse-to-start policy: a broken
+    // staging fails here, loudly, before anything is served.
+    let engine: std::sync::Arc<dyn ddp_engine::Engine> = match args.engine {
+        EngineKind::Qemu => std::sync::Arc::new(
+            ddp_engine::QemuBackend::start(&daemon_dir).map_err(|error| {
+                format!("engine: {error} — is the engine staged beside the daemon binary? (`just stage-engine`)")
+            })?,
+        ),
+        EngineKind::Stub => {
+            tracing::warn!("running on the stub backend — no real audio processing");
+            std::sync::Arc::new(ddp_engine::StubBackend::new())
+        }
+    };
     let config = DaemonConfig {
         port: args.port,
         ui_path: args.ui.unwrap_or_else(|| daemon_dir.join("index.html")),
@@ -116,8 +145,6 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     tokio::runtime::Runtime::new()?.block_on(async {
-        // StubBackend until `QemuBackend` lands in Slice 08 (#16).
-        let engine = std::sync::Arc::new(ddp_engine::StubBackend::new());
         let daemon = Daemon::start(config, engine).await?;
         tracing::info!(addr = %daemon.addr(), "listening");
         shutdown_signal().await;
@@ -134,11 +161,16 @@ mod tests {
     use super::Args;
 
     /// Behavior 1 (issue #12): the daemon binds :9876 by default.
+    /// Slice 08 (issue #16): the default engine is the real one.
     #[test]
-    fn the_default_port_is_9876() {
+    fn the_default_port_is_9876_and_the_default_engine_is_qemu() {
         let args = Args::try_parse_from(["ddp-daemon"]).unwrap();
         assert_eq!(args.port, 9876);
         assert_eq!(args.ui, None);
         assert_eq!(args.config_dir, None);
+        assert_eq!(args.engine, super::EngineKind::Qemu);
+
+        let stubbed = Args::try_parse_from(["ddp-daemon", "--engine", "stub"]).unwrap();
+        assert_eq!(stubbed.engine, super::EngineKind::Stub);
     }
 }

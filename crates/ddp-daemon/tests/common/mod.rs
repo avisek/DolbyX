@@ -62,13 +62,20 @@ pub fn config_for(dir: &TempDir) -> DaemonConfig {
     }
 }
 
+/// Starts a daemon over an existing fixture dir with an injected
+/// engine — the seam for non-stub backends (the qemu e2e suite,
+/// failure fakes).
+pub async fn start_with(dir: &TempDir, engine: Arc<dyn ddp_engine::Engine>) -> Daemon {
+    Daemon::start(config_for(dir), engine)
+        .await
+        .expect("daemon starts")
+}
+
 /// Starts a stub-backed daemon over an existing fixture dir — the
 /// restart primitive.
 pub async fn start_over(dir: &TempDir) -> (Daemon, Arc<StubBackend>) {
     let stub = Arc::new(StubBackend::new());
-    let daemon = Daemon::start(config_for(dir), stub.clone())
-        .await
-        .expect("daemon starts");
+    let daemon = start_with(dir, stub.clone()).await;
     (daemon, stub)
 }
 

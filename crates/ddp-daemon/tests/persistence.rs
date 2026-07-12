@@ -81,8 +81,10 @@ async fn sigterm_flushes_the_pending_write_and_exits_zero() {
     use std::process::{Command, Stdio};
 
     let dir = common::fixture_dir();
+    // `--engine stub`: this test exercises signal handling, not the
+    // engine, and no staged engine sits beside the test binary.
     let mut child = Command::new(env!("CARGO_BIN_EXE_ddp-daemon"))
-        .args(["--port", "0", "--ui"])
+        .args(["--engine", "stub", "--port", "0", "--ui"])
         .arg(dir.path().join("index.html"))
         .arg("--config-dir")
         .arg(dir.path().join("data"))

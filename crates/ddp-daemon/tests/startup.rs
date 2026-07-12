@@ -8,9 +8,11 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 /// Runs a daemon binary to completion with the standard flags.
+/// `--engine stub`: these tests exercise the TOML/UI refusals, and no
+/// staged engine sits beside the test binary.
 fn run(binary: &Path, ui: &Path, config_dir: &Path) -> Output {
     Command::new(binary)
-        .args(["--port", "0"])
+        .args(["--engine", "stub", "--port", "0"])
         .arg("--ui")
         .arg(ui)
         .arg("--config-dir")

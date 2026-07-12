@@ -11,7 +11,7 @@ use ddp_state::Command;
 use tokio::sync::broadcast;
 
 use crate::App;
-use crate::ws_commands::{WsCommand, WsEvent, ack, invalid_request};
+use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
 
 /// Internal identity of one WS connection — never on the wire; exists
 /// solely so the daemon can exclude the originator from `state`
@@ -89,12 +89,15 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             let diff = state
                 .apply(Command::SetPower { on })
                 .unwrap_or_else(|error| match error {});
+            let mut engine_failure = None;
             if let Some(power) = diff.power {
                 if let Err(error) = app.supervisor.set_power(power) {
-                    // Unreachable with the stub; QEMU error surfacing is
-                    // Slice 08 (#16).
                     tracing::error!(%error, "engine set_power failed");
+                    engine_failure = Some(error);
                 }
+                // State stays authoritative even when the engine is
+                // down — persist and broadcast the flip; the supervisor
+                // replays it onto the engine once it recovers.
                 app.persistence.flush(&state);
                 // Serialize + queue under the write lock so broadcast
                 // order always matches state order.
@@ -105,7 +108,10 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
                 let _ = app.updates.send((conn_id, event.into()));
             }
             drop(state);
-            vec![ack(&request_id).to_text()]
+            vec![match engine_failure {
+                None => ack(&request_id).to_text(),
+                Some(error) => engine_rejected(&request_id, &error).to_text(),
+            }]
         }
     }
 }
