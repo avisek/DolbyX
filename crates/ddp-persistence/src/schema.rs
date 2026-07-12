@@ -23,7 +23,7 @@ use std::fmt::Write as _;
 
 use ddp_state::{
     Defaults, EqPreset, ParameterDef, PresetId, Profile, ProfileId, State, ValidationError,
-    base_eq_params, base_params, validate_preset_write, validate_write,
+    base_eq_params, base_params, validate_eq_preset_write, validate_write,
 };
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -170,7 +170,7 @@ fn param_value(key: &str, value: toml::Value) -> Result<ParamValue, String> {
 }
 
 /// A per-entry param validator: [`validate_write`] for `[profile]`,
-/// [`validate_preset_write`] for `[eq_preset]` (presets carry only the
+/// [`validate_eq_preset_write`] for `[eq_preset]` (presets carry only the
 /// preset-carried params).
 type ParamValidator = fn(&[ParameterDef], &str, &[i16]) -> Result<(), ValidationError>;
 
@@ -220,14 +220,14 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
     let profile = split_namespace(file.profile).map_err(Error::Defaults)?;
     let eq_preset = split_namespace(file.eq_preset).map_err(Error::Defaults)?;
     validate_namespace(defs, &profile, validate_write).map_err(Error::Defaults)?;
-    validate_namespace(defs, &eq_preset, validate_preset_write).map_err(Error::Defaults)?;
+    validate_namespace(defs, &eq_preset, validate_eq_preset_write).map_err(Error::Defaults)?;
 
     let mut eq_presets = Vec::with_capacity(eq_preset.items.len());
     for (id, item) in &eq_preset.items {
         let name = item.name.clone().ok_or_else(|| {
             Error::Defaults(format!("[eq_preset.{id}]: missing `name` (display name)"))
         })?;
-        reject_selection("eq_preset", id, item).map_err(Error::Defaults)?;
+        reject_selection(id, item).map_err(Error::Defaults)?;
         let mut params = base_eq_params(defs);
         overlay_params(&mut params, &eq_preset.shared);
         overlay_params(&mut params, &item.params);
@@ -282,10 +282,10 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
 }
 
 /// `selected_eq_preset` belongs on `config.toml` profile items only.
-fn reject_selection(namespace: &str, id: &str, item: &ItemTable) -> Result<(), String> {
+fn reject_selection(id: &str, item: &ItemTable) -> Result<(), String> {
     if item.selected_eq_preset.is_some() {
         return Err(format!(
-            "[{namespace}.{id}]: `selected_eq_preset` applies to profiles in config.toml only"
+            "[eq_preset.{id}]: `selected_eq_preset` applies to profiles in config.toml only"
         ));
     }
     Ok(())
@@ -310,7 +310,7 @@ pub fn parse_config(
     let profile = split_namespace(file.profile).map_err(Error::Config)?;
     let eq_preset = split_namespace(file.eq_preset).map_err(Error::Config)?;
     validate_namespace(defs, &profile, validate_write).map_err(Error::Config)?;
-    validate_namespace(defs, &eq_preset, validate_preset_write).map_err(Error::Config)?;
+    validate_namespace(defs, &eq_preset, validate_eq_preset_write).map_err(Error::Config)?;
 
     let known = |id: &ProfileId| defaults.profiles.iter().any(|profile| profile.id == *id);
     let known_preset = |id: &PresetId| defaults.eq_presets.iter().any(|preset| preset.id == *id);
@@ -345,7 +345,7 @@ pub fn parse_config(
                 "[eq_preset.{id}]: factory EQ presets cannot be renamed"
             )));
         }
-        reject_selection("eq_preset", id, item).map_err(Error::Config)?;
+        reject_selection(id, item).map_err(Error::Config)?;
     }
     if let Some(selected) = &file.selected_profile
         && !known(selected)

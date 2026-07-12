@@ -44,10 +44,6 @@ impl EqPreset {
     /// When `name` is not a preset-carried param or `values` exceeds
     /// its allocation — callers validate against `ParameterDef` first.
     pub fn splice(&mut self, name: &str, values: &[i16]) {
-        let current = self
-            .params
-            .get_mut(name)
-            .unwrap_or_else(|| panic!("`{name}` is not a preset-carried param"));
-        current[..values.len()].copy_from_slice(values);
+        crate::param_def::splice_head(&mut self.params, name, values);
     }
 }

@@ -8,15 +8,10 @@ mod common;
 use std::collections::HashMap;
 
 use common::{
-    assert_config_becomes, connected, recv_json, send_json, set_params_batches, start_daemon,
-    start_over, try_recv_json, ws_connect,
+    RICH_IEBT, assert_config_becomes, connected, recv_json, send_json, set_params_batches,
+    start_daemon, start_over, try_recv_json, ws_connect,
 };
 use serde_json::json;
-
-/// Rich's 20-band IEQ target curve (`docs/ddp/05`).
-const RICH_IEBT: [i16; 20] = [
-    67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9, -55, -235,
-];
 
 /// The nine EQ params — the preset-carried set (`category ∈ {Ieq,
 /// Geq}`), in the shipped table's order.

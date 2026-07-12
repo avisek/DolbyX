@@ -136,24 +136,15 @@ impl State {
             .collect()
     }
 
-    /// A profile's effective EQ batch — the preset-carried params in
-    /// `defs` order, from the selected preset when one is selected,
-    /// else the profile's own — what a `set_eq_preset` flush carries.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice (as [`State::resolved_batch`]).
-    fn eq_batch(&self, profile: &Profile, defs: &[ParameterDef]) -> Vec<(String, Vec<i16>)> {
-        let params = self
-            .overlay_of(profile)
-            .map_or(&profile.params, |preset| &preset.params);
-        defs.iter()
-            .filter(|def| def.access.is_writable() && def.category.is_preset_carried())
-            .map(|def| {
-                let values = params
-                    .get(&def.name)
-                    .unwrap_or_else(|| panic!("`{}` missing from the resolved item", def.name));
-                (def.name.clone(), values.clone())
+    /// The selected profile's effective EQ batch — the preset-carried
+    /// subset of [`State::resolved_batch`]: the selected preset's
+    /// params when one is selected, else the profile's own — what a
+    /// live EQ preset switch/detach/reset flushes.
+    fn eq_batch(&self, defs: &[ParameterDef]) -> Vec<(String, Vec<i16>)> {
+        self.resolved_batch(defs)
+            .into_iter()
+            .filter(|(name, _)| {
+                lookup(defs, name).is_some_and(|def| def.category.is_preset_carried())
             })
             .collect()
     }
@@ -262,7 +253,7 @@ impl State {
         if let Some(preset_id) = &id
             && self.eq_preset(preset_id).is_none()
         {
-            return Err(ValidationError::UnknownPreset(preset_id.0.clone()));
+            return Err(ValidationError::UnknownEqPreset(preset_id.0.clone()));
         }
         let live = self.selected_profile == profile_id;
         let profile = self
@@ -275,7 +266,7 @@ impl State {
         Ok(StateDiff {
             power: None,
             // Live ⇒ the targeted profile is the selected one.
-            params: live.then(|| self.eq_batch(self.selected(), defs)),
+            params: live.then(|| self.eq_batch(defs)),
             changed: true,
         })
     }
@@ -290,12 +281,12 @@ impl State {
     ) -> Result<StateDiff, ValidationError> {
         // Validate everything before mutating anything.
         for (name, values) in params {
-            validate_preset_write(defs, name, values)?;
+            validate_eq_preset_write(defs, name, values)?;
         }
         let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
-            .ok_or(ValidationError::UnknownPreset(id.0))?;
+            .ok_or(ValidationError::UnknownEqPreset(id.0))?;
         let mut batch = Vec::with_capacity(params.len());
         let mut changed = false;
         for def in defs {
@@ -325,14 +316,14 @@ impl State {
         let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
-            .ok_or(ValidationError::UnknownPreset(id.0))?;
+            .ok_or(ValidationError::UnknownEqPreset(id.0))?;
         if preset.params == preset.baseline {
             return Ok(StateDiff::default());
         }
         preset.params = preset.baseline.clone();
         Ok(StateDiff {
             power: None,
-            params: live.then(|| self.eq_batch(self.selected(), defs)),
+            params: live.then(|| self.eq_batch(defs)),
             changed: true,
         })
     }
@@ -432,7 +423,7 @@ pub enum ValidationError {
     UnknownProfile(String),
     /// The preset id names no EQ preset.
     #[error("unknown EQ preset `{0}`")]
-    UnknownPreset(String),
+    UnknownEqPreset(String),
     /// The parameter is not preset-carried — EQ presets own exactly the
     /// `category ∈ {Ieq, Geq}` params (ADR-0003).
     #[error("parameter `{0}` is not preset-carried (not an IEQ/GEQ param)")]
@@ -518,7 +509,7 @@ pub fn validate_write(
 /// # Errors
 ///
 /// The first violated rule, as a [`ValidationError`].
-pub fn validate_preset_write(
+pub fn validate_eq_preset_write(
     defs: &[ParameterDef],
     name: &str,
     values: &[i16],
@@ -1048,7 +1039,7 @@ mod tests {
                 select_preset("music", Some(PresetId("ghost".into()))),
                 &defs()
             ),
-            Err(ValidationError::UnknownPreset("ghost".into())),
+            Err(ValidationError::UnknownEqPreset("ghost".into())),
         );
         assert_eq!(state, before, "rejected commands must not mutate");
     }
@@ -1113,7 +1104,7 @@ mod tests {
         let rejected = [
             (
                 edit("ghost", "iebt", &[1]),
-                ValidationError::UnknownPreset("ghost".into()),
+                ValidationError::UnknownEqPreset("ghost".into()),
             ),
             (
                 edit("rich", "dvla", &[4]),
@@ -1239,7 +1230,7 @@ mod tests {
                 },
                 &defs(),
             ),
-            Err(ValidationError::UnknownPreset("ghost".into())),
+            Err(ValidationError::UnknownEqPreset("ghost".into())),
         );
     }
 }

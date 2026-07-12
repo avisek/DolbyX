@@ -122,6 +122,23 @@ pub fn base_eq_params(defs: &[ParameterDef]) -> std::collections::HashMap<String
         .collect()
 }
 
+/// Splices `values` over the head of the full-length array `name` holds
+/// in a resolved param map — the overlay rule for band arrays shorter
+/// than the engine-capacity allocation.
+///
+/// Panics when `name` is not seeded in the map or `values` exceeds its
+/// allocation — callers validate against `ParameterDef` first.
+pub(crate) fn splice_head(
+    params: &mut std::collections::HashMap<String, Vec<i16>>,
+    name: &str,
+    values: &[i16],
+) {
+    let current = params
+        .get_mut(name)
+        .unwrap_or_else(|| panic!("`{name}` is not seeded in this param map"));
+    current[..values.len()].copy_from_slice(values);
+}
+
 /// UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

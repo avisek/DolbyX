@@ -15,29 +15,18 @@ const EqPresetPicker: Component = () => {
       ?.selected_eq_preset ?? null
   return (
     <div class="eq-preset-picker" role="radiogroup" aria-label="EQ preset">
-      <button
-        type="button"
-        class="eq-preset-picker__option"
-        role="radio"
-        aria-checked={selected() === null}
-        onClick={() => {
-          setEqPreset(state.selected_profile, null)
-        }}
-      >
-        None
-      </button>
-      <For each={state.eq_presets}>
+      <For each={[null, ...state.eq_presets]}>
         {(preset) => (
           <button
             type="button"
             class="eq-preset-picker__option"
             role="radio"
-            aria-checked={selected() === preset.id}
+            aria-checked={selected() === (preset?.id ?? null)}
             onClick={() => {
-              setEqPreset(state.selected_profile, preset.id)
+              setEqPreset(state.selected_profile, preset?.id ?? null)
             }}
           >
-            {preset.name}
+            {preset?.name ?? 'None'}
           </button>
         )}
       </For>

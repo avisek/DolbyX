@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
 use common::{
-    assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for, wait_until,
-    ws_connect,
+    RICH_IEBT, assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for,
+    wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -346,10 +346,7 @@ async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
         .expect("get_params");
     assert_eq!(
         values[0][..20],
-        [
-            67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9,
-            -55, -235
-        ],
+        RICH_IEBT,
         "Rich's curve, read back from the live clamped registry"
     );
     assert_eq!(values[1], [1], "IEQ enabled by the overlay");

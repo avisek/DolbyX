@@ -22,6 +22,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub const UI_HTML: &str =
     "<!doctype html>\n<html><head><!--BOOTSTRAP--></head><body></body></html>\n";
 
+/// Rich's 20-band IEQ target curve, verbatim from the shipped
+/// `defaults.toml` (`docs/ddp/05`) — the Slice 15 acceptance value.
+pub const RICH_IEBT: [i16; 20] = [
+    67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9, -55, -235,
+];
+
 /// An in-process daemon plus the tempdir it lives in.
 pub struct TestDaemon {
     /// The running daemon.
