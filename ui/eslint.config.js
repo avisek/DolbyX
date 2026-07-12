@@ -11,7 +11,7 @@ const solid = /** @type {import('eslint').Linter.Config} */ (
 )
 
 export default defineConfig(
-  { ignores: ['dist/'] },
+  { ignores: ['dist/', 'test-results/', 'playwright-report/'] },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   { files: ['src/**/*.{ts,tsx}'], ...solid },
