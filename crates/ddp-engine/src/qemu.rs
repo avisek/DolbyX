@@ -247,11 +247,12 @@ impl Drop for QemuBackend {
     }
 }
 
-/// What a failed spawn names, per platform.
+/// What a failed spawn names, per platform (the daemon's start error
+/// carries the fix-it action; this names the immediate cause).
 #[cfg(unix)]
 const SPAWN_HINT: &str = "apt install qemu-user-static?";
 #[cfg(windows)]
-const SPAWN_HINT: &str = r"is WSL2 installed? scripts\setup-windows.bat sets the engine up";
+const SPAWN_HINT: &str = "is WSL2 installed?";
 
 /// Builds the subprocess invocation — the spawn seam (issue #20): the
 /// same qemu run everywhere, launched natively on Unix and relayed into

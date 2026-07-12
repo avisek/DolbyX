@@ -58,8 +58,9 @@ if errorlevel 1 (
 )
 echo   [3/4] engine installed to /opt/dolbyx/engine ^(from %SRC%^)
 
-rem [4/4] health check: the daemon's spawn verbatim; EOF on stdin makes
-rem a healthy shim load libdseffect.so and exit 0.
+rem [4/4] health check: the daemon's qemu invocation (via sh for the
+rem stdin redirect); EOF makes a healthy shim load libdseffect.so and
+rem exit 0.
 wsl.exe -e sh -c "qemu-arm-static -E LD_LIBRARY_PATH=/opt/dolbyx/engine -L /usr/arm-linux-gnueabihf /opt/dolbyx/engine/ddp-engine-arm < /dev/null" 2>nul
 if errorlevel 1 (
     echo ERROR: engine health check failed.

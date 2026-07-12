@@ -45,15 +45,27 @@ struct Args {
 /// The directory the QEMU backend loads the shim from: `--engine-dir`,
 /// else beside the daemon binary — except on Windows, where the engine
 /// lives inside WSL2 at the Linux path `setup-windows.bat` installs
-/// (`docs/windows.md`).
-fn resolve_engine_dir(flag: Option<PathBuf>, daemon_dir: &std::path::Path) -> PathBuf {
-    flag.unwrap_or_else(|| {
+/// (`docs/windows.md`). A Windows-looking path is refused up front: it
+/// would spawn a broken shim inside WSL and fail obscurely at probe.
+fn resolve_engine_dir(
+    flag: Option<PathBuf>,
+    daemon_dir: &std::path::Path,
+) -> Result<PathBuf, String> {
+    let dir = flag.unwrap_or_else(|| {
         if cfg!(windows) {
             PathBuf::from("/opt/dolbyx/engine")
         } else {
             daemon_dir.to_path_buf()
         }
-    })
+    });
+    let text = dir.to_string_lossy();
+    if cfg!(windows) && (text.contains(':') || text.starts_with(r"\\")) {
+        return Err(format!(
+            "--engine-dir {text} looks like a Windows path; on Windows it names a \
+             WSL-side Linux path (e.g. /opt/dolbyx/engine, or `wslpath -u <dir>`)"
+        ));
+    }
+    Ok(dir)
 }
 
 /// Which backend the daemon binds behind the `Engine` trait.
@@ -150,7 +162,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .to_path_buf();
     // Refuse-to-start policy: a broken staging fails here, loudly,
     // before anything is served.
-    let engine_dir = resolve_engine_dir(args.engine_dir, &daemon_dir);
+    let engine_dir = resolve_engine_dir(args.engine_dir, &daemon_dir)?;
     let staging_hint = if cfg!(windows) {
         r"run scripts\setup-windows.bat, or point --engine-dir at a staged WSL directory"
     } else {
@@ -222,12 +234,24 @@ mod tests {
             "/opt/daemon"
         };
         assert_eq!(
-            super::resolve_engine_dir(None, daemon_dir),
+            super::resolve_engine_dir(None, daemon_dir).unwrap(),
             std::path::Path::new(expected)
         );
         assert_eq!(
-            super::resolve_engine_dir(Some("/staged".into()), daemon_dir),
+            super::resolve_engine_dir(Some("/staged".into()), daemon_dir).unwrap(),
             std::path::Path::new("/staged")
         );
+    }
+
+    /// Slice 12 (issue #20): a Windows-style `--engine-dir` refuses to
+    /// start — the flag names a WSL-side Linux path on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn windows_style_engine_dirs_are_refused() {
+        let daemon_dir = std::path::Path::new("/opt/daemon");
+        for wrong in [r"C:\DolbyX\engine", r"\\wsl.localhost\Ubuntu\opt"] {
+            let error = super::resolve_engine_dir(Some(wrong.into()), daemon_dir).unwrap_err();
+            assert!(error.contains("WSL-side Linux path"), "{error}");
+        }
     }
 }

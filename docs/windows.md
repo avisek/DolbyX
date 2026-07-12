@@ -24,7 +24,8 @@ hands it to `wsl.exe` verbatim.
 Run `scripts\setup-windows.bat`. It verifies a bootable default WSL2
 distro, installs `qemu-user-static` (apt), copies the engine files
 (`engine\` beside the script, else the repo's `target\windows\engine`)
-into `/opt/dolbyx/engine`, and health-checks the daemon's exact spawn.
+into `/opt/dolbyx/engine`, and health-checks the daemon's qemu
+invocation.
 
 Health check, standalone — exit 0 means qemu ran, the shim loaded
 `libdseffect.so`, and stdin EOF closed it cleanly:
@@ -48,5 +49,6 @@ real Windows process) or any Windows terminal:
 target/windows/ddp-daemon.exe --engine-dir "$(realpath target/windows/engine)"
 ```
 
-Open `http://localhost:9876`. Ctrl-C — or closing the console — flushes
-pending `config.toml` writes before exit.
+Open `http://localhost:9876`. Ctrl-C flushes pending `config.toml`
+writes before exit; closing the console rides the same shutdown path
+inside Windows' ~5 s grace window.
