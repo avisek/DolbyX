@@ -56,7 +56,7 @@ fn an_oversized_block_is_chunked_through_one_session() {
     host.set_sample_rate(48_000.0);
     host.resume();
 
-    let frames = usize::try_from(ddp_vst_windows::MAX_FRAMES).unwrap() * 2 + 1000;
+    let frames = usize::try_from(ddp_vst_windows::DEFAULT_MAX_FRAMES).unwrap() * 2 + 1000;
     let (dry_left, dry_right) = tone(7, frames);
     let (mut left, mut right) = (dry_left.clone(), dry_right.clone());
     host.process(&mut left, &mut right);

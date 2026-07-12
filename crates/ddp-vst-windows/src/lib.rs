@@ -21,5 +21,5 @@ pub mod pcm;
 mod transport;
 pub mod vst2;
 
-pub use client::{MAX_FRAMES, RETRY_INTERVAL};
+pub use client::{DEFAULT_MAX_FRAMES, RETRY_INTERVAL};
 pub use entry::vst_plugin_main;

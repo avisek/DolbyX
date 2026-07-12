@@ -1,7 +1,7 @@
 //! The plugin's state machine — everything the FFI entry delegates to,
 //! raw-pointer-free: host lifecycle in, [`DaemonLink`] calls out.
 
-use crate::client::DaemonLink;
+use crate::client::{DEFAULT_MAX_FRAMES, DaemonLink};
 use crate::pcm;
 
 /// The rate assumed for a host that resumes without ever calling
@@ -14,6 +14,9 @@ const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 pub struct Effect {
     link: DaemonLink,
     sample_rate: u32,
+    /// The host's `effSetBlockSize`, when it declared one — it feeds
+    /// the next `Hello`'s `max_frames`.
+    block_size: Option<u32>,
     /// The host block, copied at `stage` so `render` can (a) pass it
     /// through bit-exact when dry and (b) tolerate in-place hosts.
     staged_left: Vec<f32>,
@@ -29,11 +32,21 @@ impl Effect {
         Self {
             link: DaemonLink::new(),
             sample_rate: DEFAULT_SAMPLE_RATE,
+            block_size: None,
             staged_left: Vec::new(),
             staged_right: Vec::new(),
             pcm_in: Vec::new(),
             pcm_out: Vec::new(),
         }
+    }
+
+    /// The `max_frames` the next `Hello` promises: the host's declared
+    /// block size, floored at [`DEFAULT_MAX_FRAMES`] so a small block
+    /// size never shrinks the promise (a session outlives mid-flight
+    /// block-size growth — oversized blocks chunk to the promise).
+    fn hello_promise(&self) -> u32 {
+        self.block_size
+            .map_or(DEFAULT_MAX_FRAMES, |size| size.max(DEFAULT_MAX_FRAMES))
     }
 
     /// `effSetSampleRate`. Sessions are rate-immutable (epic #8): a
@@ -51,13 +64,24 @@ impl Effect {
         let changed = rate != self.sample_rate;
         self.sample_rate = rate;
         if changed && self.link.is_connected() {
-            self.link.connect(rate);
+            self.link.connect(rate, self.hello_promise());
+        }
+    }
+
+    /// `effSetBlockSize`: remembered for the next `Hello`'s
+    /// `max_frames`. Never a re-`Hello` — a live session's promise
+    /// stays valid (bigger blocks chunk to it).
+    pub fn set_block_size(&mut self, frames: isize) {
+        if let Ok(frames) = u32::try_from(frames)
+            && frames > 0
+        {
+            self.block_size = Some(frames);
         }
     }
 
     /// `effMainsChanged(1)`: connect eagerly so the first block is wet.
     pub fn resume(&mut self) {
-        self.link.connect(self.sample_rate);
+        self.link.connect(self.sample_rate, self.hello_promise());
     }
 
     /// `effMainsChanged(0)`: `Goodbye` — sessions exist only while
@@ -90,7 +114,7 @@ impl Effect {
     pub fn render(&mut self, left: &mut [f32], right: &mut [f32]) {
         debug_assert_eq!(left.len(), self.staged_left.len(), "render mirrors stage");
         debug_assert_eq!(right.len(), self.staged_right.len(), "render mirrors stage");
-        self.link.ensure(self.sample_rate);
+        self.link.ensure(self.sample_rate, self.hello_promise());
         if self.link.is_connected() {
             pcm::interleave_to_i16(&self.staged_left, &self.staged_right, &mut self.pcm_in);
             if self.link.ferry(&self.pcm_in, &mut self.pcm_out) {

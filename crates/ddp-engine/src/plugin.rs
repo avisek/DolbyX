@@ -15,6 +15,20 @@
 //! synchronous [`crate::protocol::write_message`] /
 //! [`crate::protocol::read_message`]; the daemon carries its own async
 //! twins of those.
+//!
+//! ```
+//! use ddp_engine::plugin::PluginMessage;
+//! use ddp_engine::protocol::{read_message, write_message};
+//!
+//! let hello = PluginMessage::Hello { sample_rate: 48_000, max_frames: 8192 };
+//! let (opcode, payload) = hello.encode();
+//! let mut wire = Vec::new();
+//! write_message(&mut wire, opcode, &payload)?;
+//!
+//! let (opcode, payload) = read_message(&mut wire.as_slice())?.expect("one frame");
+//! assert_eq!(PluginMessage::decode(opcode, &payload), Ok(hello));
+//! # Ok::<(), std::io::Error>(())
+//! ```
 
 use crate::protocol::DecodeError;
 
@@ -84,10 +98,8 @@ impl PluginMessage {
             }
             Self::HelloAck { session_id } => (OP_HELLO_ACK, session_id.to_le_bytes().to_vec()),
             Self::Process { ref pcm } => {
-                let frames = u32::try_from(pcm.len() / 2).expect("bounded by MAX_FRAME_BYTES");
-                let mut payload = Vec::with_capacity(4 + pcm.len() * 2);
-                payload.extend_from_slice(&frames.to_le_bytes());
-                push_pcm(&mut payload, pcm);
+                let mut payload = Vec::new();
+                encode_process(pcm, &mut payload);
                 (OP_PROCESS, payload)
             }
             Self::Processed { ref pcm } => {
@@ -157,10 +169,29 @@ impl PluginMessage {
     }
 }
 
+/// Builds a `Process` payload — `[u32 frames][i16 × frames × 2]` —
+/// into `payload`, replacing its contents.
+///
+/// The single owner of the layout, shared by [`PluginMessage::encode`]
+/// and the shims' per-block hot path (which reuses the buffer).
+///
+/// # Panics
+///
+/// Never in practice: only on a PCM block past `u32::MAX` frames,
+/// orders of magnitude beyond
+/// [`MAX_FRAME_BYTES`](crate::protocol::MAX_FRAME_BYTES).
+pub fn encode_process(pcm: &[i16], payload: &mut Vec<u8>) {
+    payload.clear();
+    payload.reserve(4 + pcm.len() * 2);
+    let frames = u32::try_from(pcm.len() / 2).expect("bounded by MAX_FRAME_BYTES");
+    payload.extend_from_slice(&frames.to_le_bytes());
+    push_pcm(payload, pcm);
+}
+
 /// Appends interleaved PCM16 samples as their little-endian wire bytes.
 ///
-/// For building `Process`/`Processed` payloads into a reused buffer on
-/// the per-block hot path, without a [`PluginMessage`] allocation.
+/// For building `Processed` payloads into a reused buffer on the
+/// per-block hot path, without a [`PluginMessage`] allocation.
 pub fn push_pcm(payload: &mut Vec<u8>, pcm: &[i16]) {
     payload.extend(pcm.iter().flat_map(|sample| sample.to_le_bytes()));
 }

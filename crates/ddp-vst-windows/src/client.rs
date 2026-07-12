@@ -9,17 +9,19 @@
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
-use ddp_engine::plugin::{OP_PROCESS, PluginMessage, push_pcm};
+use ddp_engine::plugin::{OP_PROCESS, PluginMessage, encode_process};
 use ddp_engine::protocol::{read_message, write_message};
 
 use crate::transport::{self, Stream};
 
-/// The `max_frames` promised in `Hello`.
+/// The floor of the `max_frames` promised in `Hello` — the whole
+/// promise for a host that never declared a block size.
 ///
-/// Bigger host blocks are ferried in chunks of this size, so a
-/// block-size change never needs a re-`Hello`; 8192 stereo frames is a
-/// 32 KiB payload, far under the protocol's 1 MiB frame bound.
-pub const MAX_FRAMES: u32 = 8192;
+/// The promise is `max(host block size, this)` at `Hello` time; blocks
+/// past it are ferried in chunks of the promise, so no block-size
+/// change ever needs a re-`Hello`. 8192 stereo frames is a 32 KiB
+/// payload, far under the protocol's 1 MiB frame bound.
+pub const DEFAULT_MAX_FRAMES: u32 = 8192;
 
 /// How long a failed connect (or a dropped connection) suppresses the
 /// next attempt: reconnects stay periodic — never a per-block retry
@@ -44,6 +46,9 @@ struct Connection {
     /// instance (diagnostic; the connection itself scopes the session).
     #[expect(dead_code, reason = "kept per issue #21; no plugin-side use yet")]
     session_id: u32,
+    /// This session's `Hello`'d `max_frames` — the chunk bound its
+    /// `Process` blocks must respect.
+    max_frames: u32,
 }
 
 impl DaemonLink {
@@ -59,9 +64,10 @@ impl DaemonLink {
     }
 
     /// Connects and shakes hands unless already connected or inside
-    /// the retry throttle — the per-block path. `Hello` is sent at
-    /// `sample_rate` (sessions are rate-immutable, epic #8).
-    pub fn ensure(&mut self, sample_rate: u32) {
+    /// the retry throttle — the per-block path. `Hello` carries the
+    /// host's processing setup: its `sample_rate` (sessions are
+    /// rate-immutable, epic #8) and `max_frames` promise.
+    pub fn ensure(&mut self, sample_rate: u32, max_frames: u32) {
         if self.is_connected() {
             return;
         }
@@ -70,16 +76,20 @@ impl DaemonLink {
         {
             return;
         }
-        self.connect(sample_rate);
+        self.connect(sample_rate, max_frames);
     }
 
     /// Drops any current session and connects fresh — the resume and
     /// rate-change path (rate change = `Goodbye` + fresh `Hello`).
-    pub fn connect(&mut self, sample_rate: u32) {
+    pub fn connect(&mut self, sample_rate: u32, max_frames: u32) {
         self.disconnect();
         let attempt = transport::connect().and_then(|mut stream| {
-            let session_id = handshake(&mut stream, sample_rate)?;
-            Ok(Connection { stream, session_id })
+            let session_id = handshake(&mut stream, sample_rate, max_frames)?;
+            Ok(Connection {
+                stream,
+                session_id,
+                max_frames,
+            })
         });
         match attempt {
             Ok(connection) => self.connection = Some(connection),
@@ -99,15 +109,16 @@ impl DaemonLink {
     }
 
     /// Ferries one interleaved PCM16 block through the daemon into
-    /// `out` (chunked to the `Hello`'d [`MAX_FRAMES`]). `false` means
-    /// the daemon was lost mid-block: the link is down (throttled),
-    /// and the caller falls back to dry — audio never stops.
+    /// `out` (chunked to the session's `Hello`'d `max_frames`).
+    /// `false` means the daemon was lost mid-block: the link is down
+    /// (throttled), and the caller falls back to dry — audio never
+    /// stops.
     pub fn ferry(&mut self, pcm: &[i16], out: &mut Vec<i16>) -> bool {
         let Some(connection) = &mut self.connection else {
             return false;
         };
         out.clear();
-        for chunk in pcm.chunks(MAX_FRAMES as usize * 2) {
+        for chunk in pcm.chunks(connection.max_frames as usize * 2) {
             let Ok(processed) = exchange(&mut connection.stream, chunk) else {
                 // The stream is gone or desynced — either way the
                 // session is unusable; drop it and retry later.
@@ -124,10 +135,14 @@ impl DaemonLink {
 /// Sends `Hello` and awaits the `HelloAck`, returning the session id.
 /// The daemon answers a `Hello` it won't serve (engine down, bad rate)
 /// with a `Goodbye` — surfaced as [`io::ErrorKind::ConnectionRefused`].
-fn handshake(stream: &mut (impl Read + Write), sample_rate: u32) -> io::Result<u32> {
+fn handshake(
+    stream: &mut (impl Read + Write),
+    sample_rate: u32,
+    max_frames: u32,
+) -> io::Result<u32> {
     let (opcode, payload) = PluginMessage::Hello {
         sample_rate,
-        max_frames: MAX_FRAMES,
+        max_frames,
     }
     .encode();
     write_message(stream, opcode, &payload)?;
@@ -144,10 +159,8 @@ fn handshake(stream: &mut (impl Read + Write), sample_rate: u32) -> io::Result<u
 /// Sends one `Process` block and awaits its `Processed`, which must
 /// mirror the block's length exactly — anything else is a desync.
 fn exchange(stream: &mut (impl Read + Write), pcm: &[i16]) -> io::Result<Vec<i16>> {
-    let frames = u32::try_from(pcm.len() / 2).expect("chunked to MAX_FRAMES");
-    let mut payload = Vec::with_capacity(4 + pcm.len() * 2);
-    payload.extend_from_slice(&frames.to_le_bytes());
-    push_pcm(&mut payload, pcm);
+    let mut payload = Vec::new();
+    encode_process(pcm, &mut payload);
     write_message(stream, OP_PROCESS, &payload)?;
     match read_daemon_message(stream)? {
         PluginMessage::Processed { pcm: processed } if processed.len() == pcm.len() => {
@@ -223,18 +236,19 @@ mod tests {
     }
 
     /// Behavior 1: the handshake puts exactly one framed
-    /// `Hello {rate, MAX_FRAMES}` on the pipe — layout per epic #8 —
-    /// and returns the acked session id.
+    /// `Hello {rate, max_frames}` on the pipe — layout per epic #8,
+    /// both fields from the host's processing setup — and returns the
+    /// acked session id.
     #[test]
     fn handshake_frames_a_hello_and_returns_the_acked_session() {
         let mut pipe = FakePipe::scripted(&[PluginMessage::HelloAck { session_id: 7 }]);
-        assert_eq!(handshake(&mut pipe, 48_000).unwrap(), 7);
+        assert_eq!(handshake(&mut pipe, 48_000, 512).unwrap(), 7);
         // [u32 length = 12][u32 opcode 0x01][u32 rate][u32 max_frames]
         let expected = [
             &12_u32.to_le_bytes()[..],
             &1_u32.to_le_bytes(),
             &48_000_u32.to_le_bytes(),
-            &MAX_FRAMES.to_le_bytes(),
+            &512_u32.to_le_bytes(),
         ]
         .concat();
         assert_eq!(pipe.written, expected);
@@ -246,7 +260,7 @@ mod tests {
     #[test]
     fn handshake_treats_the_daemons_goodbye_as_rejection() {
         let mut pipe = FakePipe::scripted(&[PluginMessage::Goodbye]);
-        let error = handshake(&mut pipe, 96_000).unwrap_err();
+        let error = handshake(&mut pipe, 96_000, 512).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
     }
 

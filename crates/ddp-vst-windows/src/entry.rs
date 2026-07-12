@@ -11,8 +11,8 @@ use crate::vst2::{
     AEffect, AUDIO_MASTER_VERSION, AudioMasterCallback, EFF_CAN_DO, EFF_CLOSE, EFF_EDIT_GET_RECT,
     EFF_EDIT_OPEN, EFF_FLAGS_CAN_REPLACING, EFF_FLAGS_HAS_EDITOR, EFF_GET_EFFECT_NAME,
     EFF_GET_PLUG_CATEGORY, EFF_GET_PRODUCT_STRING, EFF_GET_VENDOR_STRING, EFF_GET_VENDOR_VERSION,
-    EFF_GET_VST_VERSION, EFF_MAINS_CHANGED, EFF_SET_SAMPLE_RATE, EFFECT_MAGIC, ERect,
-    PLUG_CATEG_EFFECT, VST_VERSION,
+    EFF_GET_VST_VERSION, EFF_MAINS_CHANGED, EFF_SET_BLOCK_SIZE, EFF_SET_SAMPLE_RATE, EFFECT_MAGIC,
+    ERect, PLUG_CATEG_EFFECT, VST_VERSION,
 };
 
 /// v1's registered plugin id (`'DDP1'`) — unchanged, so host caches
@@ -27,7 +27,7 @@ const NAME: &str = "DolbyX";
 /// host's UI thread while `processReplacing` runs on its audio thread;
 /// the lock is uncontended outside those brief overlaps and vanishes
 /// against the per-block pipe round trip.
-type Shared = Mutex<Effect>;
+type SharedEffect = Mutex<Effect>;
 
 /// The VST2 entry — `VSTPluginMain` in the DLL's export table (the
 /// name EqualizerAPO resolves).
@@ -54,7 +54,7 @@ pub extern "C" fn vst_plugin_main(audio_master: AudioMasterCallback) -> *mut AEf
     if host_version == 0 {
         return std::ptr::null_mut();
     }
-    let object: *mut Shared = Box::into_raw(Box::new(Mutex::new(Effect::new())));
+    let object: *mut SharedEffect = Box::into_raw(Box::new(Mutex::new(Effect::new())));
     Box::into_raw(Box::new(AEffect {
         magic: EFFECT_MAGIC,
         dispatcher: Some(dispatcher),
@@ -90,18 +90,18 @@ pub extern "C" fn vst_plugin_main(audio_master: AudioMasterCallback) -> *mut AEf
 ///
 /// `effect` must be null or a pointer [`vst_plugin_main`] returned
 /// that hasn't seen `effClose`.
-unsafe fn shared<'a>(effect: *mut AEffect) -> Option<&'a Shared> {
+unsafe fn shared<'a>(effect: *mut AEffect) -> Option<&'a SharedEffect> {
     // SAFETY: per this function's contract.
     unsafe {
         effect
             .as_ref()
-            .and_then(|effect| effect.object.cast::<Shared>().as_ref())
+            .and_then(|effect| effect.object.cast::<SharedEffect>().as_ref())
     }
 }
 
 /// Locks the state; a poisoned lock (a panicked peer call) must not
 /// wedge audio forever.
-fn lock(shared: &Shared) -> MutexGuard<'_, Effect> {
+fn lock(shared: &SharedEffect) -> MutexGuard<'_, Effect> {
     shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -126,7 +126,7 @@ unsafe extern "C" fn dispatcher(
             // instance — reclaim both allocations the entry minted.
             // Neither `shared` nor `effect` is touched past here.
             unsafe {
-                let object = (*effect).object.cast::<Shared>();
+                let object = (*effect).object.cast::<SharedEffect>();
                 (*effect).object = std::ptr::null_mut();
                 drop(Box::from_raw(object));
                 drop(Box::from_raw(effect));
@@ -135,6 +135,10 @@ unsafe extern "C" fn dispatcher(
         }
         EFF_SET_SAMPLE_RATE => {
             lock(shared).set_sample_rate(opt);
+            0
+        }
+        EFF_SET_BLOCK_SIZE => {
+            lock(shared).set_block_size(value);
             0
         }
         EFF_MAINS_CHANGED => {

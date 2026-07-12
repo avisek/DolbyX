@@ -317,6 +317,7 @@ version = "2.0.0-alpha"
 dependencies = [
  "ddp-daemon",
  "ddp-engine",
+ "libloading",
  "proptest",
  "tempfile",
  "tokio",

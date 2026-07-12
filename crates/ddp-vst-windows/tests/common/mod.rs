@@ -188,9 +188,14 @@ pub struct SyntheticHost {
 }
 
 impl SyntheticHost {
-    /// Calls the exported entry and opens the instance.
+    /// Calls the in-process (rlib-linked) entry and opens the instance.
     pub fn load() -> Self {
-        let effect = vst_plugin_main(Some(host_callback));
+        Self::from_effect(vst_plugin_main(Some(host_callback)))
+    }
+
+    /// Adopts an `AEffect` some entry returned — the dlopen tracer
+    /// drives the built cdylib's export through this — and opens it.
+    pub fn from_effect(effect: *mut AEffect) -> Self {
         assert!(!effect.is_null(), "the entry returns an effect");
         let host = Self { effect };
         assert_eq!(host.aeffect().magic, EFFECT_MAGIC);
@@ -271,7 +276,7 @@ impl Drop for SyntheticHost {
 }
 
 /// A live VST2 host callback: answers the version probe.
-unsafe extern "C" fn host_callback(
+pub unsafe extern "C" fn host_callback(
     _effect: *mut AEffect,
     opcode: i32,
     _index: i32,
