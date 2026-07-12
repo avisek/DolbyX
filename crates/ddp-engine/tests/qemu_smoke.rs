@@ -554,6 +554,10 @@ fn staging_without_the_commit_leaf_still_reshapes() {
 /// the native pair goes live and the custom pair mirrors it — the
 /// custom grid here *is* the native table.
 #[test]
+#[expect(
+    clippy::similar_names,
+    reason = "vnbg/vnbe/vcbg/vcbe are the engine's own 4-CC names"
+)]
 fn every_process_reply_carries_the_vis_tail() {
     let mut shim = Shim::spawn("vis_tail");
     let session = shim.create(44_100);
