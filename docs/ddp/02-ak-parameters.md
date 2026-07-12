@@ -208,13 +208,19 @@ measurements, they're one source and a resampled view of it (engine help text,
   gains/excitations onto them, filling `vcbg`/`vcbe`. Command 4
   (`DS_PARAM_VISUALIZER_DATA`) returns `vcbg‖vcbe` as 40 int16s.
 
-So **`vc*` = resample(`vn*`, onto `vcbf`)**. The engine **seeds the custom grid
-to the native grid** at startup, so `vc*` reads byte-for-byte identical to `vn*`
-until a host writes `vcnb`/`vcbf` — then `vc*` follows the new grid while `vn*`
-holds steady (proven in [tools/ddp_probe/](../../tools/ddp_probe/README.md),
-`make vis`: a `vcbf` remap swings `vc*` by max |Δ|≈430 while `vn*` stays at the
-noise floor; its section C then sweeps the **sample rate** and the native count
-itself tracks 20/20/19 @48k/44.1k/32k). The whole `vn*` family and the
+So **`vc*` = resample(`vn*`, onto `vcbf`)**. The custom grid is **not seeded on
+a bare handle**: `vcnb` boots 0 and `vcbg`/`vcbe` read zero — even through the
+full DEFINE handshake, `ven` = 1, and processing — until the host writes
+`vcnb`/`vcbf` and a `ven` → ON write latches the layout (Slice 07 #15; the
+engine's own help: the custom config "takes effect when `ven` is set to ON").
+The byte-for-byte `vc*` == `vn*` identity the probes report is a side effect of
+their cmd-3 init flow arriving at `vcnb` = 20 / `vcbf` = the native table — set
+the same grid and you get the same mirror. After a *different* `vcbf` is
+latched, `vc*` follows the new grid while `vn*` holds steady (proven in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md), `make vis`: a `vcbf` remap
+swings `vc*` by max |Δ|≈430 while `vn*` stays at the noise floor; its section C
+then sweeps the **sample rate** and the native count itself tracks 20/20/19
+@48k/44.1k/32k). The whole `vn*` family and the
 `vcbg`/`vcbe` data arrays are read-only (write-protect bit `0x2`); only the
 custom **layout** — `vcnb`/`vcbf` — is host-writable. The native grid's one
 lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
@@ -226,7 +232,7 @@ lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
 |  30 | `vnbf` |  20 | int16     | no       | **Native** band centre frequencies in Hz — rate-derived, read-only.                                    |
 |  31 | `vnbg` |  20 | int16     | no       | **Native** band gains in 1/16 dB — the engine's ground-truth gain curve.                               |
 |  32 | `vnbe` |  20 | int16     | no       | **Native** band excitations in 1/16 dB — ground-truth per-band energy.                                 |
-|  33 | `vcnb` |   1 | 0..20     | no\*     | **Custom** band count — **host-writable** (engine seeds it to `vnnb`; `0` = no custom bands).          |
+|  33 | `vcnb` |   1 | 0..20     | no\*     | **Custom** band count — **host-writable**; boots **0** = no custom bands (`vc*` reads zero until set). |
 |  34 | `vcbf` |  20 | 20..20000 | no\*     | **Custom** band centre frequencies in Hz — **host-writable**, monotonically increasing.                |
 |  35 | `vcbg` |  20 | -192..576 | no       | **Custom** band **gains** in 1/16 dB (-12 to +36 dB) — `vn*` gains resampled onto `vcbf`. The EQ curve the UI draws; UI ÷ 16. |
 |  36 | `vcbe` |  20 | -192..576 | no       | **Custom** band **excitations** in 1/16 dB — `vn*` excitations resampled onto `vcbf`. UI ÷ 16.         |

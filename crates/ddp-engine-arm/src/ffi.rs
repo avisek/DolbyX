@@ -4,14 +4,18 @@
 //! and are only correct at runtime on 32-bit ARM (pointers = 4 bytes),
 //! the sole target this binary ships for; host builds merely lint.
 //!
-//! Lifecycle stays on the cmd protocol (ADR-0010): `EFFECT_CMD_INIT`,
-//! one `EFFECT_CMD_SET_CONFIG` pinning stereo + PCM16 + WRITE output
-//! mode, `ENABLE`/`DISABLE`, `process()`. The AK-direct param surface
-//! lands in Slice 07 ([#15](https://github.com/avisek/DolbyX/issues/15)).
+//! Two bindings, split by surface (ADR-0010): lifecycle stays on the
+//! cmd protocol — `EFFECT_CMD_INIT`, one `EFFECT_CMD_SET_CONFIG`
+//! pinning stereo + PCM16 + WRITE output mode, `ENABLE`/`DISABLE`,
+//! `process()` — while the param surface goes through the engine's
+//! exported AK accessors (`ak_find` / `ak_set_bulk` / `ak_get_bulk`),
+//! reached via the AK handle at the frozen context offset `H + 0x44`
+//! (`docs/ddp/07-ak-api.md`; proven by `akctl_probe`).
 
 use std::ffi::c_void;
-use std::marker::PhantomData;
 use std::path::Path;
+
+use ddp_engine::protocol::ParamName;
 
 /// `EFFECT_CMD_INIT` — effect command 0.
 const EFFECT_CMD_INIT: u32 = 0;
@@ -32,6 +36,20 @@ pub const ENODATA: i32 = 61;
 /// `Ds1apBufferInit` call inside `Effect_reinit`); `process()` takes
 /// its real per-call count from `audio_buffer_t.frame_count`.
 const CONFIG_FRAME_COUNT: u32 = 256;
+
+/// The AK tree root — the parent ref the engine's own `ak_find` /
+/// `ak_enum` calls pass; every root leaf resolves under it.
+const AK_ROOT_REF: u32 = 1;
+
+/// The `ak_*_bulk` stride selecting packed int16 elements (stride 1
+/// would be int32). A count=1 stride-4 write hits the same clamp+store
+/// core as the scalar accessors.
+const AK_STRIDE_I16: i32 = 4;
+
+/// Byte offset of the `pDs1ap` pointer in the effect context; its
+/// first word is the AK handle. Pinned to this EOL v2.0.4.0 build
+/// (ADR-0010) — the same offset v1, `ddp_probe`, and `akctl_probe` use.
+const CONTEXT_DS1AP_OFFSET: usize = 0x44;
 
 /// AOSP `audio_buffer_t` (ARM32: `size_t` = `u32`).
 #[repr(C)]
@@ -84,6 +102,10 @@ impl EffectDescriptor {
 type EffectQueryEffectFn = unsafe extern "C" fn(u32, *mut EffectDescriptor) -> i32;
 type EffectCreateFn = unsafe extern "C" fn(*const [u8; 16], i32, i32, *mut RawHandle) -> i32;
 type EffectReleaseFn = unsafe extern "C" fn(RawHandle) -> i32;
+type AkFindFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> u32;
+type AkGetLengthFn = unsafe extern "C" fn(*mut c_void, u32) -> i32;
+type AkSetBulkFn = unsafe extern "C" fn(*mut c_void, u32, i32, i32, i32, *const c_void) -> i32;
+type AkGetBulkFn = unsafe extern "C" fn(*mut c_void, u32, i32, i32, i32, *mut c_void) -> i32;
 
 /// The loaded engine library: its entry points, resolved once at
 /// startup, plus the effect UUID it publishes. The `Library` mapping
@@ -93,6 +115,10 @@ pub struct EngineLib {
     _library: libloading::Library,
     create: EffectCreateFn,
     release: EffectReleaseFn,
+    ak_find: AkFindFn,
+    ak_get_length: AkGetLengthFn,
+    ak_set_bulk: AkSetBulkFn,
+    ak_get_bulk: AkGetBulkFn,
     uuid: [u8; 16],
 }
 
@@ -104,6 +130,10 @@ impl EngineLib {
     ///
     /// A human-readable message when the library or a symbol fails to
     /// load, or the descriptor query fails — all fatal at startup.
+    #[expect(
+        clippy::similar_names,
+        reason = "ak_set_bulk / ak_get_bulk are the engine's own symbol names"
+    )]
     pub fn load(path: &Path) -> Result<Self, String> {
         // SAFETY: loading runs the library's initialisers. The path is
         // resolved to the vendored `libdseffect.so` staged beside this
@@ -126,6 +156,10 @@ impl EngineLib {
         let query = entry_point!("EffectQueryEffect" as EffectQueryEffectFn);
         let create = entry_point!("EffectCreate" as EffectCreateFn);
         let release = entry_point!("EffectRelease" as EffectReleaseFn);
+        let ak_find = entry_point!("ak_find" as AkFindFn);
+        let ak_get_length = entry_point!("ak_get_length" as AkGetLengthFn);
+        let ak_set_bulk = entry_point!("ak_set_bulk" as AkSetBulkFn);
+        let ak_get_bulk = entry_point!("ak_get_bulk" as AkGetBulkFn);
 
         let mut descriptor = EffectDescriptor::zeroed();
         // SAFETY: `EffectQueryEffect` fills the descriptor struct we
@@ -138,6 +172,10 @@ impl EngineLib {
             _library: library,
             create,
             release,
+            ak_find,
+            ak_get_length,
+            ak_set_bulk,
+            ak_get_bulk,
             uuid: descriptor.uuid,
         })
     }
@@ -169,17 +207,22 @@ impl EngineLib {
         }
         Ok(Effect {
             handle,
-            release: self.release,
-            _lib: PhantomData,
+            lib: self,
+            ak: std::ptr::null_mut(),
         })
     }
 }
 
 /// One live effect handle; releases itself on drop.
+///
+/// `ak` is the handle's own AK registry (registries are per-handle),
+/// attached after [`Effect::init`] / [`Effect::set_config`] — the two
+/// commands that (re)run `ak_open` — and stable afterwards because the
+/// rate is immutable per session (exactly one `SET_CONFIG`, ever).
 pub struct Effect<'lib> {
     handle: RawHandle,
-    release: EffectReleaseFn,
-    _lib: PhantomData<&'lib EngineLib>,
+    lib: &'lib EngineLib,
+    ak: *mut c_void,
 }
 
 impl Effect<'_> {
@@ -224,7 +267,9 @@ impl Effect<'_> {
     ///
     /// The engine's negative status.
     pub fn init(&mut self) -> Result<(), i32> {
-        self.command(EFFECT_CMD_INIT, &mut [])
+        self.command(EFFECT_CMD_INIT, &mut [])?;
+        self.attach_ak();
+        Ok(())
     }
 
     /// One `EFFECT_CMD_SET_CONFIG` at `sample_rate`, pinning stereo +
@@ -236,7 +281,102 @@ impl Effect<'_> {
     /// The engine's negative status (either failure surface).
     pub fn set_config(&mut self, sample_rate: u32) -> Result<(), i32> {
         let mut config = effect_config(sample_rate);
-        self.command(EFFECT_CMD_SET_CONFIG, &mut config)
+        self.command(EFFECT_CMD_SET_CONFIG, &mut config)?;
+        // A non-default rate tears the Ds1ap down and re-runs ak_open
+        // (lifecycle_probe) — re-read the AK handle it left behind.
+        self.attach_ak();
+        Ok(())
+    }
+
+    /// (Re-)reads the AK handle from the effect context: two derefs at
+    /// the pinned `pDs1ap` offset — `*(void**)(*(void**)(H + 0x44))`.
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "the context is word-aligned and 0x44 is a multiple of 4"
+    )]
+    fn attach_ak(&mut self) {
+        // SAFETY: `handle` is live and past `EFFECT_CMD_INIT`, so the
+        // context holds a built `Ds1ap` whose first word is the AK
+        // handle — the exact chain `akctl_probe`'s `ak_attach` walks
+        // on this pinned build.
+        self.ak = unsafe {
+            self.handle
+                .cast::<u8>()
+                .add(CONTEXT_DS1AP_OFFSET)
+                .cast::<*mut c_void>()
+                .read()
+                .cast::<*mut c_void>()
+                .read()
+        };
+    }
+
+    /// Resolves a 4-CC to its tagged AK ref straight from the tree
+    /// root — no `DEFINE_PARAMS` handshake, ever (ADR-0010). `0` is
+    /// the dead ref: an unknown name; every accessor drops it.
+    pub fn param_ref(&self, name: ParamName) -> u32 {
+        // SAFETY: `ak` is attached (init/set_config precede all param
+        // calls); `ak_find` only walks the engine's own tree.
+        unsafe { (self.lib.ak_find)(self.ak, AK_ROOT_REF, u32::from_le_bytes(name)) }
+    }
+
+    /// The leaf's engine length — its fixed storage capacity (e.g. 40
+    /// for the band arrays), not the host-active count.
+    pub fn param_length(&self, param_ref: u32) -> i32 {
+        // SAFETY: `ak` is attached; a dead ref makes the engine bail
+        // and return without touching anything.
+        unsafe { (self.lib.ak_get_length)(self.ak, param_ref) }
+    }
+
+    /// Writes `values` from element 0 via `ak_set_bulk` (packed-int16
+    /// stride). The engine saturates each value to its own `[min,
+    /// max]` and silently no-ops a write-protected leaf — there is no
+    /// failure to surface, so no return.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: only past `i32::MAX` values, orders of
+    /// magnitude beyond any leaf's capacity.
+    pub fn write_param(&mut self, param_ref: u32, values: &[i16]) {
+        let count = i32::try_from(values.len()).expect("param batches are tiny");
+        // SAFETY: `ak` is attached; the engine reads exactly `count`
+        // packed i16s from `values`, which outlives the call.
+        unsafe {
+            (self.lib.ak_set_bulk)(
+                self.ak,
+                param_ref,
+                0,
+                count,
+                AK_STRIDE_I16,
+                values.as_ptr().cast::<c_void>(),
+            );
+        }
+    }
+
+    /// Reads `count` elements from element 0 via `ak_get_bulk`
+    /// (packed-int16 stride) — the live registry values the DSP uses.
+    /// A dead ref reads as zeros (the engine bails, leaving the
+    /// zero-fill).
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: only past `i32::MAX` elements, orders of
+    /// magnitude beyond any leaf's capacity.
+    pub fn read_param(&self, param_ref: u32, count: usize) -> Vec<i16> {
+        let mut values = vec![0_i16; count];
+        let count = i32::try_from(count).expect("param lengths are tiny");
+        // SAFETY: `ak` is attached; the engine writes at most `count`
+        // packed i16s into `values`, sized exactly `count`.
+        unsafe {
+            (self.lib.ak_get_bulk)(
+                self.ak,
+                param_ref,
+                0,
+                count,
+                AK_STRIDE_I16,
+                values.as_mut_ptr().cast::<c_void>(),
+            );
+        }
+        values
     }
 
     /// `EFFECT_CMD_ENABLE` / `EFFECT_CMD_DISABLE` (idempotent in the
@@ -289,7 +429,7 @@ impl Drop for Effect<'_> {
         // SAFETY: `handle` is live and owned; after this it is never
         // touched again.
         unsafe {
-            (self.release)(self.handle);
+            (self.lib.release)(self.handle);
         }
     }
 }

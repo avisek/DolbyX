@@ -15,7 +15,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand, St
 use std::sync::OnceLock;
 
 use ddp_engine::protocol::{
-    self, Command, STATUS_INVALID, STATUS_NO_SESSION, STATUS_OK, read_reply, write_message,
+    self, Command, STATUS_INVALID, STATUS_NO_SESSION, STATUS_OK, decode_get_params_reply,
+    param_name, read_reply, write_message,
 };
 
 /// Frames per process block — the size the probes drive.
@@ -23,6 +24,15 @@ const FRAMES: usize = 256;
 /// Blocks that comfortably outlast both engine crossfades (enable 7560
 /// samples, disable 5512 — `tools/ddp_probe/README.md` #6).
 const CROSSFADE_BLOCKS: usize = 40;
+/// Blocks that let the GEQ gain smoother settle after a change
+/// (`akctl_probe`'s SETTLE).
+const SETTLE_BLOCKS: usize = 150;
+/// The standard 20-band GEQ centre frequencies the original service
+/// establishes (verbatim from `akctl_probe`); band 4 = 431 Hz.
+const GEBF: [i16; 20] = [
+    43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958,
+    11025, 13781, 18777,
+];
 
 /// One interleaved-stereo block of a 431 Hz sine at `amp`, phase-locked
 /// to `block` so consecutive blocks continue the tone.
@@ -40,6 +50,19 @@ fn sine_block(block: usize, rate: u32, amp: f64) -> Vec<i16> {
         pcm.push(sample);
     }
     pcm
+}
+
+/// Root-mean-square of one PCM block — the probes' loudness measure.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "block sample counts stay far inside f64's exact range"
+)]
+fn rms(pcm: &[i16]) -> f64 {
+    let squares = pcm
+        .iter()
+        .map(|&s| f64::from(s) * f64::from(s))
+        .sum::<f64>();
+    (squares / pcm.len() as f64).sqrt()
 }
 
 /// Builds the shim, stages it beside `libdseffect.so` + the proven
@@ -162,18 +185,49 @@ impl Shim {
         assert!(reply.is_empty(), "SetEnabled reply is empty");
     }
 
-    /// `Process` one block, asserting success; returns the output PCM.
-    fn process(&mut self, session_id: u32, pcm: &[i16]) -> Vec<i16> {
+    /// `Process` one block, asserting success and the reply shape —
+    /// the PCM block plus exactly the 160-byte vis tail, on **every**
+    /// reply (bypassed blocks included). Returns `(pcm, vis)`.
+    fn process(&mut self, session_id: u32, pcm: &[i16]) -> (Vec<i16>, Vec<i16>) {
         let (status, reply) = self.send(&Command::Process {
             session_id,
             pcm: pcm.to_vec(),
         });
         assert_eq!(status, STATUS_OK, "Process({session_id})");
-        assert_eq!(reply.len(), pcm.len() * 2, "reply carries the block");
-        reply
+        assert_eq!(
+            reply.len(),
+            pcm.len() * 2 + 160,
+            "reply carries the block plus the fixed vis tail"
+        );
+        let mut samples: Vec<i16> = reply
             .chunks_exact(2)
             .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]]))
-            .collect()
+            .collect();
+        let vis = samples.split_off(pcm.len());
+        (samples, vis)
+    }
+
+    /// `SetParams` of one name-addressed batch, asserting success.
+    fn set_params(&mut self, session_id: u32, params: &[(&str, &[i16])]) {
+        let (status, reply) = self.send(&Command::SetParams {
+            session_id,
+            params: params
+                .iter()
+                .map(|&(name, values)| (param_name(name), values.to_vec()))
+                .collect(),
+        });
+        assert_eq!(status, STATUS_OK, "SetParams({params:?})");
+        assert!(reply.is_empty(), "SetParams reply is empty");
+    }
+
+    /// `GetParams`, asserting success; returns the values per name.
+    fn get_params(&mut self, session_id: u32, names: &[&str]) -> Vec<Vec<i16>> {
+        let (status, reply) = self.send(&Command::GetParams {
+            session_id,
+            names: names.iter().map(|name| param_name(name)).collect(),
+        });
+        assert_eq!(status, STATUS_OK, "GetParams({names:?})");
+        decode_get_params_reply(&reply).expect("well-formed GetParams reply")
     }
 
     /// Everything the engine has logged so far.
@@ -239,7 +293,7 @@ fn two_sessions_coexist_and_destroy_is_isolated() {
 
     // The survivor still processes…
     let input = sine_block(0, 48_000, 8000.0);
-    let output = shim.process(second, &input);
+    let (output, _) = shim.process(second, &input);
     assert_eq!(output.len(), input.len());
 
     // …while the destroyed id is gone for every op.
@@ -262,7 +316,7 @@ fn never_enabled_session_deposits_the_dry_input() {
     let session = shim.create(44_100);
     for block in 0..3 {
         let input = sine_block(block, 44_100, 8000.0);
-        let output = shim.process(session, &input);
+        let (output, _) = shim.process(session, &input);
         assert_eq!(output, input, "bypass is the engine's dry deposit");
     }
     shim.finish();
@@ -284,7 +338,7 @@ fn disable_crossfades_to_dry_without_surfacing_errors() {
     for block in CROSSFADE_BLOCKS..2 * CROSSFADE_BLOCKS {
         let input = sine_block(block, 44_100, 8000.0);
         // `process` asserts status 0 — a surfaced -ENODATA fails here.
-        let output = shim.process(session, &input);
+        let (output, _) = shim.process(session, &input);
         last = (input, output);
     }
     assert_eq!(last.1, last.0, "past the crossfade the output goes dry");
@@ -324,7 +378,236 @@ fn malformed_frames_error_without_killing_the_shim() {
     // Still alive: a well-formed create + process works.
     let session = shim.create(32_000);
     let input = sine_block(0, 32_000, 8000.0);
-    assert_eq!(shim.process(session, &input), input);
+    assert_eq!(shim.process(session, &input).0, input);
+    shim.finish();
+}
+
+/// One `SetParams` batch of scalars lands atomically; `GetParams`
+/// reads both back from the live registry (in-range values verbatim).
+#[test]
+fn a_scalar_batch_reads_back_verbatim() {
+    let mut shim = Shim::spawn("scalar_batch");
+    let session = shim.create(44_100);
+    shim.set_params(session, &[("dvla", &[8]), ("deon", &[1])]);
+    assert_eq!(shim.get_params(session, &["dvla", "deon"]), [[8], [1]]);
+    shim.finish();
+}
+
+/// An out-of-range write is silently clamped to the engine's own
+/// bounds — `vmb` clamps at 192, not the published table's 240
+/// (probe §7 / §9c ground truth), which is why the daemon validates
+/// against `parameters.toml` up front.
+#[test]
+fn out_of_range_writes_clamp_to_the_engines_own_bounds() {
+    let mut shim = Shim::spawn("clamp_vmb");
+    let session = shim.create(44_100);
+    shim.set_params(session, &[("vmb", &[480])]);
+    assert_eq!(shim.get_params(session, &["vmb"]), [[192]]);
+    shim.finish();
+}
+
+/// A write to a write-protected leaf (`vnnb`, the native band count)
+/// stores nothing and surfaces nothing: status 0, value unchanged —
+/// the engine's own silent-no-op semantics, forwarded as-is.
+#[test]
+fn write_protected_leaves_no_op_silently() {
+    let mut shim = Shim::spawn("write_protected");
+    let session = shim.create(44_100);
+    let before = shim.get_params(session, &["vnnb"]);
+    shim.set_params(session, &[("vnnb", &[5])]); // asserts status 0
+    assert_eq!(shim.get_params(session, &["vnnb"]), before);
+    shim.finish();
+}
+
+/// `GetParams` is a true per-param read of engine-owned state: the
+/// `ver` readout's four slots format to the engine version `2.0.4.0`
+/// (what cmd 6 reports — but read AK-direct, no cmd protocol).
+#[test]
+fn ver_readout_carries_the_engine_version() {
+    let mut shim = Shim::spawn("ver_readout");
+    let session = shim.create(44_100);
+    assert_eq!(shim.get_params(session, &["ver"]), [[2, 0, 4, 0]]);
+    shim.finish();
+}
+
+/// AK registries are per-handle: a write on one session never leaks
+/// into another — the second session keeps the engine's power-on
+/// default (`dvla` = 7, probe `dump defaults`).
+#[test]
+fn set_params_is_isolated_per_session() {
+    let mut shim = Shim::spawn("param_isolation");
+    let first = shim.create(44_100);
+    let second = shim.create(44_100);
+    shim.set_params(first, &[("dvla", &[3])]);
+    assert_eq!(shim.get_params(first, &["dvla"]), [[3]]);
+    assert_eq!(
+        shim.get_params(second, &["dvla"]),
+        [[7]],
+        "the sibling session keeps its own power-on registry"
+    );
+    shim.finish();
+}
+
+/// A structural batch (`genb` = 20 + 20-band `gebf` + `gebg`) reshapes
+/// the 10-band power-on GEQ mid-stream — `GetParams` confirms the new
+/// count and the visualizer's native grid readout stays consistent
+/// (rate-derived, untouched by a GEQ reshape).
+#[test]
+fn a_structural_batch_reshapes_from_power_on_state() {
+    let mut shim = Shim::spawn("reshape_batch");
+    let session = shim.create(44_100);
+    shim.set_enabled(session, true);
+    for block in 0..5 {
+        shim.process(session, &sine_block(block, 44_100, 8000.0));
+    }
+    assert_eq!(
+        shim.get_params(session, &["genb"]),
+        [[10]],
+        "the engine powers on 10-band"
+    );
+    assert_eq!(
+        shim.get_params(session, &["vnnb"]),
+        [[20]],
+        "the native grid fills from the rate at the first blocks"
+    );
+    shim.set_params(
+        session,
+        &[("genb", &[20]), ("gebf", &GEBF), ("gebg", &[0; 20])],
+    );
+    assert_eq!(shim.get_params(session, &["genb"]), [[20]]);
+    for block in 5..10 {
+        shim.process(session, &sine_block(block, 44_100, 8000.0));
+    }
+    assert_eq!(
+        shim.get_params(session, &["vnnb"]),
+        [[20]],
+        "the native grid readout survives the reshape"
+    );
+    shim.finish();
+}
+
+/// The shim's commit-leaf touch: staging `gebf` *without* `gebg` in
+/// the batch still reshapes — bare stager writes are inert in the
+/// engine (`reshape_probe` A), so the observable reshape proves the
+/// shim re-wrote the group's commit leaf itself.
+#[test]
+fn staging_without_the_commit_leaf_still_reshapes() {
+    let mut shim = Shim::spawn("commit_touch");
+    let session = shim.create(44_100);
+    // GEQ-only + 20 bands with +10 dB on band 4 (431 Hz) — the
+    // reshape_probe isolation (every other feature off, so leveler /
+    // maximizer dynamics can't mask the reshape); `gebg` is in this
+    // batch, so it commits itself.
+    let mut boosted = [0_i16; 20];
+    boosted[4] = 160;
+    shim.set_params(
+        session,
+        &[
+            ("dvle", &[0]),
+            ("dvme", &[0]),
+            ("vmon", &[0]),
+            ("deon", &[0]),
+            ("ieon", &[0]),
+            ("aoon", &[0]),
+            ("vdhe", &[0]),
+            ("vspe", &[0]),
+            ("ngon", &[0]),
+            ("geon", &[1]),
+            ("genb", &[20]),
+            ("gebf", &GEBF),
+            ("gebg", &boosted),
+        ],
+    );
+    shim.set_enabled(session, true);
+    let mut block = 0;
+    let mut run = |shim: &mut Shim, blocks: usize| {
+        let mut last = Vec::new();
+        for _ in 0..blocks {
+            last = shim.process(session, &sine_block(block, 44_100, 2000.0)).0;
+            block += 1;
+        }
+        rms(&last)
+    };
+    let boosted_rms = run(&mut shim, CROSSFADE_BLOCKS + SETTLE_BLOCKS);
+
+    // Move band 4's centre 431 → 6000 Hz — stager only, no `gebg`.
+    let mut moved = GEBF;
+    moved[4] = 6000;
+    shim.set_params(session, &[("gebf", &moved)]);
+    let moved_rms = run(&mut shim, SETTLE_BLOCKS);
+
+    assert!(
+        moved_rms < boosted_rms * 0.8,
+        "the boost must leave 431 Hz once the shim commits the staged \
+         reshape: boosted rms {boosted_rms:.1}, moved rms {moved_rms:.1}"
+    );
+    shim.finish();
+}
+
+/// Every `Process` reply carries the fixed 160-byte vis tail —
+/// `Shim::process` asserts the exact length on every call, including
+/// the bypassed block here (vis is process-driven, not power-gated).
+/// With a tone playing and one `[vcnb, vcbf, ven]` batch (the custom
+/// grid boots unconfigured — `vcnb` = 0 — and its pair stays zero
+/// until the host writes the grid and `ven` latches it; the "seeded"
+/// identity the probes saw is a side effect of their cmd-3 init flow),
+/// the native pair goes live and the custom pair mirrors it — the
+/// custom grid here *is* the native table.
+#[test]
+#[expect(
+    clippy::similar_names,
+    reason = "vnbg/vnbe/vcbg/vcbe are the engine's own 4-CC names"
+)]
+fn every_process_reply_carries_the_vis_tail() {
+    let mut shim = Shim::spawn("vis_tail");
+    let session = shim.create(44_100);
+
+    // Bypassed (never enabled yet): the helper's length assert is the
+    // "tail rides bypass" proof.
+    shim.process(session, &sine_block(0, 44_100, 8000.0));
+
+    shim.set_enabled(session, true);
+    for block in 1..=CROSSFADE_BLOCKS {
+        shim.process(session, &sine_block(block, 44_100, 8000.0));
+    }
+    // GEBF doubles as the 44.1 kHz native grid — custom mirrors native.
+    shim.set_params(session, &[("vcnb", &[20]), ("vcbf", &GEBF), ("ven", &[1])]);
+    let mut vis = Vec::new();
+    for block in CROSSFADE_BLOCKS + 1..=2 * CROSSFADE_BLOCKS {
+        vis = shim.process(session, &sine_block(block, 44_100, 8000.0)).1;
+    }
+    let (vnbg, rest) = vis.split_at(20);
+    let (vnbe, rest) = rest.split_at(20);
+    let (vcbg, vcbe) = rest.split_at(20);
+    assert!(
+        vnbg.iter().any(|&gain| gain != 0),
+        "native gains are live: {vnbg:?}"
+    );
+    assert!(
+        vnbe.iter().any(|&excitation| excitation != 0),
+        "native excitations are live: {vnbe:?}"
+    );
+    assert_eq!(vcbg, vnbg, "custom grid == native grid ⇒ mirror");
+    assert_eq!(vcbe, vnbe, "custom grid == native grid ⇒ mirror");
+    shim.finish();
+}
+
+/// Slice 07's tracer bullet: `SetParams` lands in the live registry
+/// (`GetParams` reads back the write), and an out-of-range write reads
+/// back the engine's own clamp — `dvla` is `[0..10]` (probe §7), so
+/// 200 → 10.
+#[test]
+fn set_params_reads_back_and_out_of_range_reads_the_clamp() {
+    let mut shim = Shim::spawn("params_tracer");
+    let session = shim.create(44_100);
+    shim.set_params(session, &[("dvla", &[8])]);
+    assert_eq!(shim.get_params(session, &["dvla"]), [[8]]);
+    shim.set_params(session, &[("dvla", &[200])]);
+    assert_eq!(
+        shim.get_params(session, &["dvla"]),
+        [[10]],
+        "the registry holds the clamped value the DSP uses"
+    );
     shim.finish();
 }
 
@@ -339,7 +622,7 @@ fn enabled_session_transforms_a_test_tone() {
     let mut last = (Vec::new(), Vec::new());
     for block in 0..CROSSFADE_BLOCKS {
         let input = sine_block(block, 44_100, 8000.0);
-        let output = shim.process(session, &input);
+        let (output, _) = shim.process(session, &input);
         last = (input, output);
     }
     assert_ne!(last.1, last.0, "enabled processing must not be identity");
