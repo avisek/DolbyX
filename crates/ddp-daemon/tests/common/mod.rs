@@ -62,13 +62,20 @@ pub fn config_for(dir: &TempDir) -> DaemonConfig {
     }
 }
 
+/// Starts a daemon over an existing fixture dir with an injected
+/// engine — the seam for non-stub backends (the qemu e2e suite,
+/// failure fakes).
+pub async fn start_with(dir: &TempDir, engine: Arc<dyn ddp_engine::Engine>) -> Daemon {
+    Daemon::start(config_for(dir), engine)
+        .await
+        .expect("daemon starts")
+}
+
 /// Starts a stub-backed daemon over an existing fixture dir — the
 /// restart primitive.
 pub async fn start_over(dir: &TempDir) -> (Daemon, Arc<StubBackend>) {
     let stub = Arc::new(StubBackend::new());
-    let daemon = Daemon::start(config_for(dir), stub.clone())
-        .await
-        .expect("daemon starts");
+    let daemon = start_with(dir, stub.clone()).await;
     (daemon, stub)
 }
 
@@ -77,6 +84,23 @@ pub async fn start_daemon() -> TestDaemon {
     let dir = fixture_dir();
     let (handle, stub) = start_over(&dir).await;
     TestDaemon { handle, stub, dir }
+}
+
+/// Polls `config.toml` (up to 3 s) until it holds `expected` — the
+/// debounced write-back assertion primitive.
+pub async fn assert_config_becomes(path: &Path, expected: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let content = std::fs::read_to_string(path).expect("config.toml readable");
+        if content == expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "config.toml settled at {content:?}, wanted {expected:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
 
 /// One raw `GET` over a real TCP connection; returns (status, body).

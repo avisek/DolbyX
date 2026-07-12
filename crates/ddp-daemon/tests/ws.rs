@@ -123,6 +123,29 @@ async fn zero_session_readouts_carry_the_parameter_defaults() {
     }
 }
 
+/// Behavior 5 (issue #16): with a live main session the snapshot's
+/// `readouts` carry the engine's values; dead refs keep the defaults.
+#[tokio::test]
+async fn snapshot_readouts_prefer_the_main_sessions_live_values() {
+    let dir = common::fixture_dir();
+    let engine = std::sync::Arc::new(ddp_engine::StubBackend::seeded(vec![(
+        "ver".into(),
+        vec![9, 9, 9, 9],
+    )]));
+    let daemon = common::start_with(&dir, engine).await;
+    daemon.supervisor().create_session(48000).expect("session");
+
+    let mut ws = ws_connect(daemon.addr()).await;
+    let readouts = recv_json(&mut ws).await["snapshot"]["readouts"].take();
+    assert_eq!(readouts["ver"], json!([9, 9, 9, 9]), "live engine value");
+    assert_eq!(
+        readouts["vnnb"],
+        json!([20]),
+        "a dead ref falls back to the table default"
+    );
+    daemon.shutdown().await;
+}
+
 /// Behavior 9 (issue #12): malformed frames are answered, never fatal.
 #[tokio::test]
 async fn malformed_json_yields_invalid_request_without_dropping_the_connection() {
@@ -147,6 +170,55 @@ async fn malformed_json_yields_invalid_request_without_dropping_the_connection()
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r10" })).await;
     assert_eq!(recv_json(&mut ws).await["type"], "state");
     assert_eq!(recv_json(&mut ws).await["request_id"], "r10");
+}
+
+/// Slice 08 (issue #16): an unrecoverable engine failure surfaces as an
+/// `ENGINE_REJECTED` error — while state stays authoritative (the flip
+/// is broadcast and replays onto the engine when it comes back) and the
+/// connection keeps serving.
+#[tokio::test]
+async fn an_unrecoverable_engine_failure_surfaces_engine_rejected() {
+    let dir = common::fixture_dir();
+    let stub = std::sync::Arc::new(ddp_engine::StubBackend::new());
+    let daemon = common::start_with(&dir, stub.clone()).await;
+    daemon.supervisor().create_session(48000).expect("session");
+    let mut originator = connected(daemon.addr()).await;
+    let mut other = connected(daemon.addr()).await;
+
+    stub.fail_forever(ddp_engine::EngineError::Crashed("engine gone".into()));
+    send_json(
+        &mut originator,
+        &json!({ "cmd": "set_power", "request_id": "r1", "on": false }),
+    )
+    .await;
+    let error = recv_json(&mut originator).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["code"], "ENGINE_REJECTED");
+    assert_eq!(error["request_id"], "r1");
+    assert!(
+        error["message"]
+            .as_str()
+            .expect("message present")
+            .contains("crashed"),
+        "the cause travels on the wire: {error}"
+    );
+    assert!(
+        error.get("status").is_none(),
+        "a crash carries no engine status: {error}"
+    );
+
+    // State stayed authoritative: the other client got the flip.
+    let broadcast = recv_json(&mut other).await;
+    assert_eq!(broadcast["type"], "state");
+    assert_eq!(broadcast["snapshot"]["power"], false);
+
+    // The originator's connection survives and reflects the new state.
+    send_json(
+        &mut originator,
+        &json!({ "cmd": "get_state", "request_id": "r2" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut originator).await["snapshot"]["power"], false);
 }
 
 #[tokio::test]

@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::engine_supervisor::SupervisorError;
+
 /// A client → daemon command frame. Unknown `cmd` values and shape
 /// mismatches fail serde and surface as `INVALID_REQUEST`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -47,6 +49,10 @@ pub(crate) enum WsEvent<'a> {
         request_id: Option<&'a str>,
         /// Machine-readable failure class.
         code: ErrorCode,
+        /// The engine's reply status when the failure carries one
+        /// (e.g. `-22`); omitted otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Option<i32>,
         /// Human-readable cause.
         message: String,
     },
@@ -59,6 +65,9 @@ pub(crate) enum ErrorCode {
     /// The daemon rejected the frame up front: malformed JSON, unknown
     /// cmd, failed validation. The only daemon-side code.
     InvalidRequest,
+    /// The engine refused or lost the operation after daemon-side
+    /// validation passed (ADR-0005).
+    EngineRejected,
 }
 
 impl WsEvent<'_> {
@@ -81,6 +90,46 @@ pub(crate) fn invalid_request(request_id: Option<&str>, message: String) -> WsEv
     WsEvent::Error {
         request_id,
         code: ErrorCode::InvalidRequest,
+        status: None,
         message,
+    }
+}
+
+/// Builds an `ENGINE_REJECTED` error reply from a supervisor failure.
+pub(crate) fn engine_rejected<'a>(request_id: &'a str, error: &SupervisorError) -> WsEvent<'a> {
+    WsEvent::Error {
+        request_id: Some(request_id),
+        code: ErrorCode::EngineRejected,
+        status: error.engine_status(),
+        message: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ddp_engine::EngineError;
+
+    /// The wire shape of ADR-0005's `error` event: `status` present
+    /// exactly when the engine replied one.
+    #[test]
+    fn engine_rejected_serializes_with_an_optional_status() {
+        let rejected = SupervisorError::Engine(EngineError::Rejected { status: -22 });
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&engine_rejected("r1", &rejected).to_text())
+                .unwrap(),
+            serde_json::json!({
+                "type": "error",
+                "request_id": "r1",
+                "code": "ENGINE_REJECTED",
+                "status": -22,
+                "message": "engine rejected the operation (status -22)",
+            }),
+        );
+        let crashed = SupervisorError::EngineCrashed("engine gone".into());
+        let event =
+            serde_json::from_str::<serde_json::Value>(&engine_rejected("r2", &crashed).to_text())
+                .unwrap();
+        assert!(event.get("status").is_none(), "no status on a crash");
     }
 }

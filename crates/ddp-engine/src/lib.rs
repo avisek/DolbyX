@@ -1,14 +1,18 @@
 //! Engine seam: the `Engine` trait plus stub and QEMU backends.
 //!
-//! The trait + `StubBackend` are this crate's surface for Slice 04;
-//! `QemuBackend` lands in Slice 08
-//! ([#16](https://github.com/avisek/DolbyX/issues/16)).
+//! `QemuBackend` is the real engine and the daemon's default;
+//! `StubBackend` stays as the fast inner-loop test seam (issue #12
+//! mock policy).
 
 #![forbid(unsafe_code)]
 
 pub mod protocol;
+pub mod qemu;
 pub mod stub;
+#[cfg(feature = "qemu")]
+pub mod test_support;
 
+pub use qemu::QemuBackend;
 pub use stub::{Call, StubBackend};
 
 /// A live engine session — one per plugin instance, sample rate fixed
@@ -36,6 +40,23 @@ pub enum EngineError {
     /// The session id names no live session.
     #[error("unknown session {}", .0.0)]
     SessionNotFound(SessionId),
+    /// Host-side validation rejected the call before the engine saw it
+    /// — the engine's own handling would be a footgun (a bad rate
+    /// silently falls back to 44100; mono poisons the handle).
+    #[error("unsupported config: {0}")]
+    UnsupportedConfig(String),
+    /// The engine (or its shim) refused the operation; `status` is the
+    /// reply status verbatim.
+    #[error("engine rejected the operation (status {status})")]
+    Rejected {
+        /// The non-zero reply status, e.g. `-22` (`-EINVAL`).
+        status: i32,
+    },
+    /// The engine subprocess died (or its stream desynced). The backend
+    /// respawns lazily on the next call; every session was lost with
+    /// the process — the supervisor recreates and replays them.
+    #[error("engine subprocess crashed: {0}")]
+    Crashed(String),
 }
 
 /// Backend result.
@@ -87,4 +108,34 @@ pub trait Engine: Send + Sync {
     ///
     /// [`EngineError::SessionNotFound`] when `id` names no live session.
     fn process(&self, id: SessionId, input: &[i16], output: &mut [i16]) -> Result<VisFrame>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Behavior 3 (issue #16): host-side rejections carry a clear,
+    /// actionable message — the error *is* the interface.
+    #[test]
+    fn engine_errors_read_as_clear_messages() {
+        assert_eq!(
+            EngineError::SessionNotFound(SessionId(9)).to_string(),
+            "unknown session 9"
+        );
+        assert_eq!(
+            EngineError::UnsupportedConfig(
+                "sample rate 96000 outside the engine's {44100, 48000, 32000}".into()
+            )
+            .to_string(),
+            "unsupported config: sample rate 96000 outside the engine's {44100, 48000, 32000}"
+        );
+        assert_eq!(
+            EngineError::Rejected { status: -22 }.to_string(),
+            "engine rejected the operation (status -22)"
+        );
+        assert_eq!(
+            EngineError::Crashed("engine shim closed the stream".into()).to_string(),
+            "engine subprocess crashed: engine shim closed the stream"
+        );
+    }
 }

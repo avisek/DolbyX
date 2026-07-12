@@ -10,14 +10,14 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand, Stdio};
-use std::sync::OnceLock;
 
 use ddp_engine::protocol::{
     self, Command, STATUS_INVALID, STATUS_NO_SESSION, STATUS_OK, decode_get_params_reply,
     param_name, read_reply, write_message,
 };
+use ddp_engine::test_support::staged_engine_dir;
 
 /// Frames per process block — the size the probes drive.
 const FRAMES: usize = 256;
@@ -65,51 +65,6 @@ fn rms(pcm: &[i16]) -> f64 {
     (squares / pcm.len() as f64).sqrt()
 }
 
-/// Builds the shim, stages it beside `libdseffect.so` + the proven
-/// Android stubs from `tools/ddp_probe`, once per test run.
-fn staged_dir() -> &'static Path {
-    static STAGE: OnceLock<PathBuf> = OnceLock::new();
-    STAGE.get_or_init(|| {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("workspace root")
-            .to_path_buf();
-        let run = |program: &str, args: &[&str]| {
-            let status = ProcessCommand::new(program)
-                .args(args)
-                .current_dir(&root)
-                .status()
-                .unwrap_or_else(|error| panic!("spawn {program}: {error}"));
-            assert!(status.success(), "{program} {args:?} failed: {status}");
-        };
-        run(
-            env!("CARGO"),
-            &[
-                "build",
-                "-p",
-                "ddp-engine-arm",
-                "--target",
-                "armv7-unknown-linux-gnueabihf",
-                "--release",
-            ],
-        );
-        run("make", &["-sC", "tools/ddp_probe", "stage"]);
-
-        let stage = root.join("target/qemu-stage");
-        fs::create_dir_all(stage.join("logs")).expect("create stage dir");
-        let staged_libs = root.join("tools/ddp_probe/build/lib");
-        for entry in fs::read_dir(&staged_libs).expect("read staged libs") {
-            let entry = entry.expect("staged lib entry");
-            // fs::copy follows the sysroot symlinks to real files.
-            fs::copy(entry.path(), stage.join(entry.file_name())).expect("stage lib");
-        }
-        let shim = root.join("target/armv7-unknown-linux-gnueabihf/release/ddp-engine-arm");
-        fs::copy(&shim, stage.join("ddp-engine-arm")).expect("stage shim");
-        stage
-    })
-}
-
 /// One live shim subprocess under qemu, engine log teed to a file.
 struct Shim {
     child: Child,
@@ -121,7 +76,7 @@ struct Shim {
 impl Shim {
     /// Spawns a fresh shim; `name` keys its engine-log file.
     fn spawn(name: &str) -> Self {
-        let stage = staged_dir();
+        let stage = staged_engine_dir();
         let stderr_path = stage.join("logs").join(format!("{name}.stderr"));
         let stderr = fs::File::create(&stderr_path).expect("create stderr log");
         let mut child = ProcessCommand::new("qemu-arm-static")

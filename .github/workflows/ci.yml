@@ -36,7 +36,10 @@ jobs:
       - run: cargo build -p ddp-engine-arm --target armv7-unknown-linux-gnueabihf --release
       # Drives the shim (real engine, nothing mocked) over the framed protocol
       - run: cargo test -p ddp-engine --features qemu
+      # The daemon e2e suite against the real engine (issue #16)
+      - run: cargo test -p ddp-daemon --features qemu
       - run: cargo clippy -p ddp-engine --features qemu --all-targets -- -D warnings
+      - run: cargo clippy -p ddp-daemon --features qemu --all-targets -- -D warnings
       # The documented engine behaviors the design load-bears on
       - run: make -C tools/ddp_probe check
 
