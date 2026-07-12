@@ -1,3 +1,5 @@
 # LF everywhere — keeps Prettier/rustfmt checks identical on the
 # Windows CI runner (its git defaults to autocrlf).
 * text=auto eol=lf
+# Except batch files: cmd.exe's goto/label scanning needs CRLF.
+*.bat text eol=crlf

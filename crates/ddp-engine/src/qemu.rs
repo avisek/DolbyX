@@ -14,6 +14,11 @@
 //! engine's own handling is a footgun (a bad rate silently falls back
 //! to 44100 while replying success; mono tears the graph down and
 //! poisons the handle).
+//!
+//! On Windows the daemon is a native binary and the subprocess is the
+//! same qemu run relayed into WSL2 over `wsl.exe` stdio (issue #20);
+//! `engine_dir` names a WSL-side Linux path there — layout and setup
+//! in `docs/windows.md`.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -92,10 +97,12 @@ impl QemuBackend {
     /// Spawns a fresh subprocess, wiring its stderr (the engine log)
     /// into `tracing`.
     fn spawn(&self) -> io::Result<Subprocess> {
-        let mut child = shim_command(&self.engine_dir).spawn().map_err(|error| {
+        let mut command = shim_command(&self.engine_dir);
+        let program = command.get_program().to_string_lossy().into_owned();
+        let mut child = command.spawn().map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("spawn qemu-arm-static: {error} (apt install qemu-user-static?)"),
+                format!("spawn {program}: {error} ({SPAWN_HINT})"),
             )
         })?;
         let stdin = child.stdin.take().expect("stdin is piped");
@@ -240,19 +247,61 @@ impl Drop for QemuBackend {
     }
 }
 
-/// Builds the subprocess invocation — the spawn seam: Slice 12
-/// ([#20](https://github.com/avisek/DolbyX/issues/20)) swaps this for a
-/// `wsl.exe`-launched shim on Windows without touching the backend.
+/// What a failed spawn names, per platform.
+#[cfg(unix)]
+const SPAWN_HINT: &str = "apt install qemu-user-static?";
+#[cfg(windows)]
+const SPAWN_HINT: &str = r"is WSL2 installed? scripts\setup-windows.bat sets the engine up";
+
+/// Builds the subprocess invocation — the spawn seam (issue #20): the
+/// same qemu run everywhere, launched natively on Unix and relayed into
+/// WSL2 on Windows, protocol and framing identical.
 fn shim_command(engine_dir: &Path) -> ProcessCommand {
+    let mut command = shim_invocation(engine_dir);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
+/// The native invocation: `qemu-arm-static` runs the shim, its staged
+/// libraries resolved from `engine_dir` via `LD_LIBRARY_PATH`.
+#[cfg(unix)]
+fn shim_invocation(engine_dir: &Path) -> ProcessCommand {
     let mut command = ProcessCommand::new("qemu-arm-static");
     command
         .arg("-L")
         .arg("/usr/arm-linux-gnueabihf")
         .arg(engine_dir.join("ddp-engine-arm"))
-        .env("LD_LIBRARY_PATH", engine_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .env("LD_LIBRARY_PATH", engine_dir);
+    command
+}
+
+/// The Windows invocation: the same run inside WSL2, stdio relayed
+/// binary-clean by `wsl.exe` (the v1-proven path). `--exec` skips the
+/// default shell (dotfile output would corrupt the framed stdout) and
+/// `-E` sets the guest environment (`wsl.exe` forwards no Windows
+/// environment). `engine_dir` names a WSL-side Linux path here
+/// (layout: `docs/windows.md`) — joined with `/` by hand, since
+/// `Path::join` would insert `\`.
+#[cfg(windows)]
+fn shim_invocation(engine_dir: &Path) -> ProcessCommand {
+    use std::os::windows::process::CommandExt;
+    // Never flash a console window when spawned from a windowless
+    // context (v1 set the same flag).
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let dir = engine_dir.to_string_lossy();
+    let mut command = ProcessCommand::new("wsl.exe");
+    command
+        .arg("--exec")
+        .arg("qemu-arm-static")
+        .arg("-E")
+        .arg(format!("LD_LIBRARY_PATH={dir}"))
+        .arg("-L")
+        .arg("/usr/arm-linux-gnueabihf")
+        .arg(format!("{dir}/ddp-engine-arm"))
+        .creation_flags(CREATE_NO_WINDOW);
     command
 }
 
@@ -363,7 +412,58 @@ fn validate_name(name: &str) -> Result<crate::protocol::ParamName> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     use super::*;
+
+    /// The spawn seam, Unix side: `qemu-arm-static` runs the shim
+    /// directly, its staged libraries resolved via `LD_LIBRARY_PATH`.
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_runs_under_qemu_with_its_libraries_beside_it() {
+        let command = shim_command(Path::new("/opt/dolbyx/engine"));
+        assert_eq!(command.get_program(), "qemu-arm-static");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "-L",
+                "/usr/arm-linux-gnueabihf",
+                "/opt/dolbyx/engine/ddp-engine-arm"
+            ]
+            .map(OsStr::new)
+        );
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == "LD_LIBRARY_PATH"
+                    && value == Some(OsStr::new("/opt/dolbyx/engine")))
+        );
+    }
+
+    /// The spawn seam, Windows side (issue #20): the identical qemu run
+    /// relayed through `wsl.exe --exec` — no shell in the stdio path —
+    /// with `engine_dir` kept a forward-slash WSL path.
+    #[cfg(windows)]
+    #[test]
+    fn the_shim_is_relayed_into_wsl2_without_a_shell() {
+        let command = shim_command(Path::new("/opt/dolbyx/engine"));
+        assert_eq!(command.get_program(), "wsl.exe");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "--exec",
+                "qemu-arm-static",
+                "-E",
+                "LD_LIBRARY_PATH=/opt/dolbyx/engine",
+                "-L",
+                "/usr/arm-linux-gnueabihf",
+                "/opt/dolbyx/engine/ddp-engine-arm",
+            ]
+            .map(OsStr::new)
+        );
+    }
 
     /// Behavior 3 (issue #16): the engine-footgun configs are rejected
     /// host-side, with the footgun spelled out.

@@ -35,6 +35,25 @@ struct Args {
     /// dev/tests only.
     #[arg(long, value_enum, default_value_t = BackendKind::Qemu)]
     backend: BackendKind,
+    /// Engine directory for the QEMU backend — on Windows a WSL-side
+    /// Linux path (issue #20). Defaults beside the daemon binary
+    /// (Unix) / `/opt/dolbyx/engine` (Windows).
+    #[arg(long)]
+    engine_dir: Option<PathBuf>,
+}
+
+/// The directory the QEMU backend loads the shim from: `--engine-dir`,
+/// else beside the daemon binary — except on Windows, where the engine
+/// lives inside WSL2 at the Linux path `setup-windows.bat` installs
+/// (`docs/windows.md`).
+fn resolve_engine_dir(flag: Option<PathBuf>, daemon_dir: &std::path::Path) -> PathBuf {
+    flag.unwrap_or_else(|| {
+        if cfg!(windows) {
+            PathBuf::from("/opt/dolbyx/engine")
+        } else {
+            daemon_dir.to_path_buf()
+        }
+    })
 }
 
 /// Which backend the daemon binds behind the `Engine` trait.
@@ -129,14 +148,18 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .ok_or("cannot resolve the daemon binary's directory")?
         .to_path_buf();
-    // The engine shim + libdseffect.so resolve beside the daemon
-    // binary, like the runtime TOMLs. Refuse-to-start policy: a broken
-    // staging fails here, loudly, before anything is served.
+    // Refuse-to-start policy: a broken staging fails here, loudly,
+    // before anything is served.
+    let engine_dir = resolve_engine_dir(args.engine_dir, &daemon_dir);
+    let staging_hint = if cfg!(windows) {
+        r"run scripts\setup-windows.bat, or point --engine-dir at a staged WSL directory"
+    } else {
+        "is the engine staged beside the daemon binary? (`just stage-engine`)"
+    };
     let engine: std::sync::Arc<dyn ddp_engine::Engine> = match args.backend {
         BackendKind::Qemu => std::sync::Arc::new(
-            ddp_engine::QemuBackend::start(&daemon_dir).map_err(|error| {
-                format!("engine: {error} — is the engine staged beside the daemon binary? (`just stage-engine`)")
-            })?,
+            ddp_engine::QemuBackend::start(&engine_dir)
+                .map_err(|error| format!("engine: {error} — {staging_hint}"))?,
         ),
         BackendKind::Stub => {
             tracing::warn!("running on the stub backend — no real audio processing");
@@ -185,5 +208,26 @@ mod tests {
 
         let stubbed = Args::try_parse_from(["ddp-daemon", "--backend", "stub"]).unwrap();
         assert_eq!(stubbed.backend, super::BackendKind::Stub);
+    }
+
+    /// Slice 12 (issue #20): without `--engine-dir` the engine resolves
+    /// beside the daemon binary on Unix, and on Windows at the WSL-side
+    /// directory `setup-windows.bat` installs.
+    #[test]
+    fn the_engine_dir_defaults_per_platform() {
+        let daemon_dir = std::path::Path::new("/opt/daemon");
+        let expected = if cfg!(windows) {
+            "/opt/dolbyx/engine"
+        } else {
+            "/opt/daemon"
+        };
+        assert_eq!(
+            super::resolve_engine_dir(None, daemon_dir),
+            std::path::Path::new(expected)
+        );
+        assert_eq!(
+            super::resolve_engine_dir(Some("/staged".into()), daemon_dir),
+            std::path::Path::new("/staged")
+        );
     }
 }

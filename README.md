@@ -43,13 +43,16 @@ Prerequisites: [rustup](https://rustup.rs) (the toolchain is pinned by
 [pnpm](https://pnpm.io), and `cargo install cargo-watch` (for `just
 dev`). For anything driving the ARM engine (`just qemu-test`, the probe
 harness): `apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-qemu-user-static`.
+qemu-user-static`. For the native Windows daemon
+([`docs/windows.md`](docs/windows.md)): `apt install
+gcc-mingw-w64-x86-64`.
 
 ```bash
-just lint       # cargo fmt --check + clippy (-D warnings) + UI lint
-just test       # cargo test --workspace + UI tests
-just qemu-test  # engine shim vs real libdseffect.so under qemu
-just dev        # daemon + UI dev loop with hot reload
+just lint           # cargo fmt --check + clippy (-D warnings) + UI lint
+just test           # cargo test --workspace + UI tests
+just qemu-test      # engine shim vs real libdseffect.so under qemu
+just dev            # daemon + UI dev loop with hot reload
+just windows-build  # native Windows daemon staged in target/windows/
 ```
 
 Reading order for contributors:
