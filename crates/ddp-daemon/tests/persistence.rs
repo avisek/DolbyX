@@ -3,8 +3,6 @@
 
 mod common;
 
-use std::time::Duration;
-
 use common::{
     assert_config_becomes, connected, recv_json, set_power, start_daemon, start_over, ws_connect,
 };
@@ -64,6 +62,7 @@ async fn graceful_shutdown_flushes_a_pending_write() {
 async fn sigterm_flushes_the_pending_write_and_exits_zero() {
     use std::io::BufRead;
     use std::process::{Command, Stdio};
+    use std::time::Duration;
 
     let dir = common::fixture_dir();
     // `--backend stub`: this test exercises signal handling, not the
