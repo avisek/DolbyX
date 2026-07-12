@@ -42,7 +42,9 @@ ven = 1
 
 # The four factory profiles — each row its delta over
 # ParameterDef.default, per the XML <profile> blocks. No
-# selected_eq_preset keys: factory selection ships None (Slice 15).
+# selected_eq_preset keys: factory selection ships None — the original
+# ships ieon = 0 on every profile, its `include preset = ieq_rich` only
+# pre-stages the curve (docs/ddp/05-profiles-and-persistence.md).
 
 [profile.movie]
 name = "Movie"
@@ -89,3 +91,29 @@ dssb = 0
 dssf = 200
 vmon = 0
 aoon = 2
+
+# The factory EQ presets — global optional overlays carrying the nine
+# preset-carried params (ADR-0003). The shared block gives every preset
+# the 20-band structure (as [profile] above), so each resolves
+# standalone; the rows carry the XML's IEQ target curves with IEQ
+# enabled (GEQ stays at the geon = 0 / gebg = 0 defaults).
+[eq_preset]
+genb = 20
+ienb = 20
+gebf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
+iebf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
+
+[eq_preset.open]
+name = "Open"
+ieon = 1
+iebt = [117, 133, 188, 176, 141, 149, 175, 185, 185, 200, 236, 242, 228, 213, 182, 132, 110, 68, -27, -240]
+
+[eq_preset.rich]
+name = "Rich"
+ieon = 1
+iebt = [67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9, -55, -235]
+
+[eq_preset.focused]
+name = "Focused"
+ieon = 1
+iebt = [-419, -112, 75, 116, 113, 160, 165, 80, 61, 79, 98, 121, 64, 70, 44, -71, -33, -100, -238, -411]

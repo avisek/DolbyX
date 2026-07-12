@@ -5,6 +5,7 @@
 import { createSignal } from 'solid-js'
 import { WsClient } from '../lib/ws'
 import {
+  applyEqPreset,
   applyPower,
   applyProfile,
   applyProfileEdit,
@@ -64,6 +65,23 @@ export function setProfile(id: string): void {
     ?.request({ cmd: 'set_profile', id })
     .then(() => {
       applyProfile(id)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth; the
+      // selection simply never moved.
+    })
+}
+
+/**
+ * Local-first `set_eq_preset`: selects (or with `null` detaches) one
+ * profile's EQ preset overlay, applied on the daemon's ack — the daemon
+ * has already pushed the resolved nine EQ params in one atomic batch.
+ */
+export function setEqPreset(profileId: string, id: string | null): void {
+  void client
+    ?.request({ cmd: 'set_eq_preset', profile_id: profileId, id })
+    .then(() => {
+      applyEqPreset(profileId, id)
     })
     .catch(() => {
       // Rejected or errored — the reconcile restores daemon truth; the

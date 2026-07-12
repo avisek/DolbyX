@@ -1,7 +1,8 @@
-//! Acceptance tests for the shipped `defaults.toml` (Slice 10,
-//! [#18](https://github.com/avisek/DolbyX/issues/18)): the four factory
-//! profiles resolve to the original DDP module's values
-//! (`vendored/ds1-default.xml` via `docs/ddp/05`).
+//! Acceptance tests for the shipped `defaults.toml` (Slices 10
+//! [#18](https://github.com/avisek/DolbyX/issues/18) and 15
+//! [#23](https://github.com/avisek/DolbyX/issues/23)): the four factory
+//! profiles and three factory EQ presets resolve to the original DDP
+//! module's values (`vendored/ds1-default.xml` via `docs/ddp/05`).
 
 use ddp_state::{ParameterDef, Profile, State};
 
@@ -53,8 +54,89 @@ fn ships_the_four_factory_profiles() {
             .profiles
             .iter()
             .all(|profile| profile.selected_eq_preset.is_none()),
-        "factory EQ preset selection ships None (Slice 15 wires presets)"
+        "behavior 7 (issue #23): factory selection ships None — the \
+         original ships ieon = 0 on every profile"
     );
+}
+
+/// Behavior 1 (issue #23): the three factory EQ presets ship the XML's
+/// IEQ target curves, each resolving standalone — the `[eq_preset]`
+/// shared band structure completes the full nine preset-carried params.
+#[test]
+fn ships_the_three_factory_eq_presets_resolving_standalone() {
+    let defs = defs();
+    let defaults = defaults();
+    let names: Vec<(&str, &str)> = defaults
+        .eq_presets
+        .iter()
+        .map(|preset| (preset.id.0.as_str(), preset.name.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [("open", "Open"), ("rich", "Rich"), ("focused", "Focused")],
+    );
+
+    let eq_params: Vec<&str> = defs
+        .iter()
+        .filter(|def| def.access.is_writable() && def.category.is_preset_carried())
+        .map(|def| def.name.as_str())
+        .collect();
+    assert_eq!(
+        eq_params,
+        [
+            "ienb", "iebf", "iebt", "ieon", "iea", "geon", "genb", "gebf", "gebg"
+        ],
+        "the table derives exactly the nine EQ params"
+    );
+
+    for preset in &defaults.eq_presets {
+        let id = &preset.id.0;
+        assert!(preset.is_factory, "{id}");
+        assert_eq!(preset.params.len(), 9, "{id}: exactly the nine");
+        assert_eq!(preset.params["genb"][0], 20, "{id}: genb");
+        assert_eq!(preset.params["ienb"][0], 20, "{id}: ienb");
+        assert_eq!(preset.params["gebf"][..20], DDP_GRID, "{id}: gebf");
+        assert_eq!(preset.params["iebf"][..20], DDP_GRID, "{id}: iebf");
+        assert_eq!(preset.params["ieon"][0], 1, "{id}: ieon staged on");
+        assert_eq!(preset.params["iea"][0], 10, "{id}: iea");
+        assert_eq!(preset.params["geon"][0], 0, "{id}: GEQ off");
+        assert_eq!(preset.params["gebg"], vec![0; 40], "{id}: flat GEQ");
+        assert_eq!(preset.params["iebt"].len(), 40, "{id}: iebt allocation");
+        assert_eq!(preset.baseline, preset.params, "{id}: no user layers");
+    }
+
+    // The three IEQ target curves, verbatim from the XML (docs/ddp/05).
+    let curves: [(&str, [i16; 20]); 3] = [
+        (
+            "open",
+            [
+                117, 133, 188, 176, 141, 149, 175, 185, 185, 200, 236, 242, 228, 213, 182, 132,
+                110, 68, -27, -240,
+            ],
+        ),
+        (
+            "rich",
+            [
+                67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9,
+                -55, -235,
+            ],
+        ),
+        (
+            "focused",
+            [
+                -419, -112, 75, 116, 113, 160, 165, 80, 61, 79, 98, 121, 64, 70, 44, -71, -33,
+                -100, -238, -411,
+            ],
+        ),
+    ];
+    for (id, curve) in curves {
+        let preset = defaults
+            .eq_presets
+            .iter()
+            .find(|preset| preset.id.0 == id)
+            .expect("factory preset");
+        assert_eq!(preset.params["iebt"][..20], curve, "{id}: iebt");
+    }
 }
 
 /// Behavior 1 (issue #18): shared `[profile]` keys apply to every

@@ -1,6 +1,6 @@
 import type { Bootstrap } from '../lib/bootstrap'
 import type { ParameterDef } from '../lib/parameters'
-import type { Profile, StateSnapshot } from '../lib/ws'
+import type { EqPreset, Profile, StateSnapshot } from '../lib/ws'
 
 /** One table row over compact defaults — values stay daemon-truthful. */
 function def(
@@ -84,6 +84,11 @@ function factoryProfile(
   return { id, name, is_factory: true, selected_eq_preset: null, params }
 }
 
+/** One factory EQ preset as the snapshot carries it (issue #23). */
+function factoryPreset(id: string, name: string): EqPreset {
+  return { id, name, is_factory: true, params: { ieon: [1] } }
+}
+
 /**
  * A daemon-truthful state snapshot: the master-control values each
  * factory profile resolves to (`defaults.toml` over table defaults).
@@ -127,6 +132,11 @@ export function fixtureState(
         dvle: [0],
         dvla: [0],
       }),
+    ],
+    eq_presets: [
+      factoryPreset('open', 'Open'),
+      factoryPreset('rich', 'Rich'),
+      factoryPreset('focused', 'Focused'),
     ],
     readouts: { vnnb: [20] },
     ...overrides,

@@ -106,6 +106,35 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::ResetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::ResetProfile { id }).await
         }
+        WsCommand::SetEqPreset {
+            request_id,
+            profile_id,
+            id,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::SetEqPreset { profile_id, id },
+            )
+            .await
+        }
+        WsCommand::EditEqPreset {
+            request_id,
+            id,
+            params,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::EditEqPreset { id, params },
+            )
+            .await
+        }
+        WsCommand::ResetEqPreset { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::ResetEqPreset { id }).await
+        }
     }
 }
 

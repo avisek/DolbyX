@@ -163,10 +163,23 @@ impl App {
                 })
             })
             .collect();
+        let eq_presets: Vec<serde_json::Value> = state
+            .eq_presets
+            .iter()
+            .map(|preset| {
+                serde_json::json!({
+                    "id": preset.id,
+                    "name": preset.name,
+                    "is_factory": preset.is_factory,
+                    "params": preset.params,
+                })
+            })
+            .collect();
         serde_json::json!({
             "power": state.power,
             "selected_profile": state.selected_profile,
             "profiles": profiles,
+            "eq_presets": eq_presets,
             "readouts": readouts,
         })
     }
