@@ -30,6 +30,12 @@ export type Command =
   | { readonly cmd: 'get_state' }
   | { readonly cmd: 'set_power'; readonly on: boolean }
   | { readonly cmd: 'set_profile'; readonly id: string }
+  | {
+      readonly cmd: 'edit_profile'
+      readonly id: string
+      /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
+      readonly params: Readonly<Record<string, readonly number[]>>
+    }
 
 /** A daemon → client event frame. */
 export type ServerEvent =

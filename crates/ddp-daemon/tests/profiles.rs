@@ -6,10 +6,9 @@
 mod common;
 
 use common::{
-    assert_config_becomes, connected, recv_json, send_json, start_daemon, start_over,
-    try_recv_json, ws_connect,
+    assert_config_becomes, connected, recv_json, send_json, set_params_batches, start_daemon,
+    start_over, try_recv_json, ws_connect,
 };
-use ddp_engine::Call;
 use serde_json::json;
 
 /// A profile's full resolved set, recomputed from the shipped files —
@@ -21,17 +20,6 @@ fn resolved(profile: &str) -> Vec<(String, Vec<i16>)> {
     let mut state = ddp_state::State::new_from_defaults(&defaults);
     state.selected_profile = ddp_state::ProfileId(profile.into());
     state.resolved_batch(&defs)
-}
-
-/// The recorded `set_params` batches, in issue order.
-fn set_params_batches(stub: &ddp_engine::StubBackend) -> Vec<Vec<(String, Vec<i16>)>> {
-    stub.calls()
-        .into_iter()
-        .filter_map(|call| match call {
-            Call::SetParams(_, batch) => Some(batch),
-            _ => None,
-        })
-        .collect()
 }
 
 /// The slice's tracer bullet (issue #18): WS `set_profile {id:"movie"}`

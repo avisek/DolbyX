@@ -4,7 +4,12 @@
  */
 import { createSignal } from 'solid-js'
 import { WsClient } from '../lib/ws'
-import { applyPower, applyProfile, applySnapshot } from './state'
+import {
+  applyPower,
+  applyProfile,
+  applyProfileEdit,
+  applySnapshot,
+} from './state'
 
 const [connected, setConnected] = createSignal(false)
 
@@ -64,4 +69,39 @@ export function setProfile(id: string): void {
       // Rejected or errored — the reconcile restores daemon truth; the
       // selection simply never moved.
     })
+}
+
+/**
+ * Local-first `edit_profile` for discrete controls (toggles): sends
+ * the batch, applies it on the daemon's ack.
+ */
+export function editProfile(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  void client
+    ?.request({ cmd: 'edit_profile', id, params })
+    .then(() => {
+      applyProfileEdit(id, params)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/**
+ * Optimistic `edit_profile` for continuous drags: applied immediately —
+ * waiting for the ack would let a round-trip-lagged apply yank a
+ * mid-drag slider backward (the in-flight-edit hazard originator
+ * suppression exists for, ADR-0005). A rejection reconciles: the
+ * client re-issues `get_state` on any command error.
+ */
+export function editProfileLive(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  applyProfileEdit(id, params)
+  void client?.request({ cmd: 'edit_profile', id, params }).catch(() => {
+    // The error-path reconcile restores daemon truth.
+  })
 }

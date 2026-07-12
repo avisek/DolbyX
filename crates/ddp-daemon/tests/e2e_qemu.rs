@@ -3,8 +3,9 @@
 //! replayed over `QemuBackend`), behavior 4 (supervisor respawn), 5
 //! (live readouts), 6 (power-off session init). Slice 10 (#18) adds
 //! behavior 11: the resolved-profile init reshape, read back from the
-//! live registry. Slice 11 (#19) adds behavior 9: plugin behaviors 2–5
-//! replayed over the real platform socket.
+//! live registry. Slice 11 (#19) adds its behavior 9: plugin behaviors
+//! 2–5 replayed over the real platform socket. Slice 14 (#22) adds its
+//! behavior 9: master-control edits read back from the registry.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -258,6 +259,61 @@ async fn set_profile_lands_movies_values_on_the_real_engine() {
     assert_eq!(values[1], [3], "Movie's dialog enhancer amount");
     assert_eq!(values[2], [96], "Movie's surround boost");
     assert_eq!(values[3], [20], "still 20-band after the switch");
+}
+
+/// Behavior 9 (issue #22): master-control edits — each half of the
+/// three signature controls, written as the UI writes them (1-entry
+/// `edit_profile` batches on Music, `vdhe` per `Tristate { on: 2 }`) —
+/// land in the live clamped registry, confirmed by `get_params`, the
+/// only true per-param getter.
+#[tokio::test]
+async fn master_control_edits_land_in_the_live_registry() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+
+    let mut ws = connected(daemon.handle.addr()).await;
+    // (4-CC, write) per widget half: SV off + full boost, DE off +
+    // amount 8, VL on + amount 10 — every value diverges from Music's
+    // boot state, so a stale registry can't pass.
+    let edits = [
+        ("vdhe", 0_i16),
+        ("dhsb", 96),
+        ("deon", 0),
+        ("dea", 8),
+        ("dvle", 1),
+        ("dvla", 10),
+    ];
+    for (index, (name, value)) in edits.iter().enumerate() {
+        send_json(
+            &mut ws,
+            &json!({
+                "cmd": "edit_profile",
+                "request_id": format!("rq-mc-{index}"),
+                "id": "music",
+                "params": { *name: [value] },
+            }),
+        )
+        .await;
+        assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    }
+
+    let names: Vec<&str> = edits.iter().map(|(name, _)| *name).collect();
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &names)
+        .expect("get_params");
+    for ((name, written), read) in edits.iter().zip(&values) {
+        assert_eq!(
+            read.as_slice(),
+            [*written],
+            "`{name}` must read back from the clamped registry"
+        );
+    }
 }
 
 /// Behavior 9 / tracer bullet (issue #19), plugin behaviors 2 + 3: a

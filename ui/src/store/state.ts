@@ -41,3 +41,27 @@ export function applyPower(on: boolean): void {
 export function applyProfile(id: string): void {
   setState('selected_profile', id)
 }
+
+/**
+ * Applies one of this tab's own profile edits. Short value arrays
+ * overlay the head of the param's full allocation — the daemon merges
+ * the same way (`Profile::splice`).
+ */
+export function applyProfileEdit(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  setState('profiles', (profiles) =>
+    profiles.map((profile) => {
+      if (profile.id !== id) return profile
+      const merged: Record<string, readonly number[]> = { ...profile.params }
+      for (const [name, values] of Object.entries(params)) {
+        merged[name] = [
+          ...values,
+          ...(profile.params[name] ?? []).slice(values.length),
+        ]
+      }
+      return { ...profile, params: merged }
+    }),
+  )
+}
