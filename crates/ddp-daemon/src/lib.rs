@@ -4,8 +4,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio_server;
 pub mod engine_supervisor;
 pub mod http_server;
+pub mod platform;
 pub(crate) mod ws_commands;
 pub mod ws_server;
 
@@ -44,6 +46,10 @@ pub struct DaemonConfig {
     pub daemon_dir: PathBuf,
     /// Where `config.toml` lives (platform data dir, or `--config-dir`).
     pub config_dir: PathBuf,
+    /// The plugin transport address — a Unix socket path or a Windows
+    /// pipe name. From `--socket-path`, defaulting to
+    /// [`platform::DEFAULT_SOCKET_PATH`].
+    pub socket_path: PathBuf,
 }
 
 /// Why the daemon refused to start. Malformed metadata or a missing UI
@@ -69,6 +75,14 @@ pub enum StartError {
     Bind {
         /// The requested port.
         port: u16,
+        /// The underlying I/O error.
+        source: std::io::Error,
+    },
+    /// The plugin socket (named pipe / Unix socket) could not be bound.
+    #[error("bind plugin socket {path}: {source}")]
+    BindSocket {
+        /// The requested address.
+        path: PathBuf,
         /// The underlying I/O error.
         source: std::io::Error,
     },
@@ -98,6 +112,26 @@ impl App {
     /// The current snapshot as wire JSON.
     pub(crate) async fn snapshot_json(&self) -> serde_json::Value {
         self.snapshot_json_of(&*self.state.read().await)
+    }
+
+    /// Mints a connection identity no other connection holds.
+    pub(crate) fn fresh_conn_id(&self) -> ConnId {
+        ConnId(
+            self.next_conn_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Broadcasts a full `state` snapshot to every WS connection — the
+    /// non-WS-mutation fan-out (ADR-0005), e.g. a main-session change
+    /// refreshing the `readouts`. The originator slot is a fresh
+    /// [`ConnId`], so nobody is excluded.
+    pub(crate) async fn broadcast_snapshot(&self) {
+        let event = ws_commands::WsEvent::State {
+            snapshot: self.snapshot_json().await,
+        }
+        .to_text();
+        let _ = self.updates.send((self.fresh_conn_id(), event.into()));
     }
 
     /// The full snapshot of `state` as wire JSON: user state (profiles
@@ -138,12 +172,13 @@ impl App {
     }
 }
 
-/// A running daemon: bound address + server task + engine seam.
+/// A running daemon: bound address + server tasks + engine seam.
 pub struct Daemon {
     addr: SocketAddr,
     supervisor: Arc<EngineSupervisor>,
     persistence: Arc<Persistence>,
     server: JoinHandle<()>,
+    audio_server: JoinHandle<std::convert::Infallible>,
 }
 
 impl Daemon {
@@ -212,7 +247,15 @@ impl Daemon {
             .await
             .map_err(bind_error)?;
         let addr = listener.local_addr().map_err(bind_error)?;
+        let plugins = platform::PluginListener::bind(&config.socket_path).map_err(|source| {
+            StartError::BindSocket {
+                path: config.socket_path.clone(),
+                source,
+            }
+        })?;
+        tracing::info!(socket = %config.socket_path.display(), "plugin socket bound");
 
+        let audio_server = tokio::spawn(audio_server::accept_loop(plugins, app.clone()));
         let router = http_server::router(app);
         let server = tokio::spawn(async move {
             if let Err(error) = axum::serve(listener, router).await {
@@ -225,6 +268,7 @@ impl Daemon {
             supervisor,
             persistence,
             server,
+            audio_server,
         })
     }
 
@@ -245,7 +289,9 @@ impl Daemon {
     /// graceful-shutdown path.
     pub async fn shutdown(self) {
         self.server.abort();
+        self.audio_server.abort();
         let _ = self.server.await;
+        let _ = self.audio_server.await;
         self.persistence.shutdown().await;
     }
 }

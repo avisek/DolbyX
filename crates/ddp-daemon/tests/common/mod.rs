@@ -6,6 +6,8 @@
 // Each tests/*.rs target compiles this module and uses a subset of it.
 #![allow(dead_code)]
 
+pub mod plugin;
+
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -36,6 +38,11 @@ impl TestDaemon {
     pub fn addr(&self) -> SocketAddr {
         self.handle.addr()
     }
+
+    /// The daemon's plugin socket address.
+    pub fn socket_path(&self) -> std::path::PathBuf {
+        socket_path_for(&self.dir)
+    }
 }
 
 /// Writes a daemon dir fixture: the shipped `parameters.toml` +
@@ -52,13 +59,32 @@ pub fn fixture_dir() -> TempDir {
 }
 
 /// The config a [`fixture_dir`] daemon runs with: ephemeral port,
-/// `config.toml` under `<dir>/data/`.
+/// `config.toml` under `<dir>/data/`, plugin socket per
+/// [`socket_path_for`].
 pub fn config_for(dir: &TempDir) -> DaemonConfig {
     DaemonConfig {
         port: 0,
         ui_path: dir.path().join("index.html"),
         daemon_dir: dir.path().to_path_buf(),
         config_dir: dir.path().join("data"),
+        socket_path: socket_path_for(dir),
+    }
+}
+
+/// The fixture's plugin socket address — deterministic per tempdir, so
+/// a daemon restarted over the same dir rebinds the same address. On
+/// Windows the tempdir's unique name keys the pipe (pipes share one
+/// global namespace; parallel tests must not collide).
+pub fn socket_path_for(dir: &TempDir) -> std::path::PathBuf {
+    let unique = dir
+        .path()
+        .file_name()
+        .expect("tempdir has a name")
+        .to_string_lossy();
+    if cfg!(windows) {
+        format!(r"\\.\pipe\dolbyx-test-{unique}").into()
+    } else {
+        dir.path().join("dolbyx.sock")
     }
 }
 
@@ -84,6 +110,17 @@ pub async fn start_daemon() -> TestDaemon {
     let dir = fixture_dir();
     let (handle, stub) = start_over(&dir).await;
     TestDaemon { handle, stub, dir }
+}
+
+/// Polls `condition` (up to 5 s) until it holds — the assertion
+/// primitive for effects the daemon lands asynchronously (e.g. session
+/// teardown after a disconnect it notices on its own).
+pub async fn wait_until(condition: impl Fn() -> bool, what: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !condition() {
+        assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// Polls `config.toml` (up to 3 s) until it holds `expected` — the
@@ -146,7 +183,9 @@ pub async fn connected(addr: SocketAddr) -> WsClient {
     ws
 }
 
-/// Issues `set_power` and consumes its `ack`.
+/// Issues `set_power` and awaits its `ack` promise-style (ADR-0005:
+/// replies aren't positionally paired) — pub/sub `state` events, e.g.
+/// a plugin connection's main-session broadcast, may interleave.
 pub async fn set_power(ws: &mut WsClient, on: bool) {
     let request_id = format!("rq-set-power-{on}");
     send_json(
@@ -154,9 +193,15 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
         &serde_json::json!({ "cmd": "set_power", "request_id": request_id, "on": on }),
     )
     .await;
-    let ack = recv_json(ws).await;
-    assert_eq!(ack["type"], "ack", "set_power must ack, got {ack}");
-    assert_eq!(ack["request_id"], request_id.as_str());
+    loop {
+        let frame = recv_json(ws).await;
+        if frame["type"] == "state" {
+            continue;
+        }
+        assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
+        assert_eq!(frame["request_id"], request_id.as_str());
+        return;
+    }
 }
 
 /// Sends one JSON text frame.

@@ -72,6 +72,8 @@ async fn sigterm_flushes_the_pending_write_and_exits_zero() {
         .arg(dir.path().join("index.html"))
         .arg("--config-dir")
         .arg(dir.path().join("data"))
+        .arg("--socket-path")
+        .arg(common::socket_path_for(&dir))
         .current_dir(dir.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

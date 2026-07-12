@@ -2,7 +2,6 @@
 //! command dispatch (with the `set_power` behavior), broadcast fan-out.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -13,11 +12,12 @@ use tokio::sync::broadcast;
 use crate::App;
 use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
 
-/// Internal identity of one WS connection — never on the wire; exists
+/// Internal identity of one connection — never on the wire; exists
 /// solely so the daemon can exclude the originator from `state`
-/// fan-outs (ADR-0005).
+/// fan-outs (ADR-0005). Non-WS mutations broadcast under a freshly
+/// minted id, which matches no connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ConnId(u64);
+pub(crate) struct ConnId(pub(crate) u64);
 
 /// `GET /ws`: upgrade and serve the connection.
 pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
@@ -27,7 +27,7 @@ pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<A
 /// One client connection: full snapshot first, then command dispatch
 /// interleaved with broadcast delivery.
 async fn connection(mut socket: WebSocket, app: Arc<App>) {
-    let conn_id = ConnId(app.next_conn_id.fetch_add(1, Ordering::Relaxed));
+    let conn_id = app.fresh_conn_id();
     let mut updates = app.updates.subscribe();
     if send(&mut socket, &state_event(&app).await).await.is_err() {
         return;

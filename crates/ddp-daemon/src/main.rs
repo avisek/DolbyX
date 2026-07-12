@@ -25,6 +25,11 @@ struct Args {
     /// platform data dir.
     #[arg(long)]
     config_dir: Option<PathBuf>,
+    /// Plugin socket override for tests/dev (Unix socket path / Windows
+    /// pipe name); defaults to the platform address
+    /// (`/run/dolbyx/dolbyx.sock`, `\\.\pipe\DolbyX`).
+    #[arg(long, default_value = ddp_daemon::platform::DEFAULT_SOCKET_PATH)]
+    socket_path: PathBuf,
     /// Backend binding the `Engine` trait. The default is the real
     /// engine (issue #16); `stub` fabricates replies — inner-loop
     /// dev/tests only.
@@ -143,6 +148,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         ui_path: args.ui.unwrap_or_else(|| daemon_dir.join("index.html")),
         daemon_dir,
         config_dir: args.config_dir.unwrap_or_else(platform_config_dir),
+        socket_path: args.socket_path,
     };
 
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -163,6 +169,8 @@ mod tests {
 
     /// Behavior 1 (issue #12): the daemon binds :9876 by default.
     /// Slice 08 (issue #16): the default backend is the real engine.
+    /// Slice 11 (issue #19): the plugin socket defaults to the platform
+    /// address.
     #[test]
     fn the_default_port_is_9876_and_the_default_backend_is_qemu() {
         let args = Args::try_parse_from(["ddp-daemon"]).unwrap();
@@ -170,6 +178,10 @@ mod tests {
         assert_eq!(args.ui, None);
         assert_eq!(args.config_dir, None);
         assert_eq!(args.backend, super::BackendKind::Qemu);
+        assert_eq!(
+            args.socket_path,
+            std::path::PathBuf::from(ddp_daemon::platform::DEFAULT_SOCKET_PATH)
+        );
 
         let stubbed = Args::try_parse_from(["ddp-daemon", "--backend", "stub"]).unwrap();
         assert_eq!(stubbed.backend, super::BackendKind::Stub);
