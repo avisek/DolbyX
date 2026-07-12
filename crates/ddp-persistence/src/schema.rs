@@ -408,19 +408,23 @@ fn toml_string(value: &str) -> String {
     out
 }
 
+fn toml_array(values: &[i16]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 /// A stored param as TOML: single values as bare scalars, band arrays
 /// as arrays.
 fn toml_values(values: &[i16]) -> String {
     match values {
         [value] => value.to_string(),
-        values => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        values => toml_array(values),
     }
 }
 
@@ -428,14 +432,7 @@ fn toml_values(values: &[i16]) -> String {
 fn toml_param(value: &ParamValue) -> String {
     match value {
         ParamValue::One(value) => value.to_string(),
-        ParamValue::Many(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        ParamValue::Many(values) => toml_array(values),
     }
 }
 
@@ -538,36 +535,27 @@ dvla = 4
     #[test]
     fn rejects_malformed_or_invalid_defaults() {
         let cases = [
-            ("power = true\n", "selected_profile"),
-            ("power = tru", "expected"),
+            ("power = true\n".to_string(), "selected_profile"),
+            ("power = tru".to_string(), "expected"),
+            (DEFAULTS.replace("power = true", "power = true\nx = 1"), "x"),
+            (DEFAULTS.replace("dvla = 4", "dvla = 11"), "outside"),
+            (DEFAULTS.replace("dvla = 4", "vnnb = 5"), "read-only"),
             (
-                DEFAULTS
-                    .replace("power = true", "power = true\nx = 1")
-                    .leak(),
-                "x",
-            ),
-            (DEFAULTS.replace("dvla = 4", "dvla = 11").leak(), "outside"),
-            (DEFAULTS.replace("dvla = 4", "vnnb = 5").leak(), "read-only"),
-            (
-                DEFAULTS.replace("dvla = 4", "mxou = 1").leak(),
+                DEFAULTS.replace("dvla = 4", "mxou = 1"),
                 "unknown parameter",
             ),
-            (DEFAULTS.replace("dvla = 4", "dvla = 40000").leak(), "i16"),
-            (DEFAULTS.replace("name = \"Movie\"\n", "").leak(), "name"),
+            (DEFAULTS.replace("dvla = 4", "dvla = 40000"), "i16"),
+            (DEFAULTS.replace("name = \"Movie\"\n", ""), "name"),
             (
-                DEFAULTS
-                    .replace("selected_profile = \"music\"", "selected_profile = \"x\"")
-                    .leak(),
+                DEFAULTS.replace("selected_profile = \"music\"", "selected_profile = \"x\""),
                 "names no profile",
             ),
             (
-                DEFAULTS
-                    .replace("[profile.movie]", "[eq_preset.rich]")
-                    .leak(),
+                DEFAULTS.replace("[profile.movie]", "[eq_preset.rich]"),
                 "Slice 15",
             ),
         ];
-        for (document, needle) in cases {
+        for (document, needle) in &cases {
             let error = parse_defaults(document, &defs()).unwrap_err().to_string();
             assert!(
                 error.contains("defaults.toml") && error.contains(needle),
