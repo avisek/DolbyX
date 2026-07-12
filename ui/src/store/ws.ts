@@ -4,7 +4,7 @@
  */
 import { createSignal } from 'solid-js'
 import { WsClient } from '../lib/ws'
-import { applyPower, applySnapshot } from './state'
+import { applyPower, applyProfile, applySnapshot } from './state'
 
 const [connected, setConnected] = createSignal(false)
 
@@ -46,5 +46,22 @@ export function setPower(on: boolean): void {
     .catch(() => {
       // Rejected or errored — the client's get_state reconcile restores
       // daemon truth; the toggle simply never moved.
+    })
+}
+
+/**
+ * Local-first `set_profile`: sends the switch, applies the selection
+ * when the daemon acks it — the daemon has already pushed the profile's
+ * full resolved set to the engine in one atomic batch.
+ */
+export function setProfile(id: string): void {
+  void client
+    ?.request({ cmd: 'set_profile', id })
+    .then(() => {
+      applyProfile(id)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth; the
+      // selection simply never moved.
     })
 }

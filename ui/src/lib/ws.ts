@@ -4,10 +4,23 @@
  * engine-native i16 1/16-dB throughout; params travel by 4-CC name.
  */
 
+/** One profile as the snapshot carries it — complete, cascade-resolved. */
+export interface Profile {
+  readonly id: string
+  readonly name: string
+  /** Factory items reset instead of delete/rename. */
+  readonly is_factory: boolean
+  /** `null` ⇒ the profile's own EQ params apply (presets: Slice 15). */
+  readonly selected_eq_preset: string | null
+  /** Every writable param, keyed by 4-CC, in engine-native i16. */
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
 /** Mirror of the WS `state` event's snapshot. */
 export interface StateSnapshot {
   readonly power: boolean
   readonly selected_profile: string
+  readonly profiles: readonly Profile[]
   /** The 8 ReadOnly-Static values, keyed by 4-CC. */
   readonly readouts: Readonly<Record<string, readonly number[]>>
 }
@@ -16,6 +29,7 @@ export interface StateSnapshot {
 export type Command =
   | { readonly cmd: 'get_state' }
   | { readonly cmd: 'set_power'; readonly on: boolean }
+  | { readonly cmd: 'set_profile'; readonly id: string }
 
 /** A daemon → client event frame. */
 export type ServerEvent =

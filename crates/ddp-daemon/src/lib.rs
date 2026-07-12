@@ -100,10 +100,11 @@ impl App {
         self.snapshot_json_of(&*self.state.read().await)
     }
 
-    /// The full snapshot of `state` as wire JSON: user state + the
-    /// `readouts` map — the 8 ReadOnly-Static values live from the
-    /// main session, `ParameterDef.default` while zero sessions (or
-    /// for a dead ref the engine reads empty).
+    /// The full snapshot of `state` as wire JSON: user state (profiles
+    /// complete, params keyed by 4-CC) + the `readouts` map — the 8
+    /// ReadOnly-Static values live from the main session,
+    /// `ParameterDef.default` while zero sessions (or for a dead ref
+    /// the engine reads empty).
     pub(crate) fn snapshot_json_of(&self, state: &State) -> serde_json::Value {
         let live = self.supervisor.readouts();
         let readouts: serde_json::Map<String, serde_json::Value> = self
@@ -115,9 +116,23 @@ impl App {
                 (def.name.clone(), serde_json::json!(value))
             })
             .collect();
+        let profiles: Vec<serde_json::Value> = state
+            .profiles
+            .iter()
+            .map(|profile| {
+                serde_json::json!({
+                    "id": profile.id,
+                    "name": profile.name,
+                    "is_factory": profile.is_factory,
+                    "selected_eq_preset": profile.selected_eq_preset,
+                    "params": profile.params,
+                })
+            })
+            .collect();
         serde_json::json!({
             "power": state.power,
             "selected_profile": state.selected_profile,
+            "profiles": profiles,
             "readouts": readouts,
         })
     }
@@ -151,24 +166,31 @@ impl Daemon {
         };
 
         let params = ddp_state::parse(&read(config.daemon_dir.join("parameters.toml"))?)?;
-        let defaults =
-            ddp_persistence::parse_defaults(&read(config.daemon_dir.join("defaults.toml"))?)?;
+        let defaults = ddp_persistence::parse_defaults(
+            &read(config.daemon_dir.join("defaults.toml"))?,
+            &params,
+        )?;
         // Refuse-to-start probe; served requests re-read from disk.
         let _ = read(config.ui_path.clone())?;
 
-        let persistence = Arc::new(Persistence::open(&config.config_dir, defaults)?);
+        let persistence = Arc::new(Persistence::open(
+            &config.config_dir,
+            defaults,
+            params.clone(),
+        )?);
         let state = persistence.load();
         let readout_names = params
             .iter()
             .filter(|def| def.access == ddp_state::ParamAccess::ReadOnlyStatic)
             .map(|def| def.name.clone())
             .collect();
-        // Resolved active profile: `State` resolves no params before
-        // Slice 10 (#18), so sessions init on engine power-on defaults.
+        // Session init pushes the selected profile's full resolved set —
+        // the commit-leaf touch reshapes the engine's 10-band power-on
+        // state to the 20-band config in that same write.
         let supervisor = Arc::new(EngineSupervisor::new(
             engine,
             state.power,
-            Vec::new(),
+            state.resolved_batch(&params),
             readout_names,
         ));
         let app = Arc::new(App {

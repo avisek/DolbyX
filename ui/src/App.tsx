@@ -1,9 +1,10 @@
 import type { Component } from 'solid-js'
 import ConnectionBadge from './components/ConnectionBadge'
 import PowerToggle from './components/PowerToggle'
+import ProfileTabs from './components/ProfileTabs'
 import './App.css'
 
-/** Root shell — the tracer bullet's control surface (Slice 05, #13). */
+/** Root shell — power, profiles, connection (Slices 05 #13, 10 #18). */
 const App: Component = () => (
   <main class="app">
     <header class="app__header">
@@ -11,6 +12,7 @@ const App: Component = () => (
       <ConnectionBadge />
     </header>
     <PowerToggle />
+    <ProfileTabs />
   </main>
 )
 

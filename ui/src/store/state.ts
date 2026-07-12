@@ -16,6 +16,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 const inert: StateSnapshot = {
   power: false,
   selected_profile: '',
+  profiles: [],
   readouts: {},
 }
 
@@ -34,4 +35,9 @@ export function applySnapshot(snapshot: StateSnapshot): void {
 /** Applies the originator's own acked power flip (local-first). */
 export function applyPower(on: boolean): void {
   setState('power', on)
+}
+
+/** Applies the originator's own acked profile switch (local-first). */
+export function applyProfile(id: string): void {
+  setState('selected_profile', id)
 }

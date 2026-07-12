@@ -1,5 +1,16 @@
 import type { Bootstrap } from '../lib/bootstrap'
-import type { StateSnapshot } from '../lib/ws'
+import type { Profile, StateSnapshot } from '../lib/ws'
+
+/** One factory profile as the snapshot carries it. */
+function factoryProfile(id: string, name: string): Profile {
+  return {
+    id,
+    name,
+    is_factory: true,
+    selected_eq_preset: null,
+    params: { dvla: [4] },
+  }
+}
 
 /** A daemon-truthful state snapshot (values from `defaults.toml`). */
 export function fixtureState(
@@ -8,6 +19,12 @@ export function fixtureState(
   return {
     power: true,
     selected_profile: 'music',
+    profiles: [
+      factoryProfile('movie', 'Movie'),
+      factoryProfile('music', 'Music'),
+      factoryProfile('game', 'Game'),
+      factoryProfile('voice', 'Voice'),
+    ],
     readouts: { vnnb: [20] },
     ...overrides,
   }

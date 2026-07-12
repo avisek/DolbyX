@@ -1,9 +1,9 @@
 //! TOML overlay persistence: defaults/config cascade, debounced
 //! write-back, file watcher (ADR-0007).
 //!
-//! Root keys this slice; the full cascade lands in Slice 10
-//! ([#18](https://github.com/avisek/DolbyX/issues/18)), the watcher in
-//! Slice 19 ([#27](https://github.com/avisek/DolbyX/issues/27)).
+//! The full five-layer cascade is here (Slice 10,
+//! [#18](https://github.com/avisek/DolbyX/issues/18)); the watcher
+//! lands in Slice 19 ([#27](https://github.com/avisek/DolbyX/issues/27)).
 
 #![forbid(unsafe_code)]
 
@@ -12,7 +12,7 @@ pub mod schema;
 
 use std::path::{Path, PathBuf};
 
-use ddp_state::{Defaults, State};
+use ddp_state::{Defaults, ParameterDef, State};
 use tokio::sync::{mpsc, oneshot};
 
 pub use debounce::DEBOUNCE;
@@ -23,13 +23,14 @@ use crate::debounce::Msg;
 /// Why persistence failed to load or parse.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// `defaults.toml` is malformed — the daemon refuses to start.
+    /// `defaults.toml` is malformed or fails validation — the daemon
+    /// refuses to start.
     #[error("defaults.toml: {0}")]
-    Defaults(toml::de::Error),
-    /// `config.toml` is malformed — the daemon refuses to start rather
-    /// than silently discard user state.
+    Defaults(String),
+    /// `config.toml` is malformed or fails validation — the daemon
+    /// refuses to start rather than silently discard user state.
     #[error("config.toml: {0}")]
-    Config(toml::de::Error),
+    Config(String),
     /// The config dir or `config.toml` itself is not usable.
     #[error("{path}: {source}")]
     Io {
@@ -44,6 +45,7 @@ pub enum Error {
 /// debounced write-back, flush on shutdown.
 pub struct Persistence {
     defaults: Defaults,
+    defs: Vec<ParameterDef>,
     overlay: ConfigOverlay,
     tx: mpsc::UnboundedSender<Msg>,
 }
@@ -52,6 +54,8 @@ impl Persistence {
     /// Opens the config dir (creating it and an empty `config.toml` on a
     /// fresh install — the watcher and hand-editing need the file to
     /// exist), reads the overlay, and starts the debounced writer.
+    /// `defs` is the `ParameterDef` table every stored param validates
+    /// against.
     ///
     /// Must run inside a tokio runtime.
     ///
@@ -60,7 +64,11 @@ impl Persistence {
     /// [`Error::Io`] when the dir or file is not usable;
     /// [`Error::Config`] when the overlay is malformed (refuse to start
     /// rather than silently discard user state).
-    pub fn open(config_dir: &Path, defaults: Defaults) -> Result<Self, Error> {
+    pub fn open(
+        config_dir: &Path,
+        defaults: Defaults,
+        defs: Vec<ParameterDef>,
+    ) -> Result<Self, Error> {
         let io = |path: &Path| {
             let path = path.to_path_buf();
             move |source| Error::Io { path, source }
@@ -71,27 +79,29 @@ impl Persistence {
             std::fs::write(&config_path, "").map_err(io(&config_path))?;
         }
         let document = std::fs::read_to_string(&config_path).map_err(io(&config_path))?;
-        let overlay = parse_config(&document)?;
+        let overlay = parse_config(&document, &defs, &defaults)?;
         let (tx, rx) = mpsc::unbounded_channel();
         drop(tokio::spawn(debounce::writer(config_path, rx)));
         Ok(Self {
             defaults,
+            defs,
             overlay,
             tx,
         })
     }
 
     /// The state this boot runs: the `config.toml` overlay resolved
-    /// over the factory defaults.
+    /// over the factory defaults, every profile complete.
     #[must_use]
     pub fn load(&self) -> State {
         resolve(&self.defaults, &self.overlay)
     }
 
-    /// Queues a debounced write-back of `state`'s divergence from
-    /// factory (500 ms shared window; factory-matching fields omitted).
+    /// Queues a debounced write-back of `state`'s divergence from what
+    /// resolves beneath it (500 ms shared window; per-item write-back,
+    /// hand-edited shared layers preserved verbatim).
     pub fn flush(&self, state: &State) {
-        let document = serialize_overlay(state, &self.defaults);
+        let document = serialize_overlay(state, &self.defaults, &self.overlay, &self.defs);
         let _ = self.tx.send(Msg::Write(document));
     }
 
