@@ -97,10 +97,14 @@ impl PluginMessage {
                 let frames = u32::try_from(pcm.len() / 2).expect("bounded by MAX_FRAME_BYTES");
                 let mut payload = Vec::with_capacity(4 + pcm.len() * 2);
                 payload.extend_from_slice(&frames.to_le_bytes());
-                payload.extend(pcm.iter().flat_map(|sample| sample.to_le_bytes()));
+                push_pcm(&mut payload, pcm);
                 (OP_PROCESS, payload)
             }
-            Self::Processed { ref pcm } => (OP_PROCESSED, encode_pcm(pcm)),
+            Self::Processed { ref pcm } => {
+                let mut payload = Vec::with_capacity(pcm.len() * 2);
+                push_pcm(&mut payload, pcm);
+                (OP_PROCESSED, payload)
+            }
             Self::Goodbye => (OP_GOODBYE, Vec::new()),
         }
     }
@@ -163,9 +167,9 @@ impl PluginMessage {
     }
 }
 
-/// Interleaved PCM16 samples → their little-endian wire bytes.
-fn encode_pcm(pcm: &[i16]) -> Vec<u8> {
-    pcm.iter().flat_map(|sample| sample.to_le_bytes()).collect()
+/// Appends interleaved PCM16 samples as their little-endian wire bytes.
+fn push_pcm(payload: &mut Vec<u8>, pcm: &[i16]) {
+    payload.extend(pcm.iter().flat_map(|sample| sample.to_le_bytes()));
 }
 
 /// Little-endian bytes → interleaved PCM16 samples (size pre-checked).
@@ -221,7 +225,8 @@ async fn serve_plugin<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, app: Arc
     }
     // Host-side validation (Slice 08) rejects engine-footgun rates
     // inside `create_session` — the engine never sees a bad rate.
-    let session = match create_session(&app, sample_rate).await {
+    let created = with_main_watch(&app, || app.supervisor.create_session(sample_rate)).await;
+    let session = match created {
         Ok(session) => session,
         Err(error) => {
             tracing::warn!(%error, sample_rate, "plugin Hello rejected");
@@ -246,7 +251,9 @@ async fn serve_plugin<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, app: Arc
     {
         pump(&mut stream, &app, session, max_frames).await;
     }
-    destroy_session(&app, session).await;
+    if let Err(error) = with_main_watch(&app, || app.supervisor.destroy_session(session)).await {
+        tracing::warn!(%error, session = session.0, "session teardown failed");
+    }
     tracing::info!(session = session.0, "plugin disconnected");
 }
 
@@ -260,6 +267,7 @@ async fn pump<S: AsyncRead + AsyncWrite + Unpin>(
     max_frames: u32,
 ) {
     let mut output = Vec::new();
+    let mut reply = Vec::new();
     loop {
         let message = match read_plugin_message(stream).await {
             Ok(Some((opcode, payload))) => PluginMessage::decode(opcode, &payload),
@@ -273,7 +281,9 @@ async fn pump<S: AsyncRead + AsyncWrite + Unpin>(
                     // The vis tail feeds the `vis` event stream in
                     // Slice 16 (#24); here the plugin only needs PCM.
                     Ok(_vis) => {
-                        if write_plugin_message(stream, OP_PROCESSED, &encode_pcm(&output))
+                        reply.clear();
+                        push_pcm(&mut reply, &output);
+                        if write_plugin_message(stream, OP_PROCESSED, &reply)
                             .await
                             .is_err()
                         {
@@ -315,32 +325,17 @@ async fn send(
     write_plugin_message(stream, opcode, &payload).await
 }
 
-/// `EngineSupervisor::create_session`, broadcasting a fresh snapshot
-/// when the main session changed (a first session fills the
-/// `readouts`).
-async fn create_session(
-    app: &App,
-    sample_rate: u32,
-) -> crate::engine_supervisor::Result<SessionId> {
+/// Runs one session-table mutation, broadcasting a fresh snapshot when
+/// the main session changed under it — a first session fills the
+/// `readouts`, a handover re-reads them, the last death clears them
+/// back to defaults.
+async fn with_main_watch<T>(app: &App, mutation: impl FnOnce() -> T) -> T {
     let before = app.supervisor.main_session();
-    let result = app.supervisor.create_session(sample_rate);
+    let result = mutation();
     if app.supervisor.main_session() != before {
         app.broadcast_snapshot().await;
     }
     result
-}
-
-/// `EngineSupervisor::destroy_session`, broadcasting a fresh snapshot
-/// when the main session changed (a handover re-read the `readouts`;
-/// the last death cleared them back to defaults).
-async fn destroy_session(app: &App, session: SessionId) {
-    let before = app.supervisor.main_session();
-    if let Err(error) = app.supervisor.destroy_session(session) {
-        tracing::warn!(%error, session = session.0, "session teardown failed");
-    }
-    if app.supervisor.main_session() != before {
-        app.broadcast_snapshot().await;
-    }
 }
 
 /// Sends one framed plugin-protocol message.

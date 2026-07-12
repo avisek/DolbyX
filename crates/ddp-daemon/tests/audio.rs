@@ -10,7 +10,7 @@ mod common;
 use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
-use common::{connected, recv_json, set_power, socket_path_for, start_daemon};
+use common::{connected, recv_json, set_power, socket_path_for, start_daemon, wait_until};
 use ddp_engine::{Call, Engine, EngineError, SessionId, StubBackend};
 use serde_json::json;
 
@@ -23,17 +23,6 @@ fn tone(seed: i16) -> Vec<i16> {
 /// The stub's marker transform — what an enabled session returns.
 fn marked(pcm: &[i16]) -> Vec<i16> {
     pcm.iter().map(|sample| !sample).collect()
-}
-
-/// Polls `condition` (up to 3 s) until it holds — the assertion
-/// primitive for cleanup the daemon performs after a disconnect it
-/// notices asynchronously.
-async fn wait_until(condition: impl Fn() -> bool, what: &str) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
-    while !condition() {
-        assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
 }
 
 /// Behavior 1: the daemon binds the platform socket — the Unix socket
@@ -86,13 +75,19 @@ async fn hello_creates_an_engine_session_at_the_plugins_rate() {
     assert_eq!(second.hello(44_100, 256).await, 1, "each Hello a fresh id");
 }
 
-/// Behavior 3: `Process` frames round-trip — power on transforms
-/// (processed PCM ≠ input), power off bypasses (`OUT == IN`).
+/// Behavior 3 + the tracer bullet: `Process` frames round-trip — power
+/// on transforms (processed PCM ≠ input; silence returns the stub's
+/// marker, issue #12's contract), power off bypasses (`OUT == IN`).
 #[tokio::test]
 async fn process_round_trips_and_power_off_bypasses() {
     let daemon = start_daemon().await;
     let mut plugin = SyntheticPlugin::connect(&daemon.socket_path()).await;
     plugin.hello(48_000, 512).await;
+
+    // The tracer bullet's silence frames: the marker (bitwise NOT)
+    // proves the block really crossed the engine — !0 == -1.
+    let silence = vec![0_i16; 64];
+    assert_eq!(plugin.process(&silence).await, marked(&silence));
 
     let tone = tone(3);
     let processed = plugin.process(&tone).await;

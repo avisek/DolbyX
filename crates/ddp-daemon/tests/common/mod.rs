@@ -112,6 +112,17 @@ pub async fn start_daemon() -> TestDaemon {
     TestDaemon { handle, stub, dir }
 }
 
+/// Polls `condition` (up to 5 s) until it holds — the assertion
+/// primitive for effects the daemon lands asynchronously (e.g. session
+/// teardown after a disconnect it notices on its own).
+pub async fn wait_until(condition: impl Fn() -> bool, what: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !condition() {
+        assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 /// Polls `config.toml` (up to 3 s) until it holds `expected` — the
 /// debounced write-back assertion primitive.
 pub async fn assert_config_becomes(path: &Path, expected: &str) {

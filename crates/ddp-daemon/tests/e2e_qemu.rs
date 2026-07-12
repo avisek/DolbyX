@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
 use common::{
-    assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for, ws_connect,
+    assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for, wait_until,
+    ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -390,24 +391,42 @@ async fn goodbye_and_disconnect_destroy_real_sessions() {
     assert_eq!(supervisor.main_session(), Some(session_a));
 
     a.goodbye().await;
-    wait_for_main(supervisor, Some(session_b), "Goodbye hands main over").await;
+    wait_until(
+        || supervisor.main_session() == Some(session_b),
+        "Goodbye hands main over",
+    )
+    .await;
 
     drop(b); // no Goodbye — the host crashed / killed the plugin
-    wait_for_main(supervisor, None, "abrupt disconnect destroys").await;
+    wait_until(
+        || supervisor.main_session().is_none(),
+        "abrupt disconnect destroys",
+    )
+    .await;
 }
 
-/// Polls (up to 5 s) until the main session is `expected` — teardown
-/// after a disconnect lands asynchronously.
-async fn wait_for_main(
-    supervisor: &ddp_daemon::EngineSupervisor,
-    expected: Option<SessionId>,
-    what: &str,
-) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while supervisor.main_session() != expected {
-        assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+/// Behavior 8 (issue #19) against the real validation: a `Hello` rate
+/// outside the engine's set trips Slice 08's host-side check — a
+/// `Goodbye`, the connection closed, and the daemon healthy.
+#[tokio::test]
+async fn an_invalid_hello_rate_is_rejected_by_the_real_validation() {
+    let daemon = start_qemu_daemon().await;
+    let socket = socket_path_for(&daemon.dir);
+    SyntheticPlugin::connect(&socket)
+        .await
+        .hello_rejected(96_000, 256)
+        .await;
+    assert_eq!(
+        daemon.handle.supervisor().main_session(),
+        None,
+        "nothing was created"
+    );
+
+    // The daemon is healthy: the next plugin connects and processes.
+    let mut ok = SyntheticPlugin::connect(&socket).await;
+    ok.hello(48_000, 256).await;
+    let block = test_block();
+    assert_eq!(ok.process(&block).await.len(), block.len());
 }
 
 /// Behavior 6 (issue #16): a session created while power is off starts

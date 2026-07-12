@@ -15,6 +15,7 @@ pub type PluginStream = NamedPipeServer;
 
 /// The named-pipe plugin listener: always holds one idle server
 /// instance so a client's connect never races the next `accept`.
+#[derive(Debug)]
 pub struct PluginListener {
     address: String,
     next: NamedPipeServer,
