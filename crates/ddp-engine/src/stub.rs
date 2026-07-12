@@ -4,9 +4,11 @@
 //! contract is pinned for every later slice: enabled → deterministic
 //! marker transform (bitwise NOT — ferried audio stays distinguishable
 //! from dry passthrough), disabled → echo (bypass identity), vis tail
-//! fabricated.
+//! fabricated. A failure plan ([`StubBackend::fail_next`] /
+//! [`StubBackend::fail_forever`]) injects backend failures for the
+//! supervisor's recovery paths.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use crate::{Engine, EngineError, Result, SessionId, VisFrame};
@@ -52,6 +54,23 @@ struct Inner {
     /// Each new session's power-on registry (the real engine boots
     /// with a populated AK registry, not an empty one).
     seed: Vec<(String, Vec<i16>)>,
+    /// Failure plan, consumed one entry per call; empty ⇒ succeed.
+    plan: VecDeque<Option<EngineError>>,
+    /// Once set, every call past the plan fails with this — a dead
+    /// engine no recovery can bring back.
+    dead: Option<EngineError>,
+}
+
+impl Inner {
+    /// Applies the failure plan to the current call. A planned failure
+    /// consumes the call — it is never recorded.
+    fn check(&mut self) -> Result<()> {
+        match self.plan.pop_front() {
+            Some(Some(error)) => Err(error),
+            Some(None) => Ok(()),
+            None => self.dead.clone().map_or(Ok(()), Err),
+        }
+    }
 }
 
 impl StubBackend {
@@ -83,11 +102,42 @@ impl StubBackend {
     pub fn calls(&self) -> Vec<Call> {
         self.inner.lock().expect("stub lock").calls.clone()
     }
+
+    /// Lets the next `n` calls through before any queued failure.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the stub lock is not poisoned.
+    pub fn ok_calls(&self, n: usize) {
+        let mut inner = self.inner.lock().expect("stub lock");
+        inner.plan.extend((0..n).map(|_| None));
+    }
+
+    /// Queues `error` for the call after the plan queued so far.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the stub lock is not poisoned.
+    pub fn fail_next(&self, error: EngineError) {
+        let mut inner = self.inner.lock().expect("stub lock");
+        inner.plan.push_back(Some(error));
+    }
+
+    /// Fails every call past the queued plan with `error`, forever.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the stub lock is not poisoned.
+    pub fn fail_forever(&self, error: EngineError) {
+        let mut inner = self.inner.lock().expect("stub lock");
+        inner.dead = Some(error);
+    }
 }
 
 impl Engine for StubBackend {
     fn create_session(&self, sample_rate: u32) -> Result<SessionId> {
         let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         let id = SessionId(inner.next_id);
         inner.next_id += 1;
         let session = Session {
@@ -101,6 +151,7 @@ impl Engine for StubBackend {
 
     fn destroy_session(&self, id: SessionId) -> Result<()> {
         let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         inner
             .sessions
             .remove(&id)
@@ -111,6 +162,7 @@ impl Engine for StubBackend {
 
     fn set_enabled(&self, id: SessionId, enabled: bool) -> Result<()> {
         let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         inner
             .sessions
             .get_mut(&id)
@@ -122,6 +174,7 @@ impl Engine for StubBackend {
 
     fn set_params(&self, id: SessionId, params: &[(&str, &[i16])]) -> Result<()> {
         let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         let session = inner
             .sessions
             .get_mut(&id)
@@ -138,7 +191,8 @@ impl Engine for StubBackend {
     }
 
     fn get_params(&self, id: SessionId, names: &[&str]) -> Result<Vec<Vec<i16>>> {
-        let inner = self.inner.lock().expect("stub lock");
+        let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         let session = inner
             .sessions
             .get(&id)
@@ -155,7 +209,8 @@ impl Engine for StubBackend {
             output.len(),
             "process contract: output buffer mirrors input"
         );
-        let inner = self.inner.lock().expect("stub lock");
+        let mut inner = self.inner.lock().expect("stub lock");
+        inner.check()?;
         let session = inner
             .sessions
             .get(&id)
@@ -302,6 +357,30 @@ mod tests {
             ],
             "batches are recorded verbatim, empty batches included"
         );
+    }
+
+    #[test]
+    fn the_failure_plan_fails_calls_in_order_then_forever() {
+        let stub = StubBackend::new();
+        let id = stub.create_session(48000).unwrap();
+
+        stub.ok_calls(1);
+        stub.fail_next(EngineError::Crashed("killed".into()));
+        stub.set_enabled(id, true).unwrap();
+        assert_eq!(
+            stub.set_enabled(id, false),
+            Err(EngineError::Crashed("killed".into()))
+        );
+        stub.set_enabled(id, false).unwrap();
+        assert_eq!(
+            stub.calls().last(),
+            Some(&Call::SetEnabled(id, false)),
+            "planned failures are not recorded"
+        );
+
+        stub.fail_forever(EngineError::Crashed("engine gone".into()));
+        assert!(stub.create_session(44100).is_err());
+        assert!(stub.set_enabled(id, true).is_err(), "dead stays dead");
     }
 
     #[test]

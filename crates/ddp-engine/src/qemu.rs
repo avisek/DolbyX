@@ -33,8 +33,8 @@ const SUPPORTED_RATES: [u32; 3] = [44_100, 48_000, 32_000];
 /// Samples in the fixed vis tail (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`).
 const VIS_TAIL_SAMPLES: usize = 80;
 
-/// The engine subprocess's pipes, live while the process is.
-struct Io {
+/// The live engine subprocess: the child plus its protocol pipes.
+struct Subprocess {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
@@ -44,7 +44,7 @@ struct Io {
 pub struct QemuBackend {
     engine_dir: PathBuf,
     /// `None` between a detected crash and the next call's respawn.
-    io: Mutex<Option<Io>>,
+    subprocess: Mutex<Option<Subprocess>>,
 }
 
 impl QemuBackend {
@@ -66,11 +66,11 @@ impl QemuBackend {
     pub fn start(engine_dir: impl Into<PathBuf>) -> io::Result<Self> {
         let backend = Self {
             engine_dir: engine_dir.into(),
-            io: Mutex::new(None),
+            subprocess: Mutex::new(None),
         };
-        let mut io = backend.spawn()?;
-        probe(&mut io)?;
-        *backend.io.lock().expect("backend lock") = Some(io);
+        let mut shim = backend.spawn()?;
+        probe(&mut shim)?;
+        *backend.subprocess.lock().expect("backend lock") = Some(shim);
         Ok(backend)
     }
 
@@ -82,16 +82,16 @@ impl QemuBackend {
     /// Never in practice: the backend lock is not poisoned.
     #[must_use]
     pub fn pid(&self) -> Option<u32> {
-        self.io
+        self.subprocess
             .lock()
             .expect("backend lock")
             .as_ref()
-            .map(|io| io.child.id())
+            .map(|shim| shim.child.id())
     }
 
     /// Spawns a fresh subprocess, wiring its stderr (the engine log)
     /// into `tracing`.
-    fn spawn(&self) -> io::Result<Io> {
+    fn spawn(&self) -> io::Result<Subprocess> {
         let mut child = shim_command(&self.engine_dir).spawn().map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -102,7 +102,7 @@ impl QemuBackend {
         let stdout = child.stdout.take().expect("stdout is piped");
         forward_engine_log(child.stderr.take().expect("stderr is piped"));
         tracing::info!(pid = child.id(), "engine subprocess spawned");
-        Ok(Io {
+        Ok(Subprocess {
             child,
             stdin,
             stdout,
@@ -113,15 +113,15 @@ impl QemuBackend {
     /// subprocess first. Any pipe failure reaps the process and
     /// surfaces [`EngineError::Crashed`]; the next call respawns.
     fn call(&self, command: &Command) -> Result<(i32, Vec<u8>)> {
-        let mut guard = self.io.lock().expect("backend lock");
+        let mut guard = self.subprocess.lock().expect("backend lock");
         if guard.is_none() {
-            let io = self
+            let shim = self
                 .spawn()
                 .map_err(|error| EngineError::Crashed(error.to_string()))?;
-            *guard = Some(io);
+            *guard = Some(shim);
         }
-        let io = guard.as_mut().expect("spawned above");
-        round_trip(io, command).map_err(|error| {
+        let shim = guard.as_mut().expect("spawned above");
+        round_trip(shim, command).map_err(|error| {
             reap(&mut guard);
             tracing::error!(%error, "engine subprocess lost");
             EngineError::Crashed(error.to_string())
@@ -131,7 +131,7 @@ impl QemuBackend {
     /// A reply that doesn't fit its layout means the stream is
     /// desynced — unrecoverable: reap now, respawn on the next call.
     fn desync(&self, context: &str) -> EngineError {
-        reap(&mut self.io.lock().expect("backend lock"));
+        reap(&mut self.subprocess.lock().expect("backend lock"));
         tracing::error!(context, "engine protocol desync");
         EngineError::Crashed(format!("protocol desync: {context}"))
     }
@@ -236,7 +236,7 @@ impl Drop for QemuBackend {
         // The shim holds no state worth a graceful goodbye, and kill
         // (unlike waiting on a closed stdin) can't hang the daemon's
         // shutdown on a wedged process.
-        reap(self.io.get_mut().expect("backend lock"));
+        reap(self.subprocess.get_mut().expect("backend lock"));
     }
 }
 
@@ -259,9 +259,9 @@ fn shim_command(engine_dir: &Path) -> ProcessCommand {
 /// One create/destroy round trip — proves qemu ran, the shim loaded
 /// `libdseffect.so`, and the protocol answers (a broken staging
 /// otherwise looks like a clean exit).
-fn probe(io: &mut Io) -> io::Result<()> {
+fn probe(shim: &mut Subprocess) -> io::Result<()> {
     let (status, reply) = round_trip(
-        io,
+        shim,
         &Command::CreateSession {
             sample_rate: 44_100,
         },
@@ -273,7 +273,7 @@ fn probe(io: &mut Io) -> io::Result<()> {
         )));
     }
     let session_id = u32::from_le_bytes(reply.try_into().expect("length-checked"));
-    let (status, _) = round_trip(io, &Command::DestroySession { session_id })?;
+    let (status, _) = round_trip(shim, &Command::DestroySession { session_id })?;
     if status != STATUS_OK {
         return Err(io::Error::other(format!(
             "engine probe: DestroySession replied status {status}"
@@ -283,17 +283,17 @@ fn probe(io: &mut Io) -> io::Result<()> {
 }
 
 /// Sends one framed command and reads its reply.
-fn round_trip(io: &mut Io, command: &Command) -> io::Result<(i32, Vec<u8>)> {
+fn round_trip(shim: &mut Subprocess, command: &Command) -> io::Result<(i32, Vec<u8>)> {
     let (opcode, payload) = command.encode();
-    write_message(&mut io.stdin, opcode, &payload)?;
-    io.stdin.flush()?;
-    read_reply(&mut io.stdout)
+    write_message(&mut shim.stdin, opcode, &payload)?;
+    shim.stdin.flush()?;
+    read_reply(&mut shim.stdout)
 }
 
 /// Kills and reaps the subprocess, if one is held — never leaves a
 /// zombie behind.
-fn reap(io: &mut Option<Io>) {
-    if let Some(mut dead) = io.take() {
+fn reap(subprocess: &mut Option<Subprocess>) {
+    if let Some(mut dead) = subprocess.take() {
         let _ = dead.child.kill();
         let _ = dead.child.wait();
     }

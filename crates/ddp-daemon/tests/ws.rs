@@ -172,79 +172,6 @@ async fn malformed_json_yields_invalid_request_without_dropping_the_connection()
     assert_eq!(recv_json(&mut ws).await["request_id"], "r10");
 }
 
-/// An `Engine` that dies on demand and stays dead — recovery can never
-/// succeed. Behind the sanctioned `Engine` seam (issue #12 mock policy).
-struct Doomed {
-    stub: ddp_engine::StubBackend,
-    dead: std::sync::atomic::AtomicBool,
-}
-
-impl Doomed {
-    fn new() -> Self {
-        Self {
-            stub: ddp_engine::StubBackend::new(),
-            dead: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    fn kill(&self) {
-        self.dead.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn check(&self) -> ddp_engine::Result<()> {
-        if self.dead.load(std::sync::atomic::Ordering::SeqCst) {
-            Err(ddp_engine::EngineError::Crashed("engine gone".into()))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl ddp_engine::Engine for Doomed {
-    fn create_session(&self, sample_rate: u32) -> ddp_engine::Result<ddp_engine::SessionId> {
-        self.check()?;
-        self.stub.create_session(sample_rate)
-    }
-
-    fn destroy_session(&self, id: ddp_engine::SessionId) -> ddp_engine::Result<()> {
-        self.check()?;
-        self.stub.destroy_session(id)
-    }
-
-    fn set_enabled(&self, id: ddp_engine::SessionId, enabled: bool) -> ddp_engine::Result<()> {
-        self.check()?;
-        self.stub.set_enabled(id, enabled)
-    }
-
-    fn set_params(
-        &self,
-        id: ddp_engine::SessionId,
-        params: &[(&str, &[i16])],
-    ) -> ddp_engine::Result<()> {
-        self.check()?;
-        self.stub.set_params(id, params)
-    }
-
-    fn get_params(
-        &self,
-        id: ddp_engine::SessionId,
-        names: &[&str],
-    ) -> ddp_engine::Result<Vec<Vec<i16>>> {
-        self.check()?;
-        self.stub.get_params(id, names)
-    }
-
-    fn process(
-        &self,
-        id: ddp_engine::SessionId,
-        input: &[i16],
-        output: &mut [i16],
-    ) -> ddp_engine::Result<ddp_engine::VisFrame> {
-        self.check()?;
-        self.stub.process(id, input, output)
-    }
-}
-
 /// Slice 08 (issue #16): an unrecoverable engine failure surfaces as an
 /// `ENGINE_REJECTED` error — while state stays authoritative (the flip
 /// is broadcast and replays onto the engine when it comes back) and the
@@ -252,13 +179,13 @@ impl ddp_engine::Engine for Doomed {
 #[tokio::test]
 async fn an_unrecoverable_engine_failure_surfaces_engine_rejected() {
     let dir = common::fixture_dir();
-    let doomed = std::sync::Arc::new(Doomed::new());
-    let daemon = common::start_with(&dir, doomed.clone()).await;
+    let stub = std::sync::Arc::new(ddp_engine::StubBackend::new());
+    let daemon = common::start_with(&dir, stub.clone()).await;
     daemon.supervisor().create_session(48000).expect("session");
     let mut originator = connected(daemon.addr()).await;
     let mut other = connected(daemon.addr()).await;
 
-    doomed.kill();
+    stub.fail_forever(ddp_engine::EngineError::Crashed("engine gone".into()));
     send_json(
         &mut originator,
         &json!({ "cmd": "set_power", "request_id": "r1", "on": false }),

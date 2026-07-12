@@ -7,20 +7,11 @@
 //! `ddp_engine::test_support`.
 #![cfg(feature = "qemu")]
 
-use ddp_engine::test_support::staged_engine_dir;
+use ddp_engine::test_support::{kill_engine, staged_engine_dir};
 use ddp_engine::{Engine, EngineError, QemuBackend};
 
 fn start_backend() -> QemuBackend {
     QemuBackend::start(staged_engine_dir()).expect("engine starts")
-}
-
-/// SIGKILLs the engine subprocess — the crash the backend must absorb.
-fn kill(pid: u32) {
-    let status = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("kill runs");
-    assert!(status.success(), "kill -9 {pid}: {status}");
 }
 
 /// Behavior 1 (issue #16): `start` spawns exactly one subprocess and
@@ -86,7 +77,7 @@ fn footgun_configs_never_reach_the_engine() {
 fn a_killed_subprocess_respawns_on_the_next_call() {
     let backend = start_backend();
     let session = backend.create_session(44_100).unwrap();
-    kill(backend.pid().expect("live subprocess"));
+    kill_engine(backend.pid().expect("live subprocess"));
 
     let error = backend.set_enabled(session, true).unwrap_err();
     assert!(matches!(error, EngineError::Crashed(_)), "{error}");

@@ -13,13 +13,13 @@ use std::process::Command as ProcessCommand;
 use std::sync::OnceLock;
 
 /// Builds the ARM shim and stages it beside `libdseffect.so` + the
-/// proven Android stubs from `tools/ddp_probe`, once per test run —
-/// the directory [`crate::QemuBackend::start`] takes.
+/// proven Android stubs (`scripts/stage-engine.sh` — shared with `just
+/// stage-engine`), once per test run — the directory
+/// [`crate::QemuBackend::start`] takes.
 ///
 /// # Panics
 ///
-/// When any build/staging step fails — the suite cannot run without
-/// the real engine.
+/// When staging fails — the suite cannot run without the real engine.
 pub fn staged_engine_dir() -> &'static Path {
     static STAGE: OnceLock<PathBuf> = OnceLock::new();
     STAGE.get_or_init(|| {
@@ -28,37 +28,28 @@ pub fn staged_engine_dir() -> &'static Path {
             .nth(2)
             .expect("workspace root")
             .to_path_buf();
-        let run = |program: &str, args: &[&str]| {
-            let status = ProcessCommand::new(program)
-                .args(args)
-                .current_dir(&root)
-                .status()
-                .unwrap_or_else(|error| panic!("spawn {program}: {error}"));
-            assert!(status.success(), "{program} {args:?} failed: {status}");
-        };
-        run(
-            env!("CARGO"),
-            &[
-                "build",
-                "-p",
-                "ddp-engine-arm",
-                "--target",
-                "armv7-unknown-linux-gnueabihf",
-                "--release",
-            ],
-        );
-        run("make", &["-sC", "tools/ddp_probe", "stage"]);
-
         let stage = root.join("target/qemu-stage");
-        fs::create_dir_all(stage.join("logs")).expect("create stage dir");
-        let staged_libs = root.join("tools/ddp_probe/build/lib");
-        for entry in fs::read_dir(&staged_libs).expect("read staged libs") {
-            let entry = entry.expect("staged lib entry");
-            // fs::copy follows the sysroot symlinks to real files.
-            fs::copy(entry.path(), stage.join(entry.file_name())).expect("stage lib");
-        }
-        let shim = root.join("target/armv7-unknown-linux-gnueabihf/release/ddp-engine-arm");
-        fs::copy(&shim, stage.join("ddp-engine-arm")).expect("stage shim");
+        let status = ProcessCommand::new(root.join("scripts/stage-engine.sh"))
+            .arg(&stage)
+            .current_dir(&root)
+            .status()
+            .unwrap_or_else(|error| panic!("spawn stage-engine.sh: {error}"));
+        assert!(status.success(), "stage-engine.sh failed: {status}");
+        fs::create_dir_all(stage.join("logs")).expect("create log dir");
         stage
     })
+}
+
+/// SIGKILLs the engine subprocess — the crash the crash-recovery
+/// suites inject.
+///
+/// # Panics
+///
+/// When `kill` cannot run or reports failure.
+pub fn kill_engine(pid: u32) {
+    let status = ProcessCommand::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("kill runs");
+    assert!(status.success(), "kill -9 {pid}: {status}");
 }

@@ -10,9 +10,8 @@
 mod common;
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use common::{connected, recv_json, send_json, set_power, ws_connect};
+use common::{assert_config_becomes, connected, recv_json, send_json, set_power, ws_connect};
 use ddp_daemon::Daemon;
 use ddp_engine::QemuBackend;
 use ddp_engine::test_support::staged_engine_dir;
@@ -30,15 +29,6 @@ fn test_block() -> Vec<i16> {
     (0..512)
         .map(|i| i16::try_from((i % 64) * 500).expect("fits i16") - 16_000)
         .collect()
-}
-
-/// SIGKILLs the engine subprocess — the crash the daemon must absorb.
-fn kill(pid: u32) {
-    let status = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("kill runs");
-    assert!(status.success(), "kill -9 {pid}: {status}");
 }
 
 /// An in-process daemon over the real engine, plus its fixture dir.
@@ -63,22 +53,6 @@ async fn start_qemu_daemon_over(dir: TempDir) -> QemuDaemon {
 /// Starts a real-engine daemon over a fresh fixture dir.
 async fn start_qemu_daemon() -> QemuDaemon {
     start_qemu_daemon_over(common::fixture_dir()).await
-}
-
-/// Polls `config.toml` (up to 3 s) until it holds `expected`.
-async fn assert_config_becomes(path: &std::path::Path, expected: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    loop {
-        let content = std::fs::read_to_string(path).expect("config.toml readable");
-        if content == expected {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "config.toml settled at {content:?}, wanted {expected:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 /// The tracer bullet (issue #16): Slice 04's power toggle, end to end
@@ -142,7 +116,7 @@ async fn a_killed_engine_respawns_with_sessions_rebuilt() {
         .expect("session");
     let pid = daemon.backend.pid().expect("live engine");
 
-    kill(pid);
+    ddp_engine::test_support::kill_engine(pid);
 
     // The next command recovers transparently: an ack, not an error…
     let mut ws = connected(daemon.handle.addr()).await;

@@ -143,8 +143,15 @@ impl EngineSupervisor {
             match self.refresh_readouts(&mut inner) {
                 Ok(()) => {}
                 // Crash while reading: recovery rebuilds the session
-                // and re-reads for us.
-                Err(EngineError::Crashed(_)) => self.recover(&mut inner)?,
+                // and re-reads for us. If it fails, un-mint the session
+                // — the caller never learns this id, so leaving it in
+                // the table would ghost-replay it on later recoveries.
+                Err(EngineError::Crashed(_)) => {
+                    if let Err(error) = self.recover(&mut inner) {
+                        inner.sessions.pop();
+                        return Err(error);
+                    }
+                }
                 Err(error) => tracing::warn!(%error, "main-session readouts unavailable"),
             }
         }
@@ -433,77 +440,6 @@ mod tests {
         );
     }
 
-    /// An `Engine` failing per a scripted plan (one entry consumed per
-    /// call — `None` delegates to the stub), for driving the recovery
-    /// paths. Stays behind the sanctioned `Engine` seam.
-    struct Flaky {
-        stub: StubBackend,
-        plan: Mutex<std::collections::VecDeque<Option<EngineError>>>,
-    }
-
-    impl Flaky {
-        fn new() -> Self {
-            Self {
-                stub: StubBackend::new(),
-                plan: Mutex::new(std::collections::VecDeque::new()),
-            }
-        }
-
-        /// Lets the next `n` calls through.
-        fn ok_calls(&self, n: usize) {
-            self.plan.lock().unwrap().extend((0..n).map(|_| None));
-        }
-
-        /// Fails the call after the plan so far with `error`.
-        fn fail_next(&self, error: EngineError) {
-            self.plan.lock().unwrap().push_back(Some(error));
-        }
-
-        fn check(&self) -> ddp_engine::Result<()> {
-            match self.plan.lock().unwrap().pop_front() {
-                Some(Some(error)) => Err(error),
-                _ => Ok(()),
-            }
-        }
-    }
-
-    impl Engine for Flaky {
-        fn create_session(&self, sample_rate: u32) -> ddp_engine::Result<SessionId> {
-            self.check()?;
-            self.stub.create_session(sample_rate)
-        }
-
-        fn destroy_session(&self, id: SessionId) -> ddp_engine::Result<()> {
-            self.check()?;
-            self.stub.destroy_session(id)
-        }
-
-        fn set_enabled(&self, id: SessionId, enabled: bool) -> ddp_engine::Result<()> {
-            self.check()?;
-            self.stub.set_enabled(id, enabled)
-        }
-
-        fn set_params(&self, id: SessionId, params: &[(&str, &[i16])]) -> ddp_engine::Result<()> {
-            self.check()?;
-            self.stub.set_params(id, params)
-        }
-
-        fn get_params(&self, id: SessionId, names: &[&str]) -> ddp_engine::Result<Vec<Vec<i16>>> {
-            self.check()?;
-            self.stub.get_params(id, names)
-        }
-
-        fn process(
-            &self,
-            id: SessionId,
-            input: &[i16],
-            output: &mut [i16],
-        ) -> ddp_engine::Result<VisFrame> {
-            self.check()?;
-            self.stub.process(id, input, output)
-        }
-    }
-
     fn crashed() -> EngineError {
         EngineError::Crashed("killed".into())
     }
@@ -514,9 +450,9 @@ mod tests {
     /// process — while the external ids keep working.
     #[test]
     fn a_crash_during_set_power_recreates_every_session_and_replays_state() {
-        let flaky = Arc::new(Flaky::new());
+        let stub = Arc::new(StubBackend::new());
         let supervisor = EngineSupervisor::new(
-            flaky.clone(),
+            stub.clone(),
             true,
             vec![("dvla".into(), vec![4])],
             Vec::new(),
@@ -524,12 +460,12 @@ mod tests {
         let a = supervisor.create_session(48000).unwrap();
         let b = supervisor.create_session(44100).unwrap();
 
-        flaky.fail_next(crashed());
+        stub.fail_next(crashed());
         supervisor.set_power(false).unwrap();
 
         // The recovery tail: both sessions rebuilt through the full
         // init sequence, already under the new power state.
-        let calls = flaky.stub.calls();
+        let calls = stub.calls();
         let batch = vec![("dvla".to_string(), vec![4_i16])];
         assert_eq!(
             calls[6..],
@@ -563,11 +499,11 @@ mod tests {
     /// retries the new session's init once.
     #[test]
     fn a_crash_during_create_recovers_and_retries_the_init_once() {
-        let flaky = Arc::new(Flaky::new());
-        let supervisor = EngineSupervisor::new(flaky.clone(), true, Vec::new(), Vec::new());
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub.clone(), true, Vec::new(), Vec::new());
         let a = supervisor.create_session(48000).unwrap();
 
-        flaky.fail_next(crashed());
+        stub.fail_next(crashed());
         let b = supervisor.create_session(44100).unwrap();
         assert_eq!(b, SessionId(1), "external ids keep minting in order");
 
@@ -585,27 +521,53 @@ mod tests {
     /// surfaces as `EngineCrashed` — never an unbounded retry loop.
     #[test]
     fn a_crash_during_recovery_surfaces_engine_crashed() {
-        let flaky = Arc::new(Flaky::new());
-        let supervisor = EngineSupervisor::new(flaky.clone(), true, Vec::new(), Vec::new());
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub.clone(), true, Vec::new(), Vec::new());
         supervisor.create_session(48000).unwrap();
 
-        flaky.fail_next(crashed());
-        flaky.fail_next(crashed());
+        stub.fail_next(crashed());
+        stub.fail_next(crashed());
         assert!(matches!(
             supervisor.set_power(false),
             Err(SupervisorError::EngineCrashed(_))
         ));
     }
 
+    /// A crash while filling the readouts, with recovery failing too,
+    /// must not ghost the just-created session — its id was never
+    /// handed out, so nothing may replay it on later recoveries.
+    #[test]
+    fn a_failed_recovery_during_readout_fill_leaves_no_ghost_session() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub.clone(), true, Vec::new(), vec!["ver".into()]);
+        stub.ok_calls(3); // create, set_params, set_enabled…
+        stub.fail_next(crashed()); // …the readout read crashes…
+        stub.fail_next(crashed()); // …and so does the recovery.
+        assert!(matches!(
+            supervisor.create_session(48000),
+            Err(SupervisorError::EngineCrashed(_))
+        ));
+
+        // No ghost: a power flip fans out to nothing.
+        supervisor.set_power(false).unwrap();
+        assert!(
+            !stub
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Call::SetEnabled(_, false))),
+            "no session survived the failed create"
+        );
+    }
+
     /// A non-crash init failure is `SessionInitFailed`: no half-alive
     /// session is left behind, host-side or engine-side.
     #[test]
     fn a_rejected_init_leaves_no_session_behind() {
-        let flaky = Arc::new(Flaky::new());
-        let supervisor = EngineSupervisor::new(flaky.clone(), true, Vec::new(), Vec::new());
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub.clone(), true, Vec::new(), Vec::new());
 
-        flaky.ok_calls(1); // create succeeds…
-        flaky.fail_next(EngineError::Rejected { status: -22 }); // …set_params doesn't
+        stub.ok_calls(1); // create succeeds…
+        stub.fail_next(EngineError::Rejected { status: -22 }); // …set_params doesn't
         let error = supervisor.create_session(48000).unwrap_err();
         assert!(matches!(
             error,
@@ -616,16 +578,12 @@ mod tests {
         // The orphaned engine handle was released, and the supervisor
         // holds no session: a power flip makes no engine call.
         assert!(
-            flaky
-                .stub
-                .calls()
-                .contains(&Call::DestroySession(SessionId(0))),
+            stub.calls().contains(&Call::DestroySession(SessionId(0))),
             "the half-initialised handle is released"
         );
         supervisor.set_power(false).unwrap();
         assert!(
-            !flaky
-                .stub
+            !stub
                 .calls()
                 .iter()
                 .any(|call| matches!(call, Call::SetEnabled(..))),

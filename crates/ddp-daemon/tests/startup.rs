@@ -8,17 +8,32 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 /// Runs a daemon binary to completion with the standard flags.
-/// `--engine stub`: these tests exercise the TOML/UI refusals, and no
+/// `--backend stub`: these tests exercise the TOML/UI refusals, and no
 /// staged engine sits beside the test binary.
+///
+/// Retries `ETXTBSY`: a sibling test's fork can transiently inherit
+/// [`copied_binary`]'s write-fd on this binary until its own exec
+/// completes — execing meanwhile fails spuriously.
 fn run(binary: &Path, ui: &Path, config_dir: &Path) -> Output {
-    Command::new(binary)
-        .args(["--engine", "stub", "--port", "0"])
-        .arg("--ui")
-        .arg(ui)
-        .arg("--config-dir")
-        .arg(config_dir)
-        .output()
-        .expect("daemon binary runs")
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let result = Command::new(binary)
+            .args(["--backend", "stub", "--port", "0"])
+            .arg("--ui")
+            .arg(ui)
+            .arg("--config-dir")
+            .arg(config_dir)
+            .output();
+        match result {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            result => return result.expect("daemon binary runs"),
+        }
+    }
 }
 
 /// Asserts a startup refusal: nonzero exit, stderr naming `culprit`.

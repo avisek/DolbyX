@@ -7,11 +7,8 @@ dev: _ui-deps stage-engine
         "pnpm -C ui dev"
 
 # Stage the ARM engine (shim + libdseffect.so + stubs) beside the debug daemon binary
-stage-engine: arm-build
-    make -sC tools/ddp_probe stage
-    mkdir -p target/debug
-    cp -L tools/ddp_probe/build/lib/*.so target/debug/
-    cp target/armv7-unknown-linux-gnueabihf/release/ddp-engine-arm target/debug/
+stage-engine:
+    scripts/stage-engine.sh target/debug
 
 # Optimized build of every crate + singlefile UI beside the daemon binary
 build-release: _ui-deps
@@ -38,7 +35,8 @@ arm-build:
 
 # apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user-static
 # Integration tests against the real libdseffect.so under qemu-arm-static
-qemu-test: arm-build
+# (the suites stage the engine themselves via scripts/stage-engine.sh)
+qemu-test:
     cargo test -p ddp-engine --features qemu
     cargo test -p ddp-daemon --features qemu
 

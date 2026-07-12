@@ -3,26 +3,11 @@
 
 mod common;
 
-use std::path::Path;
 use std::time::Duration;
 
-use common::{connected, recv_json, set_power, start_daemon, start_over, ws_connect};
-
-/// Polls `config.toml` (up to 3 s) until it holds `expected`.
-async fn assert_config_becomes(path: &Path, expected: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    loop {
-        let content = std::fs::read_to_string(path).expect("config.toml readable");
-        if content == expected {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "config.toml settled at {content:?}, wanted {expected:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
+use common::{
+    assert_config_becomes, connected, recv_json, set_power, start_daemon, start_over, ws_connect,
+};
 
 #[tokio::test]
 async fn power_divergence_debounces_then_writes_only_the_overlay() {
@@ -81,10 +66,10 @@ async fn sigterm_flushes_the_pending_write_and_exits_zero() {
     use std::process::{Command, Stdio};
 
     let dir = common::fixture_dir();
-    // `--engine stub`: this test exercises signal handling, not the
+    // `--backend stub`: this test exercises signal handling, not the
     // engine, and no staged engine sits beside the test binary.
     let mut child = Command::new(env!("CARGO_BIN_EXE_ddp-daemon"))
-        .args(["--engine", "stub", "--port", "0", "--ui"])
+        .args(["--backend", "stub", "--port", "0", "--ui"])
         .arg(dir.path().join("index.html"))
         .arg("--config-dir")
         .arg(dir.path().join("data"))

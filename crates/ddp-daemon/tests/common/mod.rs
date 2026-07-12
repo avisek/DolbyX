@@ -86,6 +86,23 @@ pub async fn start_daemon() -> TestDaemon {
     TestDaemon { handle, stub, dir }
 }
 
+/// Polls `config.toml` (up to 3 s) until it holds `expected` — the
+/// debounced write-back assertion primitive.
+pub async fn assert_config_becomes(path: &Path, expected: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let content = std::fs::read_to_string(path).expect("config.toml readable");
+        if content == expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "config.toml settled at {content:?}, wanted {expected:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
 /// One raw `GET` over a real TCP connection; returns (status, body).
 pub async fn http_get(addr: SocketAddr, path: &str) -> (u16, String) {
     let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
