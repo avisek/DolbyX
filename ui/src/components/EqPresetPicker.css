@@ -1,0 +1,31 @@
+.eq-preset-picker {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+}
+
+.eq-preset-picker__option {
+  flex: 1;
+  padding: 0.375rem 0.75rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.eq-preset-picker__option:hover {
+  color: var(--color-text);
+}
+
+.eq-preset-picker__option[aria-checked='true'] {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}

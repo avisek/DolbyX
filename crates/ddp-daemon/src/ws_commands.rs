@@ -47,6 +47,32 @@ pub(crate) enum WsCommand {
         /// The profile to reset.
         id: ddp_state::ProfileId,
     },
+    /// Select — or with `id: null` detach — one profile's EQ preset
+    /// overlay (EQ selection is per-profile: the target is explicit).
+    SetEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile whose selection changes.
+        profile_id: ddp_state::ProfileId,
+        /// The preset to select; `null` ⇒ the profile's own EQ params.
+        id: Option<ddp_state::PresetId>,
+    },
+    /// Write a param map into one EQ preset (preset-carried params only).
+    EditEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to edit.
+        id: ddp_state::PresetId,
+        /// The edited entries: `{ "<4-CC>": [i16, …] }`.
+        params: std::collections::HashMap<String, Vec<i16>>,
+    },
+    /// Drop an EQ preset's own overrides, restoring its baseline.
+    ResetEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to reset.
+        id: ddp_state::PresetId,
+    },
 }
 
 /// A daemon → client event frame.

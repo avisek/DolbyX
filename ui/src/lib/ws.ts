@@ -10,9 +10,23 @@ export interface Profile {
   readonly name: string
   /** Factory items reset instead of delete/rename. */
   readonly is_factory: boolean
-  /** `null` ⇒ the profile's own EQ params apply (presets: Slice 15). */
+  /** `null` ⇒ the profile's own EQ params apply. */
   readonly selected_eq_preset: string | null
   /** Every writable param, keyed by 4-CC, in engine-native i16. */
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
+/**
+ * One EQ preset as the snapshot carries it — a global optional overlay;
+ * when a profile selects it, its params shadow the profile's own EQ
+ * params entirely (ADR-0003).
+ */
+export interface EqPreset {
+  readonly id: string
+  readonly name: string
+  /** Factory items reset instead of delete/rename. */
+  readonly is_factory: boolean
+  /** The nine preset-carried params, keyed by 4-CC, in engine-native i16. */
   readonly params: Readonly<Record<string, readonly number[]>>
 }
 
@@ -21,6 +35,7 @@ export interface StateSnapshot {
   readonly power: boolean
   readonly selected_profile: string
   readonly profiles: readonly Profile[]
+  readonly eq_presets: readonly EqPreset[]
   /** The 8 ReadOnly-Static values, keyed by 4-CC. */
   readonly readouts: Readonly<Record<string, readonly number[]>>
 }
@@ -35,6 +50,13 @@ export type Command =
       readonly id: string
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
       readonly params: Readonly<Record<string, readonly number[]>>
+    }
+  | {
+      readonly cmd: 'set_eq_preset'
+      /** EQ selection is per-profile — the target is explicit. */
+      readonly profile_id: string
+      /** `null` ⇒ the profile's own EQ params apply. */
+      readonly id: string | null
     }
 
 /** A daemon → client event frame. */

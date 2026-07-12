@@ -6,6 +6,8 @@
 //! live registry. Slice 11 (#19) adds its behavior 9: plugin behaviors
 //! 2–5 replayed over the real platform socket. Slice 14 (#22) adds its
 //! behavior 9: master-control edits read back from the registry.
+//! Slice 15 (#23) adds its behavior 8: the EQ preset overlay lands
+//! Rich's curve in the registry.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -314,6 +316,58 @@ async fn master_control_edits_land_in_the_live_registry() {
             "`{name}` must read back from the clamped registry"
         );
     }
+}
+
+/// Behavior 8 (issue #23): the EQ preset overlay against the real
+/// engine — after WS `set_eq_preset { music, rich }`, the live clamped
+/// registry holds Rich's `iebt` curve with `ieon = 1`; a `null` detach
+/// restores the profile's own (`ieon = 0`, flat targets).
+#[tokio::test]
+async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+
+    let mut ws = connected(daemon.handle.addr()).await;
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "set_eq_preset", "request_id": "r1", "profile_id": "music", "id": "rich" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["iebt", "ieon"])
+        .expect("get_params");
+    assert_eq!(
+        values[0][..20],
+        [
+            67, 95, 172, 163, 168, 201, 189, 242, 196, 221, 192, 186, 168, 139, 102, 57, 35, 9,
+            -55, -235
+        ],
+        "Rich's curve, read back from the live clamped registry"
+    );
+    assert_eq!(values[1], [1], "IEQ enabled by the overlay");
+
+    // Detach: the profile's own EQ params land again.
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "set_eq_preset", "request_id": "r2", "profile_id": "music", "id": null }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["iebt", "ieon"])
+        .expect("get_params");
+    assert_eq!(values[0], vec![0; 40], "the profile's own flat targets");
+    assert_eq!(values[1], [0], "the profile's own ieon = 0");
 }
 
 /// Behavior 9 / tracer bullet (issue #19), plugin behaviors 2 + 3: a

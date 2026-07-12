@@ -110,6 +110,18 @@ pub fn base_params(defs: &[ParameterDef]) -> std::collections::HashMap<String, V
         .collect()
 }
 
+/// The complete preset-carried param map at `ParameterDef.default` —
+/// the base layer beneath the `[eq_preset]` cascade, seeding every EQ
+/// preset so each resolves standalone (the nine EQ params of the
+/// shipped table).
+#[must_use]
+pub fn base_eq_params(defs: &[ParameterDef]) -> std::collections::HashMap<String, Vec<i16>> {
+    defs.iter()
+        .filter(|def| def.access.is_writable() && def.category.is_preset_carried())
+        .map(|def| (def.name.clone(), def.default.clone()))
+        .collect()
+}
+
 /// UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -142,6 +154,16 @@ pub enum ParamCategory {
     EndpointVolume,
     /// Engine identity + license slots (`bver bndl ver lcmf lcvd lcpt`).
     BuildLicense,
+}
+
+impl ParamCategory {
+    /// Whether params of this category are preset-carried — owned by a
+    /// selected EQ preset overlay. Eligibility is derived, never
+    /// declared: preset-carried ⟺ `category ∈ {Ieq, Geq}` (ADR-0003).
+    #[must_use]
+    pub const fn is_preset_carried(self) -> bool {
+        matches!(self, Self::Ieq | Self::Geq)
+    }
 }
 
 /// Why a `parameters.toml` document was rejected.

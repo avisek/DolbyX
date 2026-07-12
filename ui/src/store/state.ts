@@ -17,6 +17,7 @@ const inert: StateSnapshot = {
   power: false,
   selected_profile: '',
   profiles: [],
+  eq_presets: [],
   readouts: {},
 }
 
@@ -40,6 +41,20 @@ export function applyPower(on: boolean): void {
 /** Applies the originator's own acked profile switch (local-first). */
 export function applyProfile(id: string): void {
   setState('selected_profile', id)
+}
+
+/**
+ * Applies this tab's own acked EQ preset selection (local-first) —
+ * per-profile, `null` detaching to the profile's own EQ params.
+ */
+export function applyEqPreset(profileId: string, id: string | null): void {
+  setState('profiles', (profiles) =>
+    profiles.map((profile) =>
+      profile.id === profileId
+        ? { ...profile, selected_eq_preset: id }
+        : profile,
+    ),
+  )
 }
 
 /**

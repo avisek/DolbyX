@@ -26,8 +26,8 @@ pub struct Profile {
     /// User-editable display name (factory names ship in `defaults.toml`).
     pub name: String,
     /// The EQ overlay in effect; `None` ⇒ the profile's own EQ params
-    /// apply. Always `None` until Slice 15
-    /// ([#23](https://github.com/avisek/DolbyX/issues/23)).
+    /// apply (factory profiles ship `None` — first-run parity with the
+    /// original's `ieon = 0`).
     pub selected_eq_preset: Option<PresetId>,
     /// Whether the id appears in `defaults.toml` — derived at load,
     /// never stored; factory items reset instead of delete/rename.
