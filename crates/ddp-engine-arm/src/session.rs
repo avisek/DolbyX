@@ -67,6 +67,12 @@ impl<'lib> Session<'lib> {
             .or_insert_with(|| effect.param_ref(name))
     }
 
+    /// The leaf's fixed storage capacity, 0 when the engine reports
+    /// none — both the cap for writes and the count for reads.
+    fn capacity(&self, param_ref: u32) -> usize {
+        usize::try_from(self.effect.param_length(param_ref)).unwrap_or(0)
+    }
+
     /// Writes one atomic batch into the live registry, in order. Every
     /// entry lands before the next `process` block, so the batch
     /// applies on one audio block (the DSP recomputes from the
@@ -83,8 +89,7 @@ impl<'lib> Session<'lib> {
             // Cap at the leaf's fixed capacity: `ak_set_bulk` has no
             // protocol-side size check, so the shim keeps an oversized
             // count from running past the engine's storage.
-            let capacity = usize::try_from(self.effect.param_length(param_ref)).unwrap_or(0);
-            let count = values.len().min(capacity);
+            let count = values.len().min(self.capacity(param_ref));
             self.effect.write_param(param_ref, &values[..count]);
         }
         for (stagers, leaf) in COMMIT_GROUPS {
@@ -107,8 +112,7 @@ impl<'lib> Session<'lib> {
         if param_ref == 0 {
             return;
         }
-        let length = usize::try_from(self.effect.param_length(param_ref)).unwrap_or(0);
-        let current = self.effect.read_param(param_ref, length);
+        let current = self.effect.read_param(param_ref, self.capacity(param_ref));
         self.effect.write_param(param_ref, &current);
     }
 
@@ -123,8 +127,7 @@ impl<'lib> Session<'lib> {
                 if param_ref == 0 {
                     return Vec::new();
                 }
-                let length = usize::try_from(self.effect.param_length(param_ref)).unwrap_or(0);
-                self.effect.read_param(param_ref, length)
+                self.effect.read_param(param_ref, self.capacity(param_ref))
             })
             .collect()
     }

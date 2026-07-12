@@ -331,6 +331,11 @@ impl Effect<'_> {
     /// stride). The engine saturates each value to its own `[min,
     /// max]` and silently no-ops a write-protected leaf — there is no
     /// failure to surface, so no return.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: only past `i32::MAX` values, orders of
+    /// magnitude beyond any leaf's capacity.
     pub fn write_param(&mut self, param_ref: u32, values: &[i16]) {
         let count = i32::try_from(values.len()).expect("param batches are tiny");
         // SAFETY: `ak` is attached; the engine reads exactly `count`
@@ -351,6 +356,11 @@ impl Effect<'_> {
     /// (packed-int16 stride) — the live registry values the DSP uses.
     /// A dead ref reads as zeros (the engine bails, leaving the
     /// zero-fill).
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: only past `i32::MAX` elements, orders of
+    /// magnitude beyond any leaf's capacity.
     pub fn read_param(&self, param_ref: u32, count: usize) -> Vec<i16> {
         let mut values = vec![0_i16; count];
         let count = i32::try_from(count).expect("param lengths are tiny");

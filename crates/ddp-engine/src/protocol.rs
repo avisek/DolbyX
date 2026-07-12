@@ -259,10 +259,8 @@ impl Command {
                 let mut payload = session_id.to_le_bytes().to_vec();
                 payload.extend_from_slice(&entries.to_le_bytes());
                 for (name, values) in params {
-                    let count = u16::try_from(values.len()).expect("bounded by MAX_FRAME_BYTES");
                     payload.extend_from_slice(name);
-                    payload.extend_from_slice(&count.to_le_bytes());
-                    payload.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+                    write_i16_run(&mut payload, values);
                 }
                 (OP_SET_PARAMS, payload)
             }
@@ -342,21 +340,14 @@ impl Command {
                         .get(offset..offset + 4)
                         .map(|bytes| bytes.try_into().expect("4-byte slice"))
                         .ok_or(DecodeError::MalformedPayload(opcode, "entry name"))?;
-                    let count = usize::from(field_u16(opcode, payload, offset + 4, "value count")?);
-                    if count == 0 {
+                    offset += 4;
+                    let values = read_i16_run(opcode, payload, &mut offset)?;
+                    if values.is_empty() {
                         return Err(DecodeError::MalformedPayload(
                             opcode,
                             "zero-count entry writes nothing",
                         ));
                     }
-                    offset += 6;
-                    let values = payload
-                        .get(offset..offset + count * 2)
-                        .ok_or(DecodeError::MalformedPayload(opcode, "entry values"))?
-                        .chunks_exact(2)
-                        .map(|bytes| i16::from_le_bytes(bytes.try_into().expect("2-byte chunk")))
-                        .collect();
-                    offset += count * 2;
                     params.push((name, values));
                 }
                 exact_len(opcode, payload, offset)?;
@@ -409,9 +400,7 @@ pub fn encode_get_params_reply(values: &[Vec<i16>]) -> Vec<u8> {
     let entries = u16::try_from(values.len()).expect("bounded by MAX_FRAME_BYTES");
     let mut payload = entries.to_le_bytes().to_vec();
     for value in values {
-        let count = u16::try_from(value.len()).expect("bounded by MAX_FRAME_BYTES");
-        payload.extend_from_slice(&count.to_le_bytes());
-        payload.extend(value.iter().flat_map(|element| element.to_le_bytes()));
+        write_i16_run(&mut payload, value);
     }
     payload
 }
@@ -431,16 +420,7 @@ pub fn decode_get_params_reply(payload: &[u8]) -> Result<Vec<Vec<i16>>, DecodeEr
     let mut values = Vec::with_capacity(entries.into());
     let mut offset = 2;
     for _ in 0..entries {
-        let count = usize::from(field_u16(OP_GET_PARAMS, payload, offset, "reply count")?);
-        offset += 2;
-        let value = payload
-            .get(offset..offset + count * 2)
-            .ok_or(DecodeError::MalformedPayload(OP_GET_PARAMS, "reply values"))?
-            .chunks_exact(2)
-            .map(|bytes| i16::from_le_bytes(bytes.try_into().expect("2-byte chunk")))
-            .collect();
-        offset += count * 2;
-        values.push(value);
+        values.push(read_i16_run(OP_GET_PARAMS, payload, &mut offset)?);
     }
     exact_len(OP_GET_PARAMS, payload, offset)?;
     Ok(values)
@@ -457,6 +437,28 @@ fn exact_len(opcode: u32, payload: &[u8], expected: usize) -> Result<(), DecodeE
             "payload size doesn't match the opcode's layout",
         ))
     }
+}
+
+/// Appends one `[u16 count][i16 × count]` value run — the layout
+/// `SetParams` entries and `GetParams` reply entries share.
+fn write_i16_run(payload: &mut Vec<u8>, values: &[i16]) {
+    let count = u16::try_from(values.len()).expect("bounded by MAX_FRAME_BYTES");
+    payload.extend_from_slice(&count.to_le_bytes());
+    payload.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+}
+
+/// Reads the `[u16 count][i16 × count]` value run at `*offset`,
+/// advancing past it.
+fn read_i16_run(opcode: u32, payload: &[u8], offset: &mut usize) -> Result<Vec<i16>, DecodeError> {
+    let count = usize::from(field_u16(opcode, payload, *offset, "value count")?);
+    let values = payload
+        .get(*offset + 2..*offset + 2 + count * 2)
+        .ok_or(DecodeError::MalformedPayload(opcode, "value run"))?
+        .chunks_exact(2)
+        .map(|bytes| i16::from_le_bytes(bytes.try_into().expect("2-byte chunk")))
+        .collect();
+    *offset += 2 + count * 2;
+    Ok(values)
 }
 
 /// Reads the little-endian `u16` at `offset`, named for error messages.
