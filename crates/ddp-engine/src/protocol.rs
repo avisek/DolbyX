@@ -140,8 +140,29 @@ pub const OP_CREATE_SESSION: u32 = 0x01;
 pub const OP_DESTROY_SESSION: u32 = 0x02;
 /// Opcode of [`Command::SetEnabled`].
 pub const OP_SET_ENABLED: u32 = 0x03;
+/// Opcode of [`Command::SetParams`].
+pub const OP_SET_PARAMS: u32 = 0x10;
+/// Opcode of [`Command::GetParams`].
+pub const OP_GET_PARAMS: u32 = 0x11;
 /// Opcode of [`Command::Process`].
 pub const OP_PROCESS: u32 = 0x30;
+
+/// A 4-CC parameter name in its wire form: four raw bytes, short names
+/// NUL-padded (`"ver"` → `ver\0`) — exactly the little-endian packing
+/// the engine's `ak_find` takes.
+pub type ParamName = [u8; 4];
+
+/// Packs a 4-CC string into its [`ParamName`] wire form.
+///
+/// # Panics
+///
+/// When `name` exceeds 4 bytes — 4-CCs are 4 characters by definition.
+#[must_use]
+pub fn param_name(name: &str) -> ParamName {
+    let mut packed = [0_u8; 4];
+    packed[..name.len()].copy_from_slice(name.as_bytes());
+    packed
+}
 
 /// Why a received message failed to decode into a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -176,9 +197,28 @@ pub enum Command {
         /// `true` → `EFFECT_CMD_ENABLE`, `false` → `EFFECT_CMD_DISABLE`.
         enabled: bool,
     },
+    /// 0x10 `[u32 session_id][u16 n]([4-CC][u16 count][i16 × count] × n)`
+    /// → empty reply. One atomic batch, served AK-direct (ADR-0010);
+    /// the engine clamps silently, so the reply is status-only.
+    SetParams {
+        /// The session whose registry the batch lands in.
+        session_id: u32,
+        /// Name-addressed entries, written in order.
+        params: Vec<(ParamName, Vec<i16>)>,
+    },
+    /// 0x11 `[u32 session_id][u16 n]([4-CC] × n)` → reply
+    /// `[u16 n]([u16 count][i16 × count] × n)`
+    /// ([`encode_get_params_reply`]): the live **clamped** registry
+    /// values the DSP uses — the only true per-param read.
+    GetParams {
+        /// The session whose registry is read.
+        session_id: u32,
+        /// The 4-CCs to read, answered in order.
+        names: Vec<ParamName>,
+    },
     /// 0x30 `[u32 session_id][u32 frames][i16 × frames × 2]` → reply
-    /// `[i16 × frames × 2 pcm]` (+ the 160-byte vis tail from Slice 07
-    /// on — the PCM block always comes first).
+    /// `[i16 × frames × 2 pcm][i16 × 80 vis tail]` — the PCM block
+    /// always comes first.
     Process {
         /// The session that processes the block.
         session_id: u32,
@@ -210,6 +250,33 @@ impl Command {
                 let mut payload = session_id.to_le_bytes().to_vec();
                 payload.push(u8::from(enabled));
                 (OP_SET_ENABLED, payload)
+            }
+            Self::SetParams {
+                session_id,
+                ref params,
+            } => {
+                let entries = u16::try_from(params.len()).expect("bounded by MAX_FRAME_BYTES");
+                let mut payload = session_id.to_le_bytes().to_vec();
+                payload.extend_from_slice(&entries.to_le_bytes());
+                for (name, values) in params {
+                    let count = u16::try_from(values.len()).expect("bounded by MAX_FRAME_BYTES");
+                    payload.extend_from_slice(name);
+                    payload.extend_from_slice(&count.to_le_bytes());
+                    payload.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+                }
+                (OP_SET_PARAMS, payload)
+            }
+            Self::GetParams {
+                session_id,
+                ref names,
+            } => {
+                let entries = u16::try_from(names.len()).expect("bounded by MAX_FRAME_BYTES");
+                let mut payload = session_id.to_le_bytes().to_vec();
+                payload.extend_from_slice(&entries.to_le_bytes());
+                for name in names {
+                    payload.extend_from_slice(name);
+                }
+                (OP_GET_PARAMS, payload)
             }
             Self::Process {
                 session_id,
@@ -265,6 +332,46 @@ impl Command {
                     },
                 })
             }
+            OP_SET_PARAMS => {
+                let session_id = field_u32(opcode, payload, 0, "session_id")?;
+                let entries = field_u16(opcode, payload, 4, "entry count")?;
+                let mut params = Vec::with_capacity(entries.into());
+                let mut offset = 6;
+                for _ in 0..entries {
+                    let name: ParamName = payload
+                        .get(offset..offset + 4)
+                        .map(|bytes| bytes.try_into().expect("4-byte slice"))
+                        .ok_or(DecodeError::MalformedPayload(opcode, "entry name"))?;
+                    let count = usize::from(field_u16(opcode, payload, offset + 4, "value count")?);
+                    if count == 0 {
+                        return Err(DecodeError::MalformedPayload(
+                            opcode,
+                            "zero-count entry writes nothing",
+                        ));
+                    }
+                    offset += 6;
+                    let values = payload
+                        .get(offset..offset + count * 2)
+                        .ok_or(DecodeError::MalformedPayload(opcode, "entry values"))?
+                        .chunks_exact(2)
+                        .map(|bytes| i16::from_le_bytes(bytes.try_into().expect("2-byte chunk")))
+                        .collect();
+                    offset += count * 2;
+                    params.push((name, values));
+                }
+                exact_len(opcode, payload, offset)?;
+                Ok(Self::SetParams { session_id, params })
+            }
+            OP_GET_PARAMS => {
+                let session_id = field_u32(opcode, payload, 0, "session_id")?;
+                let entries = usize::from(field_u16(opcode, payload, 4, "entry count")?);
+                exact_len(opcode, payload, 6 + entries * 4)?;
+                let names = payload[6..]
+                    .chunks_exact(4)
+                    .map(|bytes| bytes.try_into().expect("4-byte chunk"))
+                    .collect();
+                Ok(Self::GetParams { session_id, names })
+            }
             OP_PROCESS => {
                 let session_id = field_u32(opcode, payload, 0, "session_id")?;
                 let frames = field_u32(opcode, payload, 4, "frames")?;
@@ -289,6 +396,56 @@ impl Command {
     }
 }
 
+/// Encodes a [`Command::GetParams`] reply payload (shim side):
+/// `[u16 n]([u16 count][i16 × count] × n)`, one entry per requested
+/// name, in request order. `count` 0 marks a dead ref (unknown 4-CC).
+///
+/// # Panics
+///
+/// Never in practice: only past `u16::MAX` entries or values per
+/// param, orders of magnitude beyond any real batch.
+#[must_use]
+pub fn encode_get_params_reply(values: &[Vec<i16>]) -> Vec<u8> {
+    let entries = u16::try_from(values.len()).expect("bounded by MAX_FRAME_BYTES");
+    let mut payload = entries.to_le_bytes().to_vec();
+    for value in values {
+        let count = u16::try_from(value.len()).expect("bounded by MAX_FRAME_BYTES");
+        payload.extend_from_slice(&count.to_le_bytes());
+        payload.extend(value.iter().flat_map(|element| element.to_le_bytes()));
+    }
+    payload
+}
+
+/// Decodes a [`Command::GetParams`] reply payload (daemon side).
+///
+/// # Errors
+///
+/// [`DecodeError::MalformedPayload`] when the payload doesn't fit the
+/// layout exactly.
+///
+/// # Panics
+///
+/// Never in practice: the value split is over a size-checked payload.
+pub fn decode_get_params_reply(payload: &[u8]) -> Result<Vec<Vec<i16>>, DecodeError> {
+    let entries = field_u16(OP_GET_PARAMS, payload, 0, "reply entry count")?;
+    let mut values = Vec::with_capacity(entries.into());
+    let mut offset = 2;
+    for _ in 0..entries {
+        let count = usize::from(field_u16(OP_GET_PARAMS, payload, offset, "reply count")?);
+        offset += 2;
+        let value = payload
+            .get(offset..offset + count * 2)
+            .ok_or(DecodeError::MalformedPayload(OP_GET_PARAMS, "reply values"))?
+            .chunks_exact(2)
+            .map(|bytes| i16::from_le_bytes(bytes.try_into().expect("2-byte chunk")))
+            .collect();
+        offset += count * 2;
+        values.push(value);
+    }
+    exact_len(OP_GET_PARAMS, payload, offset)?;
+    Ok(values)
+}
+
 /// Rejects payloads that aren't exactly `expected` bytes — a size
 /// mismatch means the peer and this end disagree on the layout.
 fn exact_len(opcode: u32, payload: &[u8], expected: usize) -> Result<(), DecodeError> {
@@ -300,6 +457,19 @@ fn exact_len(opcode: u32, payload: &[u8], expected: usize) -> Result<(), DecodeE
             "payload size doesn't match the opcode's layout",
         ))
     }
+}
+
+/// Reads the little-endian `u16` at `offset`, named for error messages.
+fn field_u16(
+    opcode: u32,
+    payload: &[u8],
+    offset: usize,
+    name: &'static str,
+) -> Result<u16, DecodeError> {
+    payload
+        .get(offset..offset + 2)
+        .map(|bytes| u16::from_le_bytes(bytes.try_into().expect("2-byte slice")))
+        .ok_or(DecodeError::MalformedPayload(opcode, name))
 }
 
 /// Reads the little-endian `u32` at `offset`, named for error messages.
@@ -389,6 +559,123 @@ mod tests {
         // Only 0/1 are valid enabled bytes — anything else is desync.
         let garbage = Command::decode(OP_SET_ENABLED, &[7, 0, 0, 0, 2]);
         assert!(garbage.is_err());
+    }
+
+    #[test]
+    fn set_params_round_trips_a_name_addressed_batch() {
+        let command = Command::SetParams {
+            session_id: 7,
+            params: vec![
+                (param_name("dvla"), vec![8]),
+                (param_name("gebf"), vec![43, 129]),
+            ],
+        };
+        let (opcode, payload) = command.encode();
+        assert_eq!(opcode, OP_SET_PARAMS);
+        // [u32 id][u16 n]([4-CC][u16 count][i16 × count] × n) — epic #8.
+        let expected = [
+            &7_u32.to_le_bytes()[..],
+            &2_u16.to_le_bytes(),
+            b"dvla",
+            &1_u16.to_le_bytes(),
+            &8_i16.to_le_bytes(),
+            b"gebf",
+            &2_u16.to_le_bytes(),
+            &43_i16.to_le_bytes(),
+            &129_i16.to_le_bytes(),
+        ]
+        .concat();
+        assert_eq!(payload, expected);
+        assert_eq!(Command::decode(opcode, &payload), Ok(command));
+    }
+
+    #[test]
+    fn set_params_rejects_malformed_payloads() {
+        let (opcode, payload) = Command::SetParams {
+            session_id: 7,
+            params: vec![(param_name("dvla"), vec![8])],
+        }
+        .encode();
+        assert!(Command::decode(opcode, &payload[..7]).is_err(), "short");
+        assert!(
+            Command::decode(opcode, &[payload.clone(), vec![0]].concat()).is_err(),
+            "trailing bytes mean the stream is desynced"
+        );
+        // A zero-count entry writes nothing — reject rather than poke.
+        let zero_count = [
+            &7_u32.to_le_bytes()[..],
+            &1_u16.to_le_bytes(),
+            b"dvla",
+            &0_u16.to_le_bytes(),
+        ]
+        .concat();
+        assert!(Command::decode(opcode, &zero_count).is_err());
+        // An empty batch is a coherent atomic no-op — allowed.
+        let empty = [&7_u32.to_le_bytes()[..], &0_u16.to_le_bytes()].concat();
+        assert_eq!(
+            Command::decode(opcode, &empty),
+            Ok(Command::SetParams {
+                session_id: 7,
+                params: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn get_params_round_trips_a_name_list() {
+        let command = Command::GetParams {
+            session_id: 7,
+            names: vec![param_name("dvla"), param_name("ver")],
+        };
+        let (opcode, payload) = command.encode();
+        assert_eq!(opcode, OP_GET_PARAMS);
+        // [u32 id][u16 n]([4-CC] × n) — epic #8.
+        let expected = [
+            &7_u32.to_le_bytes()[..],
+            &2_u16.to_le_bytes(),
+            b"dvla",
+            b"ver\0",
+        ]
+        .concat();
+        assert_eq!(payload, expected);
+        assert_eq!(Command::decode(opcode, &payload), Ok(command));
+        assert!(Command::decode(opcode, &expected[..9]).is_err(), "short");
+        assert!(
+            Command::decode(opcode, &[expected, vec![0]].concat()).is_err(),
+            "trailing bytes mean the stream is desynced"
+        );
+    }
+
+    #[test]
+    fn get_params_reply_round_trips_including_empty_arrays() {
+        let values = vec![vec![8_i16], vec![], vec![2, 0, 4, 0]];
+        let payload = encode_get_params_reply(&values);
+        // [u16 n]([u16 count][i16 × count] × n); count 0 = a dead ref.
+        let expected = [
+            &3_u16.to_le_bytes()[..],
+            &1_u16.to_le_bytes(),
+            &8_i16.to_le_bytes(),
+            &0_u16.to_le_bytes(),
+            &4_u16.to_le_bytes(),
+            &2_i16.to_le_bytes(),
+            &0_i16.to_le_bytes(),
+            &4_i16.to_le_bytes(),
+            &0_i16.to_le_bytes(),
+        ]
+        .concat();
+        assert_eq!(payload, expected);
+        assert_eq!(decode_get_params_reply(&payload), Ok(values));
+        assert!(decode_get_params_reply(&payload[..3]).is_err(), "short");
+        assert!(
+            decode_get_params_reply(&[payload, vec![0]].concat()).is_err(),
+            "trailing bytes mean the stream is desynced"
+        );
+    }
+
+    #[test]
+    fn short_names_pad_with_nul_bytes() {
+        assert_eq!(param_name("ver"), *b"ver\0");
+        assert_eq!(param_name("dvla"), *b"dvla");
     }
 
     #[test]

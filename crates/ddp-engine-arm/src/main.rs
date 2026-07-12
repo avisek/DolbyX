@@ -6,9 +6,8 @@
 //! stdout carries nothing else (the engine's own log, via the staged
 //! `liblog` stub, goes to stderr).
 //!
-//! Ops 0x01–0x03 + 0x30 (this slice, #14); the AK-direct param ops and
-//! the vis tail land in Slice 07
-//! ([#15](https://github.com/avisek/DolbyX/issues/15)).
+//! Lifecycle ops ride the engine's cmd protocol; `SetParams` /
+//! `GetParams` go AK-direct (ADR-0010).
 
 #![deny(unsafe_code)]
 
@@ -19,7 +18,9 @@ mod session;
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use ddp_engine::protocol::{Command, STATUS_INVALID, STATUS_OK, read_message, write_reply};
+use ddp_engine::protocol::{
+    Command, STATUS_INVALID, STATUS_OK, encode_get_params_reply, read_message, write_reply,
+};
 
 use crate::ffi::{ENODATA, EngineLib};
 use crate::session::SessionTable;
@@ -91,28 +92,41 @@ fn dispatch(
         } => status_only(
             sessions
                 .get_mut(session_id)
-                .and_then(|effect| effect.set_enabled(enabled)),
+                .and_then(|session| session.set_enabled(enabled)),
         ),
+        Command::SetParams { session_id, params } => status_only(
+            sessions
+                .get_mut(session_id)
+                .map(|session| session.set_params(&params)),
+        ),
+        Command::GetParams { session_id, names } => match sessions.get_mut(session_id) {
+            Ok(session) => (
+                STATUS_OK,
+                encode_get_params_reply(&session.get_params(&names)),
+            ),
+            Err(status) => (status, Vec::new()),
+        },
         Command::Process {
             session_id,
             mut pcm,
         } => {
-            let effect = match sessions.get_mut(session_id) {
-                Ok(effect) => effect,
+            let session = match sessions.get_mut(session_id) {
+                Ok(session) => session,
                 Err(status) => return (status, Vec::new()),
             };
             // WRITE mode: the engine overwrites the whole output — no
             // per-block zeroing; `resize` only touches first-use growth.
             scratch.resize(pcm.len(), 0);
             let output = &mut scratch[..pcm.len()];
-            let status = effect.process(&mut pcm, output);
+            let status = session.process(&mut pcm, output);
             // Enabled, crossfading, and bypassed blocks are all "ship
             // the output": bypass (-ENODATA) already deposited the dry
             // input (setconfig_probe Sc9).
             if status == 0 || status == -ENODATA {
-                // Reply `[pcm]`; Slice 07 appends the 160-byte vis tail.
-                let mut reply = Vec::with_capacity(output.len() * 2);
+                let tail = session.vis_tail();
+                let mut reply = Vec::with_capacity((output.len() + tail.len()) * 2);
                 reply.extend(output.iter().flat_map(|sample| sample.to_le_bytes()));
+                reply.extend(tail.iter().flat_map(|sample| sample.to_le_bytes()));
                 (STATUS_OK, reply)
             } else {
                 (status, Vec::new())
