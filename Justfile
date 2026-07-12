@@ -3,7 +3,7 @@
 # Daemon + UI dev loop with hot reload, against the real engine
 dev: _ui-deps stage-engine
     ui/node_modules/.bin/concurrently --kill-others --names daemon,ui --prefix-colors auto \
-        "cargo watch -w crates -w Cargo.toml -w Cargo.lock -x 'run -p ddp-daemon -- --ui ui/dev.html'" \
+        "cargo watch -w crates -w Cargo.toml -w Cargo.lock -x 'run -p ddp-daemon -- --ui ui/dev.html --socket-path target/debug/dolbyx.sock'" \
         "pnpm -C ui dev"
 
 # Stage the ARM engine (shim + libdseffect.so + stubs) beside the debug daemon binary

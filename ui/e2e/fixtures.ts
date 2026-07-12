@@ -55,6 +55,10 @@ class Daemon implements DaemonHandle {
       ...['--port', String(this.#port)],
       ...['--config-dir', this.#configDir],
       ...['--ui', uiHtml],
+      // Slice 11: the plugin socket; the default /run/dolbyx path needs
+      // root. Inside the per-test tempdir — unique across workers, and
+      // a restart over the same dir reclaims the stale socket file.
+      ...['--socket-path', join(this.#configDir, 'dolbyx.sock')],
     ])
     this.#child = child
     child.stderr.on('data', (chunk: Buffer) => this.#log.push(chunk.toString()))
