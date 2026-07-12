@@ -29,5 +29,9 @@ node_modules/
 package-lock.json
 /ui/dist/
 
+# Playwright
+/ui/test-results/
+/ui/playwright-report/
+
 # Local files
 *.local

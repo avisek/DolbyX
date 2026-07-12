@@ -28,6 +28,12 @@ test: _ui-deps
     cargo test --workspace
     pnpm -C ui test
 
+# Playwright E2E: real browser against the real daemon + engine (issue #17)
+e2e: _ui-deps stage-engine
+    cargo build -p ddp-daemon
+    pnpm -C ui exec playwright install chromium
+    pnpm -C ui run e2e
+
 # Cross-compile the ARMv7 engine shim (rustup target + gcc-arm-linux-gnueabihf linker)
 arm-build:
     rustup target add armv7-unknown-linux-gnueabihf
