@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
 use common::{
-    RICH_IEBT, assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for,
-    try_recv_json, wait_until, ws_connect,
+    RICH_IEBT, assert_config_becomes, connected, recv_json, recv_non_vis, send_json, set_power,
+    socket_path_for, try_recv_json, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -150,7 +150,7 @@ async fn a_killed_engine_respawns_with_sessions_rebuilt() {
     // And the WS connection keeps serving (the processed block's vis
     // frame may arrive first).
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r9" })).await;
-    let snapshot = common::recv_non_vis(&mut ws).await;
+    let snapshot = recv_non_vis(&mut ws).await;
     assert_eq!(snapshot["snapshot"]["power"], false);
 }
 

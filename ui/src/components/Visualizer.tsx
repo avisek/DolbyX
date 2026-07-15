@@ -77,14 +77,19 @@ const Visualizer: Component = () => {
   })
 
   // The pip rides the latest `vcbg` directly — near-static EQ gains
-  // need no ballistics, and the original keeps them up while suspended.
+  // need no ballistics, and the original keeps drawing them when the
+  // feed goes quiet, so idle never touches them.
   const pipRows = createMemo(() => {
     const gains = visSample()?.params.vcbg ?? paramDef('vcbg').default
     return COLUMN_INDICES.map((column) => rowFor(gains[column] ?? 0))
   })
 
-  // gebf is preset-carried: a selected EQ preset's params shadow the
-  // profile's own entirely (ADR-0003).
+  // Labels resolve from the bootstrap's `gebf` (state first — the
+  // table default is the engine's 10-band power-on grid, not the
+  // resolved one); gebf is preset-carried, so a selected EQ preset
+  // shadows the profile's own entirely (ADR-0003). The daemon stages
+  // the custom vis grid (`vcbf`) to this same table, so the labels
+  // match the `vcbe` columns.
   const frequencies = createMemo(() => {
     const profile = state.profiles.find(
       (candidate) => candidate.id === state.selected_profile,
@@ -122,8 +127,10 @@ const Visualizer: Component = () => {
         height={HEIGHT}
         fill={`url(#${gradientId})`}
       />
+      {/* As the Java painter draws them: one line at each column/row's
+          leading edge; the trailing +1 px strip stays background. */}
       <g class="visualizer__grid">
-        <For each={[...Array(BANDS + 1).keys()]}>
+        <For each={COLUMN_INDICES}>
           {(column) => (
             <line
               class="visualizer__grid-line"
@@ -134,7 +141,7 @@ const Visualizer: Component = () => {
             />
           )}
         </For>
-        <For each={[...Array(ROWS + 1).keys()]}>
+        <For each={ROW_INDICES}>
           {(row) => (
             <line
               class="visualizer__grid-line"

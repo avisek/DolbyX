@@ -802,7 +802,8 @@ mod tests {
     }
 
     /// Behavior 1 (issue #24): a main-session block fans its vis frame
-    /// out to every subscriber, verbatim.
+    /// out to every subscriber, verbatim — process-driven, not
+    /// power-gated: a bypassed block still emits.
     #[test]
     fn a_main_session_block_fans_its_vis_frame_to_subscribers() {
         let stub = Arc::new(StubBackend::new());
@@ -813,6 +814,14 @@ mod tests {
         let mut output = [0_i16; 2];
         supervisor.process(main, &[7, -7], &mut output).unwrap();
         assert_eq!(vis.try_recv(), Ok(ddp_engine::stub::fabricated_vis()));
+
+        supervisor.set_power(false).unwrap();
+        supervisor.process(main, &[7, -7], &mut output).unwrap();
+        assert_eq!(
+            vis.try_recv(),
+            Ok(ddp_engine::stub::fabricated_vis()),
+            "bypassed blocks still emit"
+        );
     }
 
     /// Behavior 2 (issue #24): a non-main session's blocks emit

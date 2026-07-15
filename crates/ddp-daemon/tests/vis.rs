@@ -2,8 +2,8 @@
 //! `vis` event per main-session block carrying the vis tail's four
 //! arrays verbatim under 4-CC keys, to every WS client (no originator
 //! rule). A pure event stream: no audio ⇒ no events, no timer, no
-//! suspend flag anywhere (v1's 50 ms pump is dead). Mock policy: stub
-//! fabricated frames here; the real-engine replay lives in
+//! suspend flag anywhere (v1's polling pump is dead). Mock policy:
+//! stub fabricated frames here; the real-engine replay lives in
 //! `e2e_qemu.rs`.
 
 mod common;

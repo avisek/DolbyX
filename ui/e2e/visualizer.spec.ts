@@ -6,7 +6,7 @@
  */
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
-import { TonePlugin } from './plugin'
+import { SyntheticPlugin } from './plugin'
 
 const SAMPLE_RATE = 48_000
 const FRAMES = 480 // 10 ms blocks
@@ -54,7 +54,7 @@ test('bricks move while a plugin pushes a tone through the real engine, then fad
   // At rest the spectrum sits at the floor — one brick per column.
   await expect.poll(() => litCount(page)).toBe(20)
 
-  const plugin = await TonePlugin.connect(daemon.socketPath)
+  const plugin = await SyntheticPlugin.connect(daemon.socketPath)
   await plugin.hello(SAMPLE_RATE, FRAMES)
   const stop = { requested: false }
   const stream = (async () => {

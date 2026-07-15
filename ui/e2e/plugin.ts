@@ -1,9 +1,11 @@
 /**
- * A synthetic audio plugin for the Slice 16 (#24) E2E: dials the
- * daemon's Unix plugin socket and speaks the real plugin ↔ daemon
- * protocol (epic #8) — `[u32 length][u32 opcode][payload]`,
- * little-endian, `length` counting the opcode word plus the payload.
- * Audio is int16 interleaved stereo, exactly what the daemon ferries.
+ * A synthetic audio plugin for the Slice 16 (#24) E2E — the TS twin of
+ * the Rust suites' `SyntheticPlugin`: dials the daemon's Unix plugin
+ * socket and speaks the real plugin ↔ daemon protocol (epic #8) —
+ * `[u32 length][u32 opcode][payload]`, little-endian, `length`
+ * counting the opcode word plus the payload. Audio is int16
+ * interleaved stereo, exactly what the daemon ferries; the signal
+ * itself is the spec's business.
  */
 import { createConnection, type Socket } from 'node:net'
 
@@ -17,7 +19,7 @@ interface Frame {
   readonly payload: Buffer
 }
 
-export class TonePlugin {
+export class SyntheticPlugin {
   readonly #socket: Socket
   #received: Buffer = Buffer.alloc(0)
   readonly #waiters: ((frame: Frame) => void)[] = []
@@ -30,13 +32,13 @@ export class TonePlugin {
     })
   }
 
-  static async connect(socketPath: string): Promise<TonePlugin> {
+  static async connect(socketPath: string): Promise<SyntheticPlugin> {
     const socket = createConnection(socketPath)
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve)
       socket.once('error', reject)
     })
-    return new TonePlugin(socket)
+    return new SyntheticPlugin(socket)
   }
 
   /** `Hello` → the daemon's `HelloAck`, returning the session id. */

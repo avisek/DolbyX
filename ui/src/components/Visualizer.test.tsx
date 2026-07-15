@@ -79,9 +79,9 @@ it('renders the SVG layer stack — bg, grid, 20×48 bricks, pips, EQ overlay', 
   const { container } = renderConnected()
 
   expect(container.querySelector('.visualizer__bg')).toBeTruthy()
-  // 21 verticals + 49 horizontals — a line between (and around) every
-  // column and row.
-  expect(container.querySelectorAll('.visualizer__grid-line')).toHaveLength(70)
+  // 20 verticals + 48 horizontals — one line at each column/row's
+  // leading edge, as the Java painter draws them.
+  expect(container.querySelectorAll('.visualizer__grid-line')).toHaveLength(68)
 
   const cols = columns(container)
   expect(cols).toHaveLength(20)

@@ -212,8 +212,8 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
     )
     .await;
     loop {
-        let frame = recv_json(ws).await;
-        if frame["type"] == "state" || frame["type"] == "vis" {
+        let frame = recv_non_vis(ws).await;
+        if frame["type"] == "state" {
             continue;
         }
         assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
