@@ -7,7 +7,8 @@
 //! 2–5 replayed over the real platform socket. Slice 14 (#22) adds its
 //! behavior 9: master-control edits read back from the registry.
 //! Slice 15 (#23) adds its behavior 8: the EQ preset overlay lands
-//! Rich's curve in the registry.
+//! Rich's curve in the registry. Slice 16 (#24) adds its behavior 10:
+//! `vis` events mirror the real reply tails verbatim.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -20,7 +21,7 @@ use std::sync::Arc;
 use common::plugin::SyntheticPlugin;
 use common::{
     RICH_IEBT, assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for,
-    wait_until, ws_connect,
+    try_recv_json, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -146,9 +147,10 @@ async fn a_killed_engine_respawns_with_sessions_rebuilt() {
         .expect("the session map was rebuilt");
     assert_eq!(output, block, "the rebuilt session carries power off");
 
-    // And the WS connection keeps serving.
+    // And the WS connection keeps serving (the processed block's vis
+    // frame may arrive first).
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r9" })).await;
-    let snapshot = recv_json(&mut ws).await;
+    let snapshot = common::recv_non_vis(&mut ws).await;
     assert_eq!(snapshot["snapshot"]["power"], false);
 }
 
@@ -538,6 +540,63 @@ async fn an_invalid_hello_rate_is_rejected_by_the_real_validation() {
     ok.hello(48_000, 256).await;
     let block = test_block();
     assert_eq!(ok.process(&block).await.len(), block.len());
+}
+
+/// Behavior 10 (issue #24), behaviors 1–2 against the real engine:
+/// every main-session block broadcasts one `vis` event carrying that
+/// `Process` reply's vis tail verbatim under 4-CC keys; a non-main
+/// session's blocks emit nothing. The custom pair goes live — proof
+/// the daemon-staged grid (`vcnb`/`vcbf`, `ven` latch order) took on
+/// the real engine.
+#[tokio::test]
+async fn vis_events_carry_the_real_reply_tails_verbatim() {
+    let daemon = start_qemu_daemon().await;
+    let supervisor = daemon.handle.supervisor();
+    let main = supervisor.create_session(48_000).expect("main session");
+    let other = supervisor.create_session(44_100).expect("second session");
+    let mut ws = connected(daemon.handle.addr()).await;
+
+    // Behavior 2: a non-main session's blocks emit nothing.
+    let block = test_block();
+    let mut output = vec![0_i16; block.len()];
+    supervisor
+        .process(other, &block, &mut output)
+        .expect("process");
+    assert_eq!(
+        try_recv_json(&mut ws, 300).await,
+        None,
+        "only the main session sources vis"
+    );
+
+    // Behavior 1: one event per main-session block, the reply's four
+    // arrays verbatim — long enough for the DSP to fill the grids.
+    let mut last = None;
+    for _ in 0..CROSSFADE_BLOCKS {
+        let vis = supervisor
+            .process(main, &block, &mut output)
+            .expect("process");
+        let event = recv_json(&mut ws).await;
+        assert_eq!(
+            event,
+            json!({
+                "type": "vis",
+                "params": {
+                    "vnbg": vis.vnbg,
+                    "vnbe": vis.vnbe,
+                    "vcbg": vis.vcbg,
+                    "vcbe": vis.vcbe,
+                },
+            }),
+            "the event mirrors its own block's reply tail"
+        );
+        last = Some(vis);
+    }
+    let last = last.expect("processed blocks");
+    assert!(
+        last.vcbe.iter().any(|&excitation| excitation != 0),
+        "custom excitations went live — the staged grid latched: {:?}",
+        last.vcbe
+    );
 }
 
 /// Behavior 6 (issue #16): a session created while power is off starts

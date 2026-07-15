@@ -201,8 +201,9 @@ pub async fn connected(addr: SocketAddr) -> WsClient {
 }
 
 /// Issues `set_power` and awaits its `ack` promise-style (ADR-0005:
-/// replies aren't positionally paired) — pub/sub `state` events, e.g.
-/// a plugin connection's main-session broadcast, may interleave.
+/// replies aren't positionally paired) — pub/sub `state`/`vis` events,
+/// e.g. a plugin's main-session broadcast or its blocks' vis frames,
+/// may interleave.
 pub async fn set_power(ws: &mut WsClient, on: bool) {
     let request_id = format!("rq-set-power-{on}");
     send_json(
@@ -212,12 +213,23 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
     .await;
     loop {
         let frame = recv_json(ws).await;
-        if frame["type"] == "state" {
+        if frame["type"] == "state" || frame["type"] == "vis" {
             continue;
         }
         assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
         assert_eq!(frame["request_id"], request_id.as_str());
         return;
+    }
+}
+
+/// Receives the next non-`vis` JSON frame — the per-block vis stream
+/// (issue #24) interleaves freely once audio flows.
+pub async fn recv_non_vis(ws: &mut WsClient) -> serde_json::Value {
+    loop {
+        let frame = recv_json(ws).await;
+        if frame["type"] != "vis" {
+            return frame;
+        }
     }
 }
 
