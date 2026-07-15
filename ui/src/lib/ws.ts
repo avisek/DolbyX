@@ -59,9 +59,26 @@ export type Command =
       readonly id: string | null
     }
 
+/**
+ * The `vis` event's payload — the main session's vis tail keyed by
+ * 4-CC, one event per processed block (Slice 16 #24). A pure event
+ * stream: no audio ⇒ no events; idle is the client's to derive.
+ */
+export interface VisParams {
+  /** Native-grid per-band EQ gains. */
+  readonly vnbg: readonly number[]
+  /** Native-grid per-band spectrum excitations. */
+  readonly vnbe: readonly number[]
+  /** Custom-grid per-band EQ gains — the level pips (and, Slice 17, the EQ curve). */
+  readonly vcbg: readonly number[]
+  /** Custom-grid per-band spectrum excitations — the spectrum bricks. */
+  readonly vcbe: readonly number[]
+}
+
 /** A daemon → client event frame. */
 export type ServerEvent =
   | { readonly type: 'state'; readonly snapshot: StateSnapshot }
+  | { readonly type: 'vis'; readonly params: VisParams }
   | { readonly type: 'ack'; readonly request_id: string; readonly ok: true }
   | {
       readonly type: 'error'
@@ -77,6 +94,8 @@ export interface WsClientHandlers {
   onSnapshot(snapshot: StateSnapshot): void
   /** The connection opened (`true`) or dropped (`false`). */
   onConnected(connected: boolean): void
+  /** One `vis` event arrived — the latest frame supersedes. */
+  onVis(params: VisParams): void
 }
 
 /** One command awaiting its `ack`/`error`. */
@@ -180,6 +199,9 @@ export class WsClient {
       case 'state':
         this.#handlers.onSnapshot(parsed.snapshot)
         break
+      case 'vis':
+        this.#handlers.onVis(parsed.params)
+        break
       case 'ack':
         this.#settle(parsed.request_id)?.resolve()
         break
@@ -193,7 +215,7 @@ export class WsClient {
         break
       }
       default:
-        // Unknown event types (future `vis`, Slice 16) are ignored.
+        // Unknown (future) event types are ignored.
         break
     }
   }

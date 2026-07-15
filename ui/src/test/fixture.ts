@@ -21,10 +21,16 @@ function def(
   }
 }
 
+/** The original 20-band grid — profiles resolve `gebf` to it. */
+export const DDP_GRID = [
+  43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651,
+  5685, 7063, 8958, 11025, 13781, 18777,
+] as const
+
 /**
- * The master-control rows of `parameters.toml` (+ the `vnnb` readout) —
- * ranges, `frac_bits`, kinds, and defaults verbatim from the shipped
- * table, so widgets resolve against daemon truth.
+ * The master-control and visualizer rows of `parameters.toml` (+ the
+ * `vnnb` readout) — ranges, `frac_bits`, kinds, and defaults verbatim
+ * from the shipped table, so widgets resolve against daemon truth.
  */
 export function fixtureParams(): readonly ParameterDef[] {
   return [
@@ -72,16 +78,59 @@ export function fixtureParams(): readonly ParameterDef[] {
       category: 'visualizer',
       access: 'read_only_static',
     }),
+    def({
+      name: 'gebf',
+      length: 40,
+      min: 20,
+      max: 20000,
+      // The engine's 10-band power-on grid; the resolved 20-band grid
+      // arrives via the profiles (defaults.toml shared block).
+      default: [
+        32,
+        64,
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000,
+        16000,
+        ...Array<number>(30).fill(20),
+      ],
+      kind: 'frequency_hz',
+      category: 'geq',
+    }),
+    def({
+      name: 'vcbg',
+      length: 20,
+      min: -192,
+      max: 576,
+      frac_bits: 4,
+      default: Array<number>(20).fill(0),
+      kind: { decibel: { lkfs: false } },
+      category: 'visualizer',
+      access: 'read_only_dynamic',
+    }),
   ]
 }
 
-/** One factory profile as the snapshot carries it. */
+/**
+ * One factory profile as the snapshot carries it — every profile
+ * resolves the shared 20-band `gebf` grid (defaults.toml `[profile]`).
+ */
 function factoryProfile(
   id: string,
   name: string,
   params: Profile['params'],
 ): Profile {
-  return { id, name, is_factory: true, selected_eq_preset: null, params }
+  return {
+    id,
+    name,
+    is_factory: true,
+    selected_eq_preset: null,
+    params: { gebf: DDP_GRID, ...params },
+  }
 }
 
 /** One factory EQ preset as the snapshot carries it (issue #23). */

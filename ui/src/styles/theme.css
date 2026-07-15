@@ -7,4 +7,15 @@
   --color-text: #e8eef5;
   --color-text-muted: #8fa1b3;
   --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  /* Visualizer (ADR-0008): dark-navy → near-black radial background,
+     the four brick tiles, and the brighter level pip. */
+  --color-vis-bg: #14304d;
+  --color-vis-bg-edge: #040810;
+  --color-vis-grid: #000;
+  --color-vis-brick-off: #10233a66;
+  --color-vis-brick-red: #d94f3d;
+  --color-vis-brick-yellow: #e8c34a;
+  --color-vis-brick-blue: #6db6e3;
+  --color-vis-pip: #b8ecff;
 }

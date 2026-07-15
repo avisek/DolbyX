@@ -1,0 +1,37 @@
+.visualizer {
+  display: block;
+  width: 100%;
+  border-radius: 0.25rem;
+}
+
+.visualizer__grid-line {
+  stroke: var(--color-vis-grid);
+  stroke-width: 1;
+}
+
+/* The dark "off" tile every empty cell renders. */
+.visualizer__brick {
+  fill: var(--color-vis-brick-off);
+}
+
+.visualizer__brick--red.visualizer__brick--lit {
+  fill: var(--color-vis-brick-red);
+}
+
+.visualizer__brick--yellow.visualizer__brick--lit {
+  fill: var(--color-vis-brick-yellow);
+}
+
+.visualizer__brick--blue.visualizer__brick--lit {
+  fill: var(--color-vis-brick-blue);
+}
+
+.visualizer__pip {
+  fill: var(--color-vis-pip);
+}
+
+/* Contents land in Slice 17 (#25); the transition is the hand-off. */
+.visualizer__eq-overlay {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}

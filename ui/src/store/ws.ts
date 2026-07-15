@@ -11,6 +11,7 @@ import {
   applyProfileEdit,
   applySnapshot,
 } from './state'
+import { applyVis } from './vis'
 
 const [connected, setConnected] = createSignal(false)
 
@@ -28,6 +29,7 @@ export function startWs(url = `ws://${location.host}/ws`): void {
   client = new WsClient(url, {
     onSnapshot: applySnapshot,
     onConnected: setConnected,
+    onVis: applyVis,
   })
 }
 

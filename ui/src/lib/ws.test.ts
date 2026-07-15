@@ -1,20 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
-import { WsClient, type StateSnapshot } from './ws'
+import { WsClient, type StateSnapshot, type VisParams } from './ws'
 
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 let snapshots: StateSnapshot[]
 let connectionLog: boolean[]
+let visFrames: VisParams[]
 let client: WsClient
 
 beforeEach(() => {
   MockWebSocket.reset()
   snapshots = []
   connectionLog = []
+  visFrames = []
   client = new WsClient('ws://daemon.test/ws', {
     onSnapshot: (snapshot) => snapshots.push(snapshot),
     onConnected: (connected) => connectionLog.push(connected),
+    onVis: (params) => visFrames.push(params),
   })
 })
 
@@ -139,6 +142,23 @@ it('close() stops the reconnect loop', () => {
   client.close()
   vi.advanceTimersByTime(60_000)
   expect(MockWebSocket.instances).toHaveLength(1)
+})
+
+// Slice 16 (#24): `vis` events are pure pub/sub — routed to onVis
+// verbatim, no request lifecycle, no reconcile.
+it('routes vis events to onVis without touching pendings', () => {
+  const socket = MockWebSocket.latest()
+  socket.open()
+  const params = {
+    vnbg: [0, 1, 2],
+    vnbe: [20, 21, 22],
+    vcbg: [40, 41, 42],
+    vcbe: [60, 61, 62],
+  }
+  socket.serverMessage({ type: 'vis', params })
+  expect(visFrames).toEqual([params])
+  // Only the on-open reconcile was sent — a vis event triggers nothing.
+  expect(socket.sentCommands().map((f) => f.cmd)).toEqual(['get_state'])
 })
 
 it('does not reconcile a failed get_state again (no error loop)', () => {
