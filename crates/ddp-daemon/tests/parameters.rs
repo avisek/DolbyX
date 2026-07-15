@@ -118,6 +118,23 @@ fn curated_defaults_correct_the_oob_power_on_slots() {
     assert_eq!(lookup(&defs, "vnnb").unwrap().default, vec![20]);
 }
 
+/// The custom visualizer grid follows the structural-group layout rule
+/// (issue #24): its stagers `vcnb`/`vcbf` precede `ven` in the table,
+/// so every resolved batch writes grid-then-latch — the `ven` → ON
+/// write latches the staged layout (docs/ddp/02; the vis-grid analog
+/// of the commit-leaf rule, shim-internal like the rest).
+#[test]
+fn ven_sits_after_the_custom_grid_it_latches() {
+    let defs = defs();
+    let position = |name: &str| {
+        defs.iter()
+            .position(|def| def.name == name)
+            .unwrap_or_else(|| panic!("`{name}` declared"))
+    };
+    assert!(position("vcnb") < position("vcbf"), "count stages first");
+    assert!(position("vcbf") < position("ven"), "ven latches last");
+}
+
 /// The CI structural check against the param twin: same 64 leaves,
 /// `length` equal (the allocation is a hard engine fact), every range
 /// within the engine envelope. Everything else — narrowed bounds,

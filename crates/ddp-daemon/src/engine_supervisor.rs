@@ -2,12 +2,20 @@
 //! session table (main session = index 0). External session ids are
 //! minted here and stay stable across engine respawns — transparent to
 //! `AudioServer`/UI. Every state-side write fans out to all live
-//! sessions; zero sessions ⇒ state-only, no engine call.
+//! sessions; zero sessions ⇒ state-only, no engine call. Every
+//! main-session block fans its vis tail out to the `vis` subscribers
+//! (issue #24) — process-driven, never timed.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ddp_engine::{Engine, EngineError, SessionId, VisFrame};
+use tokio::sync::broadcast;
+
+/// Vis frames a subscriber may fall behind before it skips ahead —
+/// ~0.6 s of buffer at a 100-block/s host. Skipping loses nothing: the
+/// client renders from the latest frame anyway.
+const VIS_CHANNEL_CAPACITY: usize = 64;
 
 /// Why a supervisor operation failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -57,6 +65,9 @@ pub struct EngineSupervisor {
     engine: Arc<dyn Engine>,
     /// The 8 ReadOnly-Static 4-CCs read from the main session.
     readout_names: Vec<String>,
+    /// The `vis` fan-out (issue #24): one frame per main-session block,
+    /// pure event stream — no audio ⇒ nothing sent, no timer anywhere.
+    vis: broadcast::Sender<VisFrame>,
     inner: Mutex<Inner>,
 }
 
@@ -90,6 +101,7 @@ impl EngineSupervisor {
         Self {
             engine,
             readout_names,
+            vis: broadcast::channel(VIS_CHANNEL_CAPACITY).0,
             inner: Mutex::new(Inner {
                 sessions: Vec::new(),
                 next_external: 0,
@@ -307,11 +319,11 @@ impl EngineSupervisor {
             .iter()
             .position(|session| session.external == id)
             .ok_or(SupervisorError::SessionNotFound(id))?;
-        match self
+        let vis = match self
             .engine
             .process(inner.sessions[index].backend, input, output)
         {
-            Ok(vis) => Ok(vis),
+            Ok(vis) => vis,
             Err(EngineError::Crashed(_)) => {
                 // The block was lost with the process; recover, then
                 // retry it once on the rebuilt session.
@@ -321,10 +333,23 @@ impl EngineSupervisor {
                     .map_err(|error| match error {
                         EngineError::Crashed(message) => SupervisorError::EngineCrashed(message),
                         other => SupervisorError::Engine(other),
-                    })
+                    })?
             }
-            Err(error) => Err(SupervisorError::Engine(error)),
+            Err(error) => return Err(SupervisorError::Engine(error)),
+        };
+        if index == 0 {
+            let _ = self.vis.send(vis.clone()); // no subscribers is fine
         }
+        Ok(vis)
+    }
+
+    /// Subscribes to the `vis` event stream: the vis tail of every
+    /// processed block, verbatim. Pure event stream — no audio ⇒ no
+    /// frames; idle is the client's to derive (issue #24). A lagged
+    /// subscriber skips ahead; frames are superseded, never awaited.
+    #[must_use]
+    pub fn subscribe_vis(&self) -> broadcast::Receiver<VisFrame> {
+        self.vis.subscribe()
     }
 
     /// The live ReadOnly-Static values from the main session, keyed by
@@ -339,10 +364,9 @@ impl EngineSupervisor {
     }
 
     /// The main session's external id — the oldest live session, which
-    /// sources the readouts (and, from Slice 16
-    /// [#24](https://github.com/avisek/DolbyX/issues/24), the `vis`
-    /// events). `None` with zero sessions. A change here means the
-    /// snapshot's `readouts` changed — the caller broadcasts.
+    /// sources the readouts and the `vis` events. `None` with zero
+    /// sessions. A change here means the snapshot's `readouts` changed
+    /// — the caller broadcasts.
     ///
     /// # Panics
     ///
@@ -775,6 +799,56 @@ mod tests {
             supervisor.process(SessionId(99), &input, &mut output),
             Err(SupervisorError::SessionNotFound(SessionId(99)))
         );
+    }
+
+    /// Behavior 1 (issue #24): a main-session block fans its vis frame
+    /// out to every subscriber, verbatim.
+    #[test]
+    fn a_main_session_block_fans_its_vis_frame_to_subscribers() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub, true, Vec::new(), Vec::new());
+        let mut vis = supervisor.subscribe_vis();
+        let main = supervisor.create_session(48000).unwrap();
+
+        let mut output = [0_i16; 2];
+        supervisor.process(main, &[7, -7], &mut output).unwrap();
+        assert_eq!(vis.try_recv(), Ok(ddp_engine::stub::fabricated_vis()));
+    }
+
+    /// Behavior 2 (issue #24): a non-main session's blocks emit
+    /// nothing — the main session is the one vis source, so two hosts
+    /// never interleave frames.
+    #[test]
+    fn a_non_main_session_block_emits_no_vis_frame() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub, true, Vec::new(), Vec::new());
+        let mut vis = supervisor.subscribe_vis();
+        let _main = supervisor.create_session(48000).unwrap();
+        let other = supervisor.create_session(44100).unwrap();
+
+        let mut output = [0_i16; 2];
+        supervisor.process(other, &[7, -7], &mut output).unwrap();
+        assert_eq!(
+            vis.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty),
+            "only the main session sources vis"
+        );
+    }
+
+    /// Behavior 4 (issue #24): when the main session dies the
+    /// next-oldest takes over as the vis source.
+    #[test]
+    fn the_next_oldest_session_sources_vis_after_the_mains_death() {
+        let stub = Arc::new(StubBackend::new());
+        let supervisor = EngineSupervisor::new(stub, true, Vec::new(), Vec::new());
+        let mut vis = supervisor.subscribe_vis();
+        let first = supervisor.create_session(48000).unwrap();
+        let second = supervisor.create_session(44100).unwrap();
+
+        supervisor.destroy_session(first).unwrap();
+        let mut output = [0_i16; 2];
+        supervisor.process(second, &[7, -7], &mut output).unwrap();
+        assert_eq!(vis.try_recv(), Ok(ddp_engine::stub::fabricated_vis()));
     }
 
     #[test]

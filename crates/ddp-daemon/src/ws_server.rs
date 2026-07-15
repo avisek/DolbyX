@@ -10,7 +10,7 @@ use ddp_state::Command;
 use tokio::sync::broadcast;
 
 use crate::App;
-use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
+use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request, vis_event};
 
 /// Internal identity of one connection — never on the wire; exists
 /// solely so the daemon can exclude the originator from `state`
@@ -29,6 +29,7 @@ pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<A
 async fn connection(mut socket: WebSocket, app: Arc<App>) {
     let conn_id = app.fresh_conn_id();
     let mut updates = app.updates.subscribe();
+    let mut vis_frames = app.supervisor.subscribe_vis();
     if send(&mut socket, &state_event(&app).await).await.is_err() {
         return;
     }
@@ -56,6 +57,20 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
                     Err(broadcast::error::RecvError::Closed) => return,
                 };
                 if send(&mut socket, &text).await.is_err() {
+                    return;
+                }
+            }
+            vis = vis_frames.recv() => {
+                let frame = match vis {
+                    Ok(frame) => frame,
+                    // Fell behind a fast block rate: skip ahead — the
+                    // client renders the latest frame, nothing is owed.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    // The supervisor (and its sender) outlives every
+                    // connection; closed only at teardown.
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
+                if send(&mut socket, &vis_event(&frame).to_text()).await.is_err() {
                     return;
                 }
             }

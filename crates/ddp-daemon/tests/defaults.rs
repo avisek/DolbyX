@@ -165,6 +165,12 @@ fn the_shared_block_applies_to_every_profile() {
         // `endp`), and the visualizer feed.
         assert_eq!(scalar(profile, "endp"), 2, "{id}: endp");
         assert_eq!(scalar(profile, "ven"), 1, "{id}: ven");
+        // The custom visualizer grid (issue #24): the engine boots
+        // `vcnb` = 0 — `vcbg`/`vcbe` read zero — until the host stages
+        // the grid and `ven` latches it (docs/ddp/02). The original
+        // rode the same 20-band table for GEQ, IEQ, and visualizer.
+        assert_eq!(scalar(profile, "vcnb"), 20, "{id}: vcnb");
+        assert_eq!(profile.params["vcbf"][..20], DDP_GRID, "{id}: vcbf");
         // Band arrays stay allocated at engine capacity.
         assert_eq!(profile.params["gebf"].len(), 40, "{id}: gebf allocation");
         assert_eq!(profile.params["aobg"].len(), 329, "{id}: aobg allocation");

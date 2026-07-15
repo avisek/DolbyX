@@ -742,20 +742,6 @@ description = "Enable for test mode in the Peak Limiter."
 help = "A test mode is provided in the Peak LImiter that removes the system headroom, and hard-clips any peaks on the output, instead of normal limiter operation. This mode is used for system tests. This test mode is active when this parameter is set to DAP_PLIM_TEST_ENABLE, and inactive otherwise. Test mode should only be used in conjunction with the 'plmd' parameter set to DAP_PLMD_PEAK_ONLY."
 
 [[param]]
-name = "ven"
-length = 1
-min = 0
-max = 1
-frac_bits = 0
-default = [0]
-kind = "toggle"
-category = "visualizer"
-access = "experimental"
-label = "Visualization Support Enable"
-description = "Enable for visualization."
-help = "The Audio Processing Platform provides visualizations of the excitation (power) in each frequency band and the gains applied by the Audio Processing Platform in  each frequency band.The visualization can be provided at the native frequncy bands. Or you can configure the visualization for a custom set of frequencies.Visualization is available when this parameter is set to DAP_FEATURE_ON."
-
-[[param]]
 name = "vnnb"
 length = 1
 min = 1
@@ -838,6 +824,24 @@ access = "experimental"
 label = "Custom Visualizer Band Center Frequencies"
 description = "Specifies the centre frequencies of the Custom Visualizer bands."
 help = "This parameter allows control over the frequencies of the custom visualization bands. The values must be monotonically increasing. Changes to this parameter will not take effect until ven is set to DAP_FEATURE_ON."
+
+# ven sits after its stagers vcnb/vcbf (not in engine tree order): a
+# resolved batch writes grid-then-latch, so the ven → ON write latches
+# the staged custom layout (docs/ddp/02; the vis-grid analog of the
+# structural groups' stager-before-commit-leaf layout rule).
+[[param]]
+name = "ven"
+length = 1
+min = 0
+max = 1
+frac_bits = 0
+default = [0]
+kind = "toggle"
+category = "visualizer"
+access = "experimental"
+label = "Visualization Support Enable"
+description = "Enable for visualization."
+help = "The Audio Processing Platform provides visualizations of the excitation (power) in each frequency band and the gains applied by the Audio Processing Platform in  each frequency band.The visualization can be provided at the native frequncy bands. Or you can configure the visualization for a custom set of frequencies.Visualization is available when this parameter is set to DAP_FEATURE_ON."
 
 [[param]]
 name = "vcbg"

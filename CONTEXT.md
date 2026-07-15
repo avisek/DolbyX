@@ -54,8 +54,10 @@ profile's config.
 **Commit leaf**:
 The last payload array of a structural-param group (`gebg`, `iebt`,
 `aobg`, `arbh`); re-writing it — even unchanged — makes the engine
-re-derive that group's filterbank (**touch = commit**). Shim-internal,
-never in `ParameterDef`
+re-derive that group's filterbank (**touch = commit**). The custom
+visualizer grid is the analog with `ven` as its latch: `vcnb`/`vcbf`
+stage, a `ven` → ON write latches. Shim-internal, never in
+`ParameterDef`
 ([ADR-0010](docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
 _Avoid_: trigger param, commit param.
 

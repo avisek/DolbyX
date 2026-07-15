@@ -2,6 +2,7 @@
 //! command carries a client-generated `request_id`, echoed on exactly
 //! one `ack`/`error`; `state` events are pub/sub.
 
+use ddp_engine::VisFrame;
 use serde::{Deserialize, Serialize};
 
 use crate::engine_supervisor::SupervisorError;
@@ -85,6 +86,13 @@ pub(crate) enum WsEvent<'a> {
         /// The snapshot JSON.
         snapshot: serde_json::Value,
     },
+    /// The per-block visualizer broadcast (issue #24) — the main
+    /// session's vis tail keyed by 4-CC, to every client (`vis` has no
+    /// originator). Pure event stream: no audio ⇒ no events.
+    Vis {
+        /// The four ReadOnly-Dynamic arrays, verbatim i16 1/16-dB.
+        params: VisParams<'a>,
+    },
     /// The one success reply per command.
     Ack {
         /// The echoed correlation id.
@@ -120,10 +128,37 @@ pub(crate) enum ErrorCode {
     EngineRejected,
 }
 
+/// The `vis` event's payload — the `edit_*`/`vis` shared shape
+/// (`params: { "<4-CC>": [i16, …] }`, ADR-0005), borrowed from the
+/// supervisor's [`VisFrame`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct VisParams<'a> {
+    /// Native-grid per-band EQ gains.
+    vnbg: &'a [i16; 20],
+    /// Native-grid per-band spectrum excitations.
+    vnbe: &'a [i16; 20],
+    /// Custom-grid per-band EQ gains.
+    vcbg: &'a [i16; 20],
+    /// Custom-grid per-band spectrum excitations.
+    vcbe: &'a [i16; 20],
+}
+
 impl WsEvent<'_> {
     /// The frame as wire text.
     pub(crate) fn to_text(&self) -> String {
         serde_json::to_string(self).expect("events always serialize")
+    }
+}
+
+/// Builds the `vis` broadcast for one main-session block.
+pub(crate) fn vis_event(frame: &VisFrame) -> WsEvent<'_> {
+    WsEvent::Vis {
+        params: VisParams {
+            vnbg: &frame.vnbg,
+            vnbe: &frame.vnbe,
+            vcbg: &frame.vcbg,
+            vcbe: &frame.vcbe,
+        },
     }
 }
 

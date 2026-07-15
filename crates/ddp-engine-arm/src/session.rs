@@ -18,14 +18,18 @@ const SUPPORTED_RATES: [u32; 3] = [44_100, 48_000, 32_000];
 /// Structural-param groups → commit leaf. The engine only *stages* a
 /// band-count / centre-frequency write; the filterbank re-derives when
 /// the group's commit leaf (its last payload array) is rewritten —
-/// even unchanged (**touch = commit**, `reshape_probe`). Shim-internal
+/// even unchanged (**touch = commit**, `reshape_probe`). The custom
+/// visualizer grid is the analog with `ven` as its latch: a `ven` → ON
+/// write latches the staged `vcnb`/`vcbf` layout (docs/ddp/02), so its
+/// touch re-latches while ON and stays dormant while OFF. Shim-internal
 /// engine-binding knowledge, versioned with the binary — never in
 /// `ParameterDef`, never above the `Engine` trait (ADR-0010).
-const COMMIT_GROUPS: [(&[ParamName], ParamName); 4] = [
+const COMMIT_GROUPS: [(&[ParamName], ParamName); 5] = [
     (&[*b"genb", *b"gebf"], *b"gebg"),
     (&[*b"ienb", *b"iebf"], *b"iebt"),
     (&[*b"aonb", *b"aocc", *b"aobf"], *b"aobg"),
     (&[*b"arnb", *b"arbf"], *b"arbh"),
+    (&[*b"vcnb", *b"vcbf"], *b"ven\0"),
 ];
 
 /// The vis tail's four ReadOnly-Dynamic arrays, in reply order.
