@@ -24,6 +24,10 @@ into markup, so a smooth skin — or any different brick geometry —
 would need code changes. Continuous vars + CSS `round(…, step)` keep
 quantization a skin decision; by convention a skin holds its steps in
 custom properties (visualizer: `--exc-step`, `--gain-step` — Classic:
-1 row / none), so derived skins retune by overriding two vars.
+1 row / the wire's 1/16-dB quantum, an exact identity ⇒ observably
+continuous), so derived skins retune by overriding two vars. A step
+must stay numeric — `round()` can't consume a `none`, and an invalid
+substitution voids the whole declaration; "no quantization" is spelled
+"the data's own resolution".
 Consequence: jsdom tests see only the var/class seam;
 rendered-geometry truth needs a real browser (Playwright).

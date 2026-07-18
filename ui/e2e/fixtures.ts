@@ -22,6 +22,8 @@ const STOP_TIMEOUT_MS = 10_000
 export interface DaemonHandle {
   /** `http://localhost:<port>` — the page's single front door. */
   readonly origin: string
+  /** The plugin socket it serves (Slice 11) — synthetic plugins here. */
+  readonly socketPath: string
   /** SIGTERMs and waits: flushes `config.toml`, reaps the engine. */
   stop(): Promise<void>
   /** Boots again on the same port over the same config dir. */
@@ -45,6 +47,10 @@ class Daemon implements DaemonHandle {
     return `http://localhost:${String(this.#port)}`
   }
 
+  get socketPath(): string {
+    return join(this.#configDir, 'dolbyx.sock')
+  }
+
   /** Everything the daemon wrote — attached to failed tests. */
   get log(): string {
     return this.#log.join('')
@@ -58,7 +64,7 @@ class Daemon implements DaemonHandle {
       // Slice 11: the plugin socket; the default /run/dolbyx path needs
       // root. Inside the per-test tempdir — unique across workers, and
       // a restart over the same dir reclaims the stale socket file.
-      ...['--socket-path', join(this.#configDir, 'dolbyx.sock')],
+      ...['--socket-path', this.socketPath],
     ])
     this.#child = child
     child.stderr.on('data', (chunk: Buffer) => this.#log.push(chunk.toString()))

@@ -1,6 +1,6 @@
 import type { Bootstrap } from '../lib/bootstrap'
 import type { ParameterDef } from '../lib/parameters'
-import type { EqPreset, Profile, StateSnapshot } from '../lib/ws'
+import type { EqPreset, Profile, StateSnapshot, VisParams } from '../lib/ws'
 
 /** One table row over compact defaults — values stay daemon-truthful. */
 function def(
@@ -81,7 +81,15 @@ function factoryProfile(
   name: string,
   params: Profile['params'],
 ): Profile {
-  return { id, name, is_factory: true, selected_eq_preset: null, params }
+  return {
+    id,
+    name,
+    is_factory: true,
+    selected_eq_preset: null,
+    // The `defaults.toml [profile]` shared visualizer pins (issue #24
+    // part A) — every resolved profile carries them.
+    params: { ven: [1], vcnb: [20], ...params },
+  }
 }
 
 /** One factory EQ preset as the snapshot carries it (issue #23). */
@@ -140,6 +148,25 @@ export function fixtureState(
     ],
     readouts: { vnnb: [20] },
     ...overrides,
+  }
+}
+
+/**
+ * One `vis` event's params as the daemon broadcasts them (issue #24
+ * part A): four fixed 20-slot arrays, raw i16 1/16-dB. Unset custom
+ * slots carry what streamed silence produces — `vcbe` −192 (−12 dB),
+ * `vcbg` 0.
+ */
+export function fixtureVis(
+  head: { vcbg?: readonly number[]; vcbe?: readonly number[] } = {},
+): VisParams {
+  const pad = (values: readonly number[] | undefined, floor: number) =>
+    Array.from({ length: 20 }, (_slot, band) => values?.[band] ?? floor)
+  return {
+    vnbg: pad(undefined, 0),
+    vnbe: pad(undefined, -192),
+    vcbg: pad(head.vcbg, 0),
+    vcbe: pad(head.vcbe, -192),
   }
 }
 

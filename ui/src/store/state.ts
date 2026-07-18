@@ -5,7 +5,7 @@
  * events reconcile any drift after connect.
  */
 import { createStore, reconcile } from 'solid-js/store'
-import type { StateSnapshot } from '../lib/ws'
+import type { Profile, StateSnapshot } from '../lib/ws'
 
 // The wire type is readonly; the store's setter needs writable paths.
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
@@ -27,6 +27,11 @@ const [state, setState] = createStore<Mutable<StateSnapshot>>(
 
 /** The live snapshot, read by components. */
 export { state }
+
+/** The selected profile — carries every resolved non-readonly param. */
+export function selectedProfile(): Profile | undefined {
+  return state.profiles.find((profile) => profile.id === state.selected_profile)
+}
 
 /** Reconciles a full daemon snapshot into the store. */
 export function applySnapshot(snapshot: StateSnapshot): void {
