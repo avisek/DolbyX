@@ -2,6 +2,7 @@
 //! command carries a client-generated `request_id`, echoed on exactly
 //! one `ack`/`error`; `state` events are pub/sub.
 
+use ddp_engine::VisFrame;
 use serde::{Deserialize, Serialize};
 
 use crate::engine_supervisor::SupervisorError;
@@ -85,6 +86,12 @@ pub(crate) enum WsEvent<'a> {
         /// The snapshot JSON.
         snapshot: serde_json::Value,
     },
+    /// The per-block visualizer broadcast — the main session's vis
+    /// tail; pub/sub to every client, no originator rule (ADR-0005).
+    Vis {
+        /// The tail's four arrays keyed by 4-CC, raw i16 1/16-dB.
+        params: VisParams,
+    },
     /// The one success reply per command.
     Ack {
         /// The echoed correlation id.
@@ -106,6 +113,31 @@ pub(crate) enum WsEvent<'a> {
         /// Human-readable cause.
         message: String,
     },
+}
+
+/// The `vis` event payload: a [`VisFrame`] as wire JSON — the same
+/// `params: { "<4-CC>": [i16, …] }` shape the `edit_*` commands carry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct VisParams {
+    /// Native-grid per-band EQ gains.
+    vnbg: [i16; 20],
+    /// Native-grid per-band spectrum excitations.
+    vnbe: [i16; 20],
+    /// Custom-grid per-band EQ gains.
+    vcbg: [i16; 20],
+    /// Custom-grid per-band spectrum excitations.
+    vcbe: [i16; 20],
+}
+
+impl From<&VisFrame> for VisParams {
+    fn from(frame: &VisFrame) -> Self {
+        Self {
+            vnbg: frame.vnbg,
+            vnbe: frame.vnbe,
+            vcbg: frame.vcbg,
+            vcbe: frame.vcbe,
+        }
+    }
 }
 
 /// Machine-readable failure classes on the wire.

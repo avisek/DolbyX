@@ -126,8 +126,8 @@ async fn pump<S: AsyncRead + AsyncWrite + Unpin>(
             Ok(PluginMessage::Process { pcm }) if pcm.len() as u64 <= u64::from(max_frames) * 2 => {
                 output.resize(pcm.len(), 0);
                 match app.supervisor.process(session, &pcm, &mut output) {
-                    // The vis tail feeds the `vis` event stream in
-                    // Slice 16 (#24); here the plugin only needs PCM.
+                    // The supervisor fans main-session frames to the
+                    // `vis` subscribers itself; the plugin needs PCM.
                     Ok(_vis) => {
                         reply.clear();
                         push_pcm(&mut reply, &output);

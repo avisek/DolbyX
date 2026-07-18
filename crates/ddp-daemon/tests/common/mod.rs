@@ -118,6 +118,17 @@ pub async fn start_daemon() -> TestDaemon {
     TestDaemon { handle, stub, dir }
 }
 
+/// The `params` object a [`ddp_engine::VisFrame`] must appear as on
+/// the wire (ADR-0005): the four arrays verbatim under their 4-CC keys.
+pub fn vis_params_json(frame: &ddp_engine::VisFrame) -> serde_json::Value {
+    serde_json::json!({
+        "vnbg": frame.vnbg.to_vec(),
+        "vnbe": frame.vnbe.to_vec(),
+        "vcbg": frame.vcbg.to_vec(),
+        "vcbe": frame.vcbe.to_vec(),
+    })
+}
+
 /// The `set_params` batches an injected stub recorded, in issue order.
 pub fn set_params_batches(stub: &StubBackend) -> Vec<Vec<(String, Vec<i16>)>> {
     stub.calls()
@@ -201,8 +212,9 @@ pub async fn connected(addr: SocketAddr) -> WsClient {
 }
 
 /// Issues `set_power` and awaits its `ack` promise-style (ADR-0005:
-/// replies aren't positionally paired) — pub/sub `state` events, e.g.
-/// a plugin connection's main-session broadcast, may interleave.
+/// replies aren't positionally paired) — pub/sub `state` and `vis`
+/// events, e.g. a plugin connection's main-session broadcast or its
+/// blocks' frames, may interleave.
 pub async fn set_power(ws: &mut WsClient, on: bool) {
     let request_id = format!("rq-set-power-{on}");
     send_json(
@@ -212,12 +224,23 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
     .await;
     loop {
         let frame = recv_json(ws).await;
-        if frame["type"] == "state" {
+        if frame["type"] == "state" || frame["type"] == "vis" {
             continue;
         }
         assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
         assert_eq!(frame["request_id"], request_id.as_str());
         return;
+    }
+}
+
+/// Receives frames until the next `state` event — for asserting a
+/// snapshot on a stream where pub/sub `vis` events interleave.
+pub async fn recv_state(ws: &mut WsClient) -> serde_json::Value {
+    loop {
+        let frame = recv_json(ws).await;
+        if frame["type"] == "state" {
+            return frame;
+        }
     }
 }
 

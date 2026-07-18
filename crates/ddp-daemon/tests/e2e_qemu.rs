@@ -7,7 +7,8 @@
 //! 2–5 replayed over the real platform socket. Slice 14 (#22) adds its
 //! behavior 9: master-control edits read back from the registry.
 //! Slice 15 (#23) adds its behavior 8: the EQ preset overlay lands
-//! Rich's curve in the registry.
+//! Rich's curve in the registry. Slice 16 (#24) adds its behavior 6:
+//! `vis` events mirror the real reply tails, custom grid live.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -19,8 +20,8 @@ use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
 use common::{
-    RICH_IEBT, assert_config_becomes, connected, recv_json, send_json, set_power, socket_path_for,
-    wait_until, ws_connect,
+    RICH_IEBT, assert_config_becomes, connected, recv_json, recv_state, send_json, set_power,
+    socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -146,9 +147,10 @@ async fn a_killed_engine_respawns_with_sessions_rebuilt() {
         .expect("the session map was rebuilt");
     assert_eq!(output, block, "the rebuilt session carries power off");
 
-    // And the WS connection keeps serving.
+    // And the WS connection keeps serving (the process block's `vis`
+    // event may arrive first).
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r9" })).await;
-    let snapshot = recv_json(&mut ws).await;
+    let snapshot = recv_state(&mut ws).await;
     assert_eq!(snapshot["snapshot"]["power"], false);
 }
 
@@ -538,6 +540,61 @@ async fn an_invalid_hello_rate_is_rejected_by_the_real_validation() {
     ok.hello(48_000, 256).await;
     let block = test_block();
     assert_eq!(ok.process(&block).await.len(), block.len());
+}
+
+/// Behavior 6 (issue #24): the `vis` feed against the real engine —
+/// every main-session block's event mirrors its reply tail verbatim; a
+/// non-main block emits nothing; and the defaults-carried custom grid
+/// is live: the DSP fills `vcbg`/`vcbe`, which at the power-on
+/// `vcnb = 0` would read zero forever (probe `make vis` sec D).
+#[tokio::test]
+async fn vis_events_mirror_the_real_reply_tails() {
+    let daemon = start_qemu_daemon().await;
+    let supervisor = daemon.handle.supervisor();
+    let main = supervisor.create_session(48_000).expect("main");
+    let second = supervisor.create_session(48_000).expect("second");
+    let mut ws = connected(daemon.handle.addr()).await;
+
+    let block = test_block();
+    let mut output = vec![0_i16; block.len()];
+    let mut frames = Vec::new();
+    for _ in 0..CROSSFADE_BLOCKS {
+        frames.push(
+            supervisor
+                .process(main, &block, &mut output)
+                .expect("process"),
+        );
+    }
+    for (index, frame) in frames.iter().enumerate() {
+        let event = recv_json(&mut ws).await;
+        assert_eq!(event["type"], "vis", "block {index}");
+        assert_eq!(
+            event["params"],
+            vis_params_json(frame),
+            "block {index}: the reply tail, verbatim"
+        );
+    }
+
+    let last = frames.last().expect("processed blocks");
+    assert!(
+        last.vcbe.iter().any(|&value| value != 0),
+        "the custom grid is live: excitations filled, {:?}",
+        last.vcbe
+    );
+    assert!(
+        last.vcbg.iter().any(|&value| value != 0),
+        "the custom grid is live: gains filled, {:?}",
+        last.vcbg
+    );
+
+    supervisor
+        .process(second, &block, &mut output)
+        .expect("process");
+    assert_eq!(
+        try_recv_json(&mut ws, 300).await,
+        None,
+        "a non-main block emits nothing"
+    );
 }
 
 /// Behavior 6 (issue #16): a session created while power is off starts
