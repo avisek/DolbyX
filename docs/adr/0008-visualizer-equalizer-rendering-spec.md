@@ -21,38 +21,69 @@ Deliberate choices a reader might otherwise "fix":
   idle concept: the engine's excitation data is already ballistic (the
   original painter raw-copies it to screen), and processed silence
   walks the display to the floor by itself. Client smoothing would
-  only falsify the data. Before the first event: all bricks off.
-  Stream stops: hold the last frame. Power off: frames keep applying —
-  the off-look is skin CSS reading `data-power`, never a data gate.
-- **Columns, not bricks, in the DOM.** 20 column elements carrying
-  continuous `--exc`/`--gain` dB vars; quantization is Classic CSS
-  `round()`, brick separation is the lattice overlay. Per-brick JS
-  rects would bake quantization into markup (ADR-0011).
+  only falsify the data. From mount every column carries the floor
+  (`--exc: -12`, `--gain: 0`) — exactly what streamed silence
+  produces, so a plugin connecting changes nothing visually. Stream
+  stops: vars hold. Power off: frames keep applying — the off-look is
+  skin CSS under the app root's `app--off` modifier, never a data
+  gate.
+- **Columns, not bricks, in the DOM.** One element per live band
+  (count = the `vcnb` param, reactive; the vis event's fixed 20-slot
+  arrays are sliced to it) carrying continuous `--exc`/`--gain` dB
+  vars; quantization is Classic CSS `round()`, brick separation is the
+  per-column lattice chrome. Per-brick JS rects would bake
+  quantization into markup (ADR-0011).
 - **The EQ curve is a polyline with rounded joins — not a spline.** The
   original draws linear segments through `CornerPathEffect(10·scale)`;
   at these stroke widths a rounded-join polyline reproduces it exactly,
   a Catmull-Rom spline does not.
 
-## Classic constants (reference: `GraphicVisualiserPainter.java`)
+## Markup — regions, data displays, chrome surfaces (ADR-0011)
 
-- Field 20 columns × 48 rows, 1 dB per row, window **[−12, +36]** —
-  asymmetric, matches the engine, not ±12.
-- Excitation row index: `(int)(convertValue(dB, 47) + 0.5)` where
-  `convertValue = (int)((dB + 12) · h / 48)` — double truncation.
-  Worked examples: 0 dB → index 11 → bottom **12** bricks lit;
-  +36 dB → index 47 → all 48.
+```
+visualizer
+├─ vis-columns                 layout wrapper: flex row, inset 0
+│  └─ vis-column               × vcnb (live) — carries --exc, --gain
+│     ├─ vis-column__fill      displays --exc
+│     ├─ vis-column__lattice   chrome surface
+│     └─ vis-column__pip       displays --gain
+├─ eq-sliders                  layout wrapper (Slice 17)
+│  └─ eq-slider                × N visible — role="slider", --gain, …
+│     ├─ eq-slider__track      chrome surface
+│     └─ eq-slider__thumb      displays --gain; drag handle
+└─ eq-curve                    the only SVG (Slice 17)
+```
+
+Wrappers are layout-only; the component never sets z-index, transform,
+opacity, or filter, so every leaf shares one stacking context and
+z-order is entirely skin CSS. DOM order carries no z meaning.
+
+## Classic constants (reference: the two painters)
+
+- Field 48 rows × the live band count (20 on the shipped grid), 1 dB
+  per row, window **[−12, +36]** — asymmetric, matches the engine, not
+  ±12.
+- Fill rule: linear height `(--exc + 12) / 48`, quantized down to
+  whole rows (`--exc-step`: 1 row). Matches the original's brick
+  count across the window — its index math
+  `(int)(convertValue(dB, 47) + 0.5)` with
+  `convertValue = (int)((dB + 12) · h / 48)` gives 0 dB → 12 bricks,
+  +36 dB → all 48 — except at the exact floor: an inclusive brick
+  index can't express zero, so the original keeps the bottom brick lit
+  at −12 dB; DolbyX deliberately renders an empty field (silence looks
+  silent).
 - Zone colors by absolute row: top 12 red, next 6 yellow, bottom 30
   blue (`ROWS_RED = 12`, `ROWS_YELLOW = 6`).
-- Layer stack, Classic z-order: `bg < fills < lattice < pip <
-  eq-overlay`. The original insets bricks 1 px into cells so the black
-  gutter pixels are never covered — a lattice *overlay* reproduces
-  this over continuous fills. The pip stays continuous
-  (`--gain-step: none`) and straddles lattice lines, like the
-  original's paint order.
+- Classic z — the painters' own paint order: `background < fills <
+  lattice < pips < tracks < thumbs < curve` (bricks then pip per
+  column; per-slider track then thumb; curve last). The lattice chrome
+  reproduces the original's 1-px brick insets per column; the pip
+  stays continuous (`--gain-step: none`) and straddles lattice lines.
 - Element vocabulary, with provenance: **brick** (`mock_gv_brick*`),
   **rows** (`ROWS_*`), **background** (`eq_background`), **pip**
-  (`brick_blue_light`), **thumb** (`eq_thumb`), **curve**
-  (`mPaintCurve*`), **track** (their `eq_bar`); **lattice** is ours —
-  the original leaves the gutter lines unnamed, and "grid" is taken by
-  the band layouts. _Avoid_ "bar": the original overloads it (brick
-  bitmaps, column width, EQ track).
+  (`brick_blue_light`), **slider** (`mSliderThumb`/`mSliderBg`),
+  **thumb** (`eq_thumb`), **track** (their `eq_bar` — slider chrome),
+  **curve** (`mPaintCurve*`); **lattice** is ours — the original
+  leaves the gutter lines unnamed, and "grid" is taken by the band
+  layouts. _Avoid_ "bar": the original overloads it (brick bitmaps,
+  column width, EQ track).
