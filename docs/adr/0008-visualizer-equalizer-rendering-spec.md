@@ -26,10 +26,14 @@ Deliberate choices a reader might otherwise "fix":
   produces, so a plugin connecting changes nothing visually. Stream
   stops: vars hold. Power off: frames keep applying — the off-look is
   skin CSS under the app root's `app--off` modifier, never a data
-  gate.
+  gate. `ven = 0` likewise: the component only mirrors the resolved
+  param as its `visualizer--off` modifier; frames keep applying (the
+  DSP has stopped filling, so they carry frozen values — boot-zeros
+  read 0 dB) and the skin's off-look covers the field.
 - **Columns, not bricks, in the DOM.** One element per live band
-  (count = the `vcnb` param, reactive; the vis event's fixed 20-slot
-  arrays are sliced to it) carrying continuous `--exc`/`--gain` dB
+  (count = the `vcnb` param, reactive; the component reads the first
+  `vcnb` slots of the vis event's fixed 20-slot arrays — the wire
+  never changes shape) carrying continuous `--exc`/`--gain` dB
   vars; quantization is Classic CSS `round()`, brick separation is the
   per-column lattice chrome. Per-brick JS rects would bake
   quantization into markup (ADR-0011).
@@ -79,6 +83,10 @@ z-order is entirely skin CSS. DOM order carries no z meaning.
   column; per-slider track then thumb; curve last). The lattice chrome
   reproduces the original's 1-px brick insets per column; the pip
   stays continuous (`--gain-step: none`) and straddles lattice lines.
+- Off-looks: `.app--off` — bricks off + greyed, like the original;
+  `.visualizer--off` (resolved `ven` = 0) — fills + pips dark, chrome
+  and background stay. The eq family reads state, not the vis stream,
+  so it stays live under `visualizer--off`.
 - Element vocabulary, with provenance: **brick** (`mock_gv_brick*`),
   **rows** (`ROWS_*`), **background** (`eq_background`), **pip**
   (`brick_blue_light`), **slider** (`mSliderThumb`/`mSliderBg`),

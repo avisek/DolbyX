@@ -6,7 +6,9 @@ contract: a component renders semantic structure — regions, data
 displays, and bare chrome surfaces for skins to paint — and publishes
 *data*: continuous CSS custom properties in real units (e.g. dB
 floats) plus state as BEM modifier classes (power is `app--off` on the
-app root, so every component skins its off-look from one marker). **No
+app root, so every component skins its off-look from one marker;
+feature state sits on its owner — the visualizer mirrors resolved
+`ven` as `visualizer--off`). **No
 appearance policy in TSX**: no colors, no thresholds, no quantization
 — and no stacking policy: the component never sets z-index, transform,
 opacity, or filter, so every element shares one stacking context and
