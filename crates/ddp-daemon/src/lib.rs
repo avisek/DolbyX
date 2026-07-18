@@ -194,6 +194,7 @@ pub struct Daemon {
     persistence: Arc<Persistence>,
     server: JoinHandle<()>,
     audio_server: JoinHandle<std::convert::Infallible>,
+    vis_bridge: JoinHandle<()>,
 }
 
 impl Daemon {
@@ -271,6 +272,7 @@ impl Daemon {
         tracing::info!(socket = %config.socket_path.display(), "plugin socket bound");
 
         let audio_server = tokio::spawn(audio_server::accept_loop(plugins, app.clone()));
+        let vis_bridge = tokio::spawn(ws_server::vis_bridge(app.clone()));
         let router = http_server::router(app);
         let server = tokio::spawn(async move {
             if let Err(error) = axum::serve(listener, router).await {
@@ -284,6 +286,7 @@ impl Daemon {
             persistence,
             server,
             audio_server,
+            vis_bridge,
         })
     }
 
@@ -305,8 +308,10 @@ impl Daemon {
     pub async fn shutdown(self) {
         self.server.abort();
         self.audio_server.abort();
+        self.vis_bridge.abort();
         let _ = self.server.await;
         let _ = self.audio_server.await;
+        let _ = self.vis_bridge.await;
         self.persistence.shutdown().await;
     }
 }

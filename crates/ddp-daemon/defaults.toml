@@ -13,11 +13,14 @@ selected_profile = "music"
 # (iebf rides the gebf grid — this build's parser used it for GEQ, IEQ,
 # and visualizer alike), the SPEAKER-endpoint tuning tables from
 # <tuning> (loaded but dormant at the pinned headphone endpoint), and
-# two v2 pins: endp = 2 pins the *engine's* HEADPHONES endpoint — its
+# three v2 pins: endp = 2 pins the *engine's* HEADPHONES endpoint — its
 # AK encoding, not Java's DsEndpoint enum (probe-verified: the vdhe = 2
 # "auto" gate engages only at endp = 2, exactly v1's value; the speaker
 # tuning never does); ven = 1 keeps the visualizer feed on (v1's cmd-7
-# VISUALIZER_ENABLE, retired).
+# VISUALIZER_ENABLE, retired); vcnb + vcbf put the custom visualizer
+# pair on the DDP grid — the power-on vcnb = 0 reads it zero forever
+# (tools/ddp_probe `make vis` sec D: plain per-block registry state,
+# no commit semantics).
 [profile]
 genb = 20
 ienb = 20
@@ -40,6 +43,8 @@ artp = 12
 dssa = 10
 endp = 2
 ven = 1
+vcnb = 20
+vcbf = [43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651, 5685, 7063, 8958, 11025, 13781, 18777]
 
 # The four factory profiles — each row its delta over
 # ParameterDef.default, per the XML <profile> blocks. No

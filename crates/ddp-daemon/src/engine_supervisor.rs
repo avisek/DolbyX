@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ddp_engine::{Engine, EngineError, SessionId, VisFrame};
+use tokio::sync::broadcast;
 
 /// Why a supervisor operation failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -57,6 +58,8 @@ pub struct EngineSupervisor {
     engine: Arc<dyn Engine>,
     /// The 8 ReadOnly-Static 4-CCs read from the main session.
     readout_names: Vec<String>,
+    /// The vis fan-out: one frame per main-session process block.
+    vis: broadcast::Sender<VisFrame>,
     inner: Mutex<Inner>,
 }
 
@@ -90,6 +93,10 @@ impl EngineSupervisor {
         Self {
             engine,
             readout_names,
+            // Capacity for a burst of blocks between subscriber polls;
+            // a lagged subscriber loses the oldest frames, which the
+            // pure-render contract shrugs off (latest wins).
+            vis: broadcast::channel(64).0,
             inner: Mutex::new(Inner {
                 sessions: Vec::new(),
                 next_external: 0,
@@ -288,7 +295,9 @@ impl EngineSupervisor {
     }
 
     /// Processes one interleaved-stereo PCM block on a session (by its
-    /// external id), returning the block's vis tail.
+    /// external id), returning the block's vis tail. A main-session
+    /// block also fans its frame out to the [`Self::subscribe_vis`]
+    /// subscribers — the feed is process-driven: no audio, no frames.
     ///
     /// # Errors
     ///
@@ -307,11 +316,11 @@ impl EngineSupervisor {
             .iter()
             .position(|session| session.external == id)
             .ok_or(SupervisorError::SessionNotFound(id))?;
-        match self
+        let vis = match self
             .engine
             .process(inner.sessions[index].backend, input, output)
         {
-            Ok(vis) => Ok(vis),
+            Ok(vis) => vis,
             Err(EngineError::Crashed(_)) => {
                 // The block was lost with the process; recover, then
                 // retry it once on the rebuilt session.
@@ -321,10 +330,25 @@ impl EngineSupervisor {
                     .map_err(|error| match error {
                         EngineError::Crashed(message) => SupervisorError::EngineCrashed(message),
                         other => SupervisorError::Engine(other),
-                    })
+                    })?
             }
-            Err(error) => Err(SupervisorError::Engine(error)),
+            Err(error) => return Err(SupervisorError::Engine(error)),
+        };
+        if index == 0 {
+            // No subscribers ⇒ send is a no-op; delivery order is the
+            // block order (sends happen under the supervisor lock).
+            let _ = self.vis.send(vis.clone());
         }
+        Ok(vis)
+    }
+
+    /// Subscribes to the vis fan-out: one [`VisFrame`] per main-session
+    /// process block, in block order — the `vis` event source. A
+    /// receiver that lags past the channel capacity loses the oldest
+    /// frames (the client is a pure render of the latest frame).
+    #[must_use]
+    pub fn subscribe_vis(&self) -> broadcast::Receiver<VisFrame> {
+        self.vis.subscribe()
     }
 
     /// The live ReadOnly-Static values from the main session, keyed by
@@ -339,10 +363,9 @@ impl EngineSupervisor {
     }
 
     /// The main session's external id — the oldest live session, which
-    /// sources the readouts (and, from Slice 16
-    /// [#24](https://github.com/avisek/DolbyX/issues/24), the `vis`
-    /// events). `None` with zero sessions. A change here means the
-    /// snapshot's `readouts` changed — the caller broadcasts.
+    /// sources the readouts and the `vis` events. `None` with zero
+    /// sessions. A change here means the snapshot's `readouts` changed
+    /// — the caller broadcasts.
     ///
     /// # Panics
     ///

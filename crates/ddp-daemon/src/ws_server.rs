@@ -12,6 +12,28 @@ use tokio::sync::broadcast;
 use crate::App;
 use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
 
+/// Bridges the supervisor's vis fan-out onto the update channel: each
+/// frame serialized once and queued for every connection — `vis` has
+/// no originator rule, and a freshly minted [`ConnId`] matches nobody.
+/// Runs until aborted at shutdown (the app keeps the supervisor — and
+/// so the channel — alive).
+pub(crate) async fn vis_bridge(app: Arc<App>) {
+    let mut frames = app.supervisor.subscribe_vis();
+    loop {
+        let frame = match frames.recv().await {
+            Ok(frame) => frame,
+            // Dropped frames need no resync — the stream is pure.
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => return,
+        };
+        let event = WsEvent::Vis {
+            params: (&frame).into(),
+        }
+        .to_text();
+        let _ = app.updates.send((app.fresh_conn_id(), event.into()));
+    }
+}
+
 /// Internal identity of one connection — never on the wire; exists
 /// solely so the daemon can exclude the originator from `state`
 /// fan-outs (ADR-0005). Non-WS mutations broadcast under a freshly

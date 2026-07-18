@@ -165,6 +165,12 @@ fn the_shared_block_applies_to_every_profile() {
         // `endp`), and the visualizer feed.
         assert_eq!(scalar(profile, "endp"), 2, "{id}: endp");
         assert_eq!(scalar(profile, "ven"), 1, "{id}: ven");
+        // Behavior 5 (issue #24): the custom-grid enabler — power-on
+        // vcnb = 0 reads the custom pair zero forever; the defaults
+        // put it on the DDP grid (the only guard on the exact
+        // frequencies — the qemu suite proves nonzero only).
+        assert_eq!(scalar(profile, "vcnb"), 20, "{id}: vcnb");
+        assert_eq!(profile.params["vcbf"], DDP_GRID, "{id}: vcbf");
         // Band arrays stay allocated at engine capacity.
         assert_eq!(profile.params["gebf"].len(), 40, "{id}: gebf allocation");
         assert_eq!(profile.params["aobg"].len(), 329, "{id}: aobg allocation");
