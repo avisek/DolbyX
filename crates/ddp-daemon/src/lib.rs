@@ -29,9 +29,10 @@ pub use engine_supervisor::{EngineSupervisor, SupervisorError};
 
 use crate::ws_server::ConnId;
 
-/// One queued `state` fan-out: the originating connection (excluded
-/// from delivery) plus the pre-serialized event text.
-pub(crate) type StateBroadcast = (ConnId, Arc<str>);
+/// One queued event fan-out (`state` or `vis`): the originating
+/// connection (excluded from delivery — `vis` and non-WS mutations
+/// carry a fresh id, so nobody is) plus the pre-serialized event text.
+pub(crate) type EventBroadcast = (ConnId, Arc<str>);
 
 /// Everything `Daemon::start` needs — resolved by `main` from CLI flags
 /// and platform conventions, or by tests from a tempdir fixture.
@@ -102,8 +103,8 @@ pub(crate) struct App {
     pub(crate) supervisor: Arc<EngineSupervisor>,
     /// `config.toml` write-back.
     pub(crate) persistence: Arc<Persistence>,
-    /// The originator-aware `state` fan-out (ADR-0005).
-    pub(crate) updates: broadcast::Sender<StateBroadcast>,
+    /// The originator-aware event fan-out — `state` + `vis` (ADR-0005).
+    pub(crate) updates: broadcast::Sender<EventBroadcast>,
     /// `ConnId` allocator.
     pub(crate) next_conn_id: AtomicU64,
     /// The UI HTML file, re-read on every `GET /`.

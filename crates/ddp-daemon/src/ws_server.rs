@@ -1,5 +1,6 @@
 //! `WsServer` — one WebSocket per UI tab: snapshot on connect, typed
-//! command dispatch (with the `set_power` behavior), broadcast fan-out.
+//! command dispatch (with the `set_power` behavior), broadcast fan-out
+//! (`state` + the bridged `vis` feed).
 
 use std::sync::Arc;
 
@@ -18,6 +19,9 @@ use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_reque
 /// Runs until aborted at shutdown (the app keeps the supervisor — and
 /// so the channel — alive).
 pub(crate) async fn vis_bridge(app: Arc<App>) {
+    // One minted identity for the whole feed — the allocator never
+    // reissues it, so it matches no connection, ever.
+    let origin = app.fresh_conn_id();
     let mut frames = app.supervisor.subscribe_vis();
     loop {
         let frame = match frames.recv().await {
@@ -30,7 +34,7 @@ pub(crate) async fn vis_bridge(app: Arc<App>) {
             params: (&frame).into(),
         }
         .to_text();
-        let _ = app.updates.send((app.fresh_conn_id(), event.into()));
+        let _ = app.updates.send((origin, event.into()));
     }
 }
 
