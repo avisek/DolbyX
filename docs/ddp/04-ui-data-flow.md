@@ -293,9 +293,9 @@ for how it sits in the profile detail page.
 
 The visualizer panel shows two things composited:
 
-1. **Spectrum bars** — 20 bars × 48 vertical "rows", each row 1 dB
-   tall. Colour: rows 0..11 = red, 12..17 = yellow, 18..47 = blue. The
-   bar fills from the bottom up; height is determined by
+1. **Spectrum columns** — 20 columns × 48 vertical "rows", each row
+   1 dB tall. Colour: rows 0..11 = red, 12..17 = yellow, 18..47 =
+   blue. The column fills from the bottom up; height is determined by
    `excitations[c]` mapped through `(dB + 12) * 48 / 48` (a no-op
    really, since `(dB - (-12))` ranges 0..48 dB for the engine's
    `[-12, +36]` output range).
@@ -333,13 +333,15 @@ The suspended state is the engine telling the service "no audio
 flowing — your visualizer is going to be empty bars for a while".
 The UI greys out the panel and stops repainting in that state.
 
-> **Implication for DolbyX**: the daemon's `vis_pump_thread` does the
-> equivalent at 33 ms and broadcasts via WebSocket. There is no
-> equivalent suspended-state heuristic. For a fully-correct visualizer,
-> add a counter that checks if every band is zero (or sub-threshold)
-> for N consecutive polls, and emit a `{"type":"vis_suspended", ...}`
-> message. See
-> [06-gap-analysis.md](06-gap-analysis.md#issue-no-suspended-state-detection).
+> **Implication for DolbyX**: v2 replaces the pump entirely (issue
+> #24): the shim appends the vis tail to every `Process` reply and the
+> daemon broadcasts one `vis` event per main-session block — a pure
+> event stream, no poll timer. The suspended-state heuristic dissolves
+> with it: no audio ⇒ no events, and the client just holds the last
+> frame — no idle concept, no client smoothing (the excitation data is
+> already ballistic; desktop hosts stream silence, which walks the
+> display to the floor). v1's 33 ms `vis_pump_thread` and the proposed
+> `vis_suspended` message are both dead.
 
 ### The 30ms paint loop (UI side)
 

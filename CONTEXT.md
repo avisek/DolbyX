@@ -56,7 +56,9 @@ The last payload array of a structural-param group (`gebg`, `iebt`,
 `aobg`, `arbh`); re-writing it — even unchanged — makes the engine
 re-derive that group's filterbank (**touch = commit**). Shim-internal,
 never in `ParameterDef`
-([ADR-0010](docs/adr/0010-ak-direct-params-cmd-lifecycle.md)).
+([ADR-0010](docs/adr/0010-ak-direct-params-cmd-lifecycle.md)). The
+custom visualizer grid (`vcnb`/`vcbf`) has no commit semantics — plain
+per-block registry reads.
 _Avoid_: trigger param, commit param.
 
 **Native grid** (`vnnb` / `vnbf`):
@@ -132,8 +134,8 @@ _Avoid_: config, init payload, manifest.
 
 **`vis` event**:
 The per-block visualizer broadcast — the vis tail's four arrays keyed by
-4-CC; a pure event stream (no audio → no events; idle is
-client-derived).
+4-CC; a pure event stream (no audio → no events; the client holds the
+last frame — no idle concept, no client-side smoothing).
 _Avoid_: visualizer data (see `vcbg`/`vcbe`); `vis_suspended` /
 suspended (removed concept).
 
@@ -200,3 +202,33 @@ One of the three main-screen controls — Surround Virtualizer
 (`dvle`+`dvla`) — each pairing an enable param with an amount param; a
 curated UI overlay, not engine metadata.
 _Avoid_: basic param, basic switch, "Basic panel".
+
+**Skin**:
+A CSS-only visual variant of the whole UI — all visual policy
+(quantization, colors, z-order, state looks) lives in skin CSS;
+components expose data as CSS variables and state as BEM modifier
+classes, never appearance.
+_Avoid_: theme (reads as light/dark color scheme).
+
+**Classic skin**:
+The factory skin — the faithful transcription of the original DDP look.
+
+**Lattice**:
+The per-column chrome surface whose separator lines carve the column's
+fill into bricks; the pieces tile into the field-wide grid (the
+original's per-cell brick insets, not a global overlay). Skin-painted
+quantization chrome.
+_Avoid_: grid (taken — the band layouts: Native grid, custom vis grid).
+
+**Pip**:
+The per-column gain marker riding `vcbg[c]` (the original's
+`brick_blue_light`); quantization per skin — Classic keeps it
+continuous, like the original.
+_Avoid_: bar (the original overloads it: brick bitmaps, column width, EQ
+track).
+
+**Slider**:
+The per-visible-band EQ control unit — track chrome + draggable thumb
+(the original's `mSliderBg`/`mSliderThumb`), riding a fractional `gebf`
+index; visible count `N ∈ [2, genb]`, default 5.
+_Avoid_: band (sliders sit at fractional indices, between bands).

@@ -504,7 +504,8 @@ fn staging_without_the_commit_leaf_still_reshapes() {
 /// the bypassed block here (vis is process-driven, not power-gated).
 /// With a tone playing and one `[vcnb, vcbf, ven]` batch (the custom
 /// grid boots unconfigured — `vcnb` = 0 — and its pair stays zero
-/// until the host writes the grid and `ven` latches it; the "seeded"
+/// until the host writes the grid; `ven` starts 0 on a fresh session
+/// and gates whether the DSP fills the arrays; the "seeded"
 /// identity the probes saw is a side effect of their cmd-3 init flow),
 /// the native pair goes live and the custom pair mirrors it — the
 /// custom grid here *is* the native table.

@@ -24,7 +24,9 @@
 #                    among the commit writes order is free (commit presence, not order)
 #   make vis       — run the native-vs-custom visualizer experiment (vis_native_probe):
 #                    prove vc* is the native vn* data resampled onto a host-set band grid,
-#                    and that the native grid (vnnb/vnbf) is itself rate-derived (sec C)
+#                    that the native grid (vnnb/vnbf) is itself rate-derived (sec C), and
+#                    that the custom layout is plain registry state on a bare handle —
+#                    unset until written, applied from the next block (sec D)
 #   make lifecycle — run the defaults capture-point experiment (lifecycle_probe):
 #                    snapshot all root leaves at open / handshake / SET_CONFIG /
 #                    ENABLE / 40 blocks / vis-on, diff the stages (issue #11)
