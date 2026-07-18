@@ -1,19 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
-import { WsClient, type StateSnapshot } from './ws'
+import { fixtureVis } from '../test/fixture'
+import { WsClient, type StateSnapshot, type VisParams } from './ws'
 
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 let snapshots: StateSnapshot[]
+let visEvents: VisParams[]
 let connectionLog: boolean[]
 let client: WsClient
 
 beforeEach(() => {
   MockWebSocket.reset()
   snapshots = []
+  visEvents = []
   connectionLog = []
   client = new WsClient('ws://daemon.test/ws', {
     onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onVis: (params) => visEvents.push(params),
     onConnected: (connected) => connectionLog.push(connected),
   })
 })
@@ -139,6 +143,17 @@ it('close() stops the reconnect loop', () => {
   client.close()
   vi.advanceTimersByTime(60_000)
   expect(MockWebSocket.instances).toHaveLength(1)
+})
+
+// Behavior 7 (#24), the wire half: a `vis` event routes to `onVis`
+// with its params intact — pub/sub, no request_id involved.
+it('routes a vis event to onVis', () => {
+  const socket = MockWebSocket.latest()
+  socket.open()
+
+  const params = fixtureVis({ vcbe: [-52], vcbg: [40] })
+  socket.serverMessage({ type: 'vis', params })
+  expect(visEvents).toEqual([params])
 })
 
 it('does not reconcile a failed get_state again (no error loop)', () => {

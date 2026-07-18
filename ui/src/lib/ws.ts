@@ -40,6 +40,18 @@ export interface StateSnapshot {
   readonly readouts: Readonly<Record<string, readonly number[]>>
 }
 
+/**
+ * A `vis` event's payload: the main session's vis tail — four fixed
+ * 20-slot arrays keyed by 4-CC, raw i16 1/16-dB (ADR-0005). The live
+ * band count is the `vcnb` state param; the wire never changes shape.
+ */
+export interface VisParams {
+  readonly vnbg: readonly number[]
+  readonly vnbe: readonly number[]
+  readonly vcbg: readonly number[]
+  readonly vcbe: readonly number[]
+}
+
 /** A client → daemon command; the client stamps the `request_id`. */
 export type Command =
   | { readonly cmd: 'get_state' }
@@ -62,6 +74,7 @@ export type Command =
 /** A daemon → client event frame. */
 export type ServerEvent =
   | { readonly type: 'state'; readonly snapshot: StateSnapshot }
+  | { readonly type: 'vis'; readonly params: VisParams }
   | { readonly type: 'ack'; readonly request_id: string; readonly ok: true }
   | {
       readonly type: 'error'
@@ -75,6 +88,8 @@ export type ServerEvent =
 export interface WsClientHandlers {
   /** A full `state` snapshot arrived — reconcile it. */
   onSnapshot(snapshot: StateSnapshot): void
+  /** One per-block `vis` event arrived — the latest frame. */
+  onVis(params: VisParams): void
   /** The connection opened (`true`) or dropped (`false`). */
   onConnected(connected: boolean): void
 }
@@ -180,6 +195,9 @@ export class WsClient {
       case 'state':
         this.#handlers.onSnapshot(parsed.snapshot)
         break
+      case 'vis':
+        this.#handlers.onVis(parsed.params)
+        break
       case 'ack':
         this.#settle(parsed.request_id)?.resolve()
         break
@@ -193,7 +211,7 @@ export class WsClient {
         break
       }
       default:
-        // Unknown event types (future `vis`, Slice 16) are ignored.
+        // Unknown (future) event types are ignored.
         break
     }
   }

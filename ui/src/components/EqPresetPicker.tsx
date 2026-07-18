@@ -1,5 +1,5 @@
 import { For, type Component } from 'solid-js'
-import { state } from '../store/state'
+import { selectedProfile, state } from '../store/state'
 import { setEqPreset } from '../store/ws'
 import './EqPresetPicker.css'
 
@@ -10,9 +10,7 @@ import './EqPresetPicker.css'
  * has already overlaid the resolved nine EQ params (ADR-0003).
  */
 const EqPresetPicker: Component = () => {
-  const selected = () =>
-    state.profiles.find((profile) => profile.id === state.selected_profile)
-      ?.selected_eq_preset ?? null
+  const selected = () => selectedProfile()?.selected_eq_preset ?? null
   return (
     <div class="eq-preset-picker" role="radiogroup" aria-label="EQ preset">
       <For each={[null, ...state.eq_presets]}>

@@ -6,7 +6,7 @@ import {
   type ParameterDef,
 } from '../lib/parameters'
 import { displayToRaw, rawToDisplay } from '../lib/units'
-import { state } from '../store/state'
+import { selectedProfile, state } from '../store/state'
 import { editProfile, editProfileLive } from '../store/ws'
 import './MasterControls.css'
 
@@ -26,10 +26,7 @@ const MASTER_CONTROLS = [
 
 /** The active profile's raw value for `def` (scalar head slot). */
 function rawValue(def: ParameterDef): number {
-  const profile = state.profiles.find(
-    (candidate) => candidate.id === state.selected_profile,
-  )
-  return profile?.params[def.name]?.[0] ?? def.default[0] ?? 0
+  return selectedProfile()?.params[def.name]?.[0] ?? def.default[0] ?? 0
 }
 
 /**

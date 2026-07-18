@@ -68,7 +68,10 @@ z-order is entirely skin CSS. DOM order carries no z meaning.
   per row, window **[−12, +36]** — asymmetric, matches the engine, not
   ±12.
 - Fill rule: linear height `(--exc + 12) / 48`, quantized down to
-  whole rows (`--exc-step`: 1 row). Matches the original's brick
+  whole rows (`--exc-step`: 1 row, expressed in dB — 1 dB ≡ 1 row on
+  this window, and dB-space `round()` is float-exact where a
+  percentage-space step can land 11.999… and drop a row). Matches the
+  original's brick
   count across the window — its index math
   `(int)(convertValue(dB, 47) + 0.5)` with
   `convertValue = (int)((dB + 12) · h / 48)` gives 0 dB → 12 bricks,

@@ -1,0 +1,130 @@
+/* Structure (ADR-0008 markup tree): the wrappers lay out, the leaves
+   paint. Everything below the Classic banner is skin policy
+   (ADR-0011) — another skin replaces it without touching the TSX. */
+
+.visualizer {
+  position: relative;
+}
+
+.vis-columns {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.vis-column {
+  position: relative;
+  flex: 1;
+}
+
+/* — Classic: the faithful DDP look. Constants from the original
+   painters (ADR-0008): 48 rows × 1 dB, window [−12, +36]; colors
+   lifted from the DsUI drawables. — */
+
+.visualizer {
+  /* eq_background.png: blue glow at bottom centre, black-edged. */
+  background: radial-gradient(
+    58% 130% at 50% 108%,
+    #2a82cc 0%,
+    #0e5490 42%,
+    #022f56 68%,
+    #001322 88%,
+    #000 100%
+  );
+  inline-size: min(36rem, 90vw);
+  aspect-ratio: 885 / 390; /* the background asset's own proportions */
+}
+
+.vis-column {
+  /* Classic's per-band coordinate device: cqh below measures the
+     column. (contain: layout makes each column its own stacking
+     context — the painters' per-column paint order; columns never
+     overlap.) */
+  container-type: size;
+  /* One row: 1 dB of the 48-dB window. */
+  --row: calc(100cqh / 48);
+  /* Quantization steps (ADR-0011), in dB — 1 dB ≡ 1 row. The fill
+     snaps to whole rows; the pip stays continuous, like the original.
+     Derived skins retune by overriding these two. */
+  --exc-step: 1;
+  --gain-step: none;
+  /* Zone colors: mock_gv_brick_{blue,yellow,red}, all 60% alpha. */
+  --brick-blue: rgb(102 197 220 / 60%);
+  --brick-yellow: rgb(202 181 145 / 60%);
+  --brick-red: rgb(184 145 147 / 60%);
+}
+
+/* The fill displays `--exc`: linear (--exc + 12) / 48 of the field,
+   quantized down to whole rows — the original's brick count, except at
+   the exact floor, deliberately empty (silence looks silent). The
+   step quantizes in dB space, where 1/16-dB values are exact — a
+   percentage-space round() can land 11.999… and drop a row. */
+.vis-column__fill {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  height: calc(
+    clamp(0, round(down, var(--exc) + 12, var(--exc-step)), 48) * var(--row)
+  );
+  /* Zone colors by absolute row — bottom 30 blue, 6 yellow, top 12
+     red — anchored to the field: the gradient line starts at the
+     fill's bottom edge, which is the field's. */
+  background: linear-gradient(
+    to top,
+    var(--brick-blue) 0 calc(30 * var(--row)),
+    var(--brick-yellow) calc(30 * var(--row)) calc(36 * var(--row)),
+    var(--brick-red) calc(36 * var(--row)) calc(48 * var(--row))
+  );
+}
+
+/* The lattice: per-column chrome whose lines carve the fill into
+   bricks — the original's 1-px black insets (a gutter at each column
+   start, a line at each row top; outer right/bottom edges unpainted). */
+.vis-column__lattice {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-left: 1px solid #000;
+  background-image: linear-gradient(#000 1px, transparent 1px);
+  background-size: 100% var(--row);
+}
+
+/* The pip displays `--gain`, continuous (`--gain-step: none`): one
+   brick-sized marker whose travel is the field minus one brick, riding
+   half a brick high — the original's placement — so it straddles
+   lattice lines. brick_blue_light: a soft #2bc9fd glow. */
+.vis-column__pip {
+  position: absolute;
+  right: 0;
+  bottom: calc(
+    (var(--gain) + 12) / 48 * (100cqh - var(--row)) + var(--row) / 2
+  );
+  left: 1px;
+  z-index: 3;
+  height: var(--row);
+  background: radial-gradient(
+    ellipse closest-side,
+    #2bc9fd 0%,
+    rgb(105 236 255 / 45%) 55%,
+    rgb(105 236 255 / 0%) 100%
+  );
+}
+
+/* Power off (`app--off`, the whole-UI marker): bricks off + greyed,
+   like the original's disabled surface; chrome and background stay. */
+.app--off .visualizer {
+  filter: grayscale(100%) brightness(60%);
+}
+
+.app--off .vis-column__fill,
+.app--off .vis-column__pip {
+  visibility: hidden;
+}
+
+/* `ven` off (`visualizer--off`): fills + pips dark — the DSP has
+   stopped filling, frames carry frozen values — chrome and background
+   stay. */
+.visualizer--off .vis-column__fill,
+.visualizer--off .vis-column__pip {
+  background: rgb(2 10 18 / 55%);
+}
