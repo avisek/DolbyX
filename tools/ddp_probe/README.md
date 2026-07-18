@@ -222,10 +222,9 @@ it — not two measurements (engine help text, `make dump-docs`):
 `ddp_probe` #9 saw `vnbg`/`vnbe` == `vcbg`/`vcbe` only because these probes'
 cmd-3 init flow lands the custom grid on the native table — an identity their
 runs never disturb. (It is **not** a bare-handle seed: without that flow `vcnb`
-boots 0 and `vcbg`/`vcbe` read zero until the host writes `vcnb`/`vcbf` and a
-`ven` → ON write latches the layout — established handshake-free in Slice 07
-#15, whose qemu harness drives exactly that batch.) This probe disturbs the
-identity:
+boots 0 — its power-on default — and `vcbg`/`vcbe` read zero until the host
+writes `vcnb`/`vcbf`; section D drives that bare-handle path.) This probe
+disturbs the identity:
 
 - **A. Default config — they coincide.** Untouched, `vcbf` == `vnbf` (0/20 differ),
   so `vcbg`==`vnbg` and `vcbe`==`vnbe`, 20/20. The "mirror."
@@ -239,6 +238,12 @@ identity:
   not per-block. The arrays stay **20-wide** at every rate; only `vnnb` of each is
   live, and at 32k the unused 20th slot is *stale, not zeroed* (`vnbf[19]`=0 but
   `vnbg[19]`/`vnbe[19]` keep junk) — so gate on `vnnb`.
+- **D. Bare handle — the layout is plain registry state.** The `ddp-engine-arm`
+  flow (AK-direct, no DEFINE handshake): `vcnb` boots 0 and the custom pair
+  reads zero even with `ven` on and audio flowing; write `vcnb`/`vcbf` and the
+  pair fills from the next blocks (20/20 mirror — no other write involved);
+  rewrite `vcbf` and the output follows again. The layout is re-read per block;
+  `ven` only gates whether the DSP fills the arrays.
 
 Neither family is redundant: `vn*` is the zero-config ground truth, `vc*` the
 host-configurable view. See

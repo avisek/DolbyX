@@ -20,6 +20,13 @@
  *      engine's rate-indexed .constdata arrays. => the native grid is the
  *      RATE-DERIVED half of vn* (vnnb/vnbf), distinct from the per-block half
  *      (vnbg/vnbe). It can't be host-set; the only lever is the rate.
+ *   D. drive a BARE handle exactly as ddp-engine-arm does (AK-direct, no
+ *      DEFINE handshake): vcnb boots 0 — its power-on default — and vc* reads
+ *      zero until the host writes the grid; writes and rewrites apply from the
+ *      next block. The custom layout is ordinary registry state, read per
+ *      block; ven only gates whether the DSP fills the arrays. The cmd-path
+ *      init flow of A-C is what pre-fills vcnb = 20 / vcbf = the native table
+ *      (the "seed" ddp_probe #9 inherited).
  *
  * Build/run: `make vis` (see Makefile). Standalone — reuses ddp_probe's
  * proven init handshake + ak_get path, trimmed to the visualizer slots.
@@ -86,20 +93,31 @@ static int find_param(const char *n) {
 }
 
 /* ── Engine AK API (same offsets/symbols ddp_probe proves) ───────────── */
-typedef int (*ak_get_fn)(void *, uint32_t, int);
-typedef int (*ak_set_fn)(void *, uint32_t, int, int);
-static ak_get_fn ak_get;
-static ak_set_fn ak_set;
+typedef int      (*ak_get_fn)(void *, uint32_t, int);
+typedef int      (*ak_set_fn)(void *, uint32_t, int, int);
+typedef int      (*ak_set_bulk_fn)(void *, uint32_t, int, int, int, const void *);
+typedef uint32_t (*ak_find_fn)(void *, uint32_t, uint32_t);
+static ak_get_fn      ak_get;
+static ak_set_fn      ak_set;
+static ak_set_bulk_fn ak_set_bulk;
+static ak_find_fn     ak_find;
 static void *AK;
-static uint32_t *AK_REF;
 
-static void ak_attach(void) {
-    void *pDs1ap = *(void **)((char *)H + 0x44);
-    AK     = *(void **)pDs1ap;
-    AK_REF = *(uint32_t **)((char *)H + 0xb4);
+static void ak_attach(void) { AK = *(void **)(*(void **)((char *)H + 0x44)); }
+
+/* Resolve name → ref straight from the tree (root = ref 1) — identical to the
+ * DEFINE-built ref table (akctl_probe), and works on a bare handle (sec D). */
+static uint32_t pack4(const char *s) {
+    uint32_t f = 0;
+    for (int i = 0; i < 4 && s[i]; i++) f |= (uint32_t)(uint8_t)s[i] << (8 * i);
+    return f;
 }
-static uint32_t ak_ref(const char *n) { int p = find_param(n); return p < 0 ? 0 : AK_REF[p]; }
+static uint32_t ak_ref(const char *n) { return ak_find(AK, 1, pack4(n)); }
 static int akv(const char *n, int e)  { return ak_get(AK, ak_ref(n), e); }
+/* AK-direct write, stride 4 (packed int16) — the ddp-engine-arm write path. */
+static void ak_wr(const char *n, const int16_t *v, int count) {
+    ak_set_bulk(AK, ak_ref(n), 0, count, 4, v);
+}
 
 /* ── cmd SET / DEFINE plumbing (trimmed from ddp_probe) ──────────────── */
 static int cmd_set(int cmd, const void *val, int vsize) {
@@ -211,8 +229,13 @@ int main(int argc, char *argv[]) {
     EffectQueryNumberEffects_t Q = dlsym(lib, "EffectQueryNumberEffects");
     EffectQueryEffect_t       QE = dlsym(lib, "EffectQueryEffect");
     EffectCreate_t            C  = dlsym(lib, "EffectCreate");
-    ak_get = (ak_get_fn) dlsym(lib, "ak_get");
-    ak_set = (ak_set_fn) dlsym(lib, "ak_set");
+    ak_get      = (ak_get_fn)      dlsym(lib, "ak_get");
+    ak_set      = (ak_set_fn)      dlsym(lib, "ak_set");
+    ak_set_bulk = (ak_set_bulk_fn) dlsym(lib, "ak_set_bulk");
+    ak_find     = (ak_find_fn)     dlsym(lib, "ak_find");
+    if (!ak_get || !ak_set || !ak_set_bulk || !ak_find) {
+        fprintf(stderr, "dlsym: missing an ak_* accessor\n"); return 1;
+    }
 
     uint32_t ne = 0; Q(&ne);
     effect_descriptor_t desc; QE(0, &desc);
@@ -269,11 +292,8 @@ int main(int argc, char *argv[]) {
     for (int e = 0; e < 20; e++) cf[e] = (int16_t)(120 + e * 120);
     int16_t cnt = 20;
     set_param("vcnb", 0, &cnt, 1);          /* custom count */
-    set_param("vcbf", 0, cf, 20);           /* custom freqs = the commit (vcbf_preupdate) */
-    /* "take effect ... when ven is set to ON" — re-latch ven, then re-warm. */
-    int16_t zero = 0;
-    set_param("ven", 0, &zero, 1); warm(in, out, frames, 5);
-    set_param("ven", 0, &one, 1);  warm(in, out, frames, 60);
+    set_param("vcbf", 0, cf, 20);           /* custom freqs */
+    warm(in, out, frames, 60);              /* the DSP reads the layout per block */
 
     dump_row("vcbf new-f", "vcbf", n);
     dump_row("vnbg nat-g", "vnbg", n);   /* unchanged native ground truth */
@@ -331,6 +351,38 @@ int main(int argc, char *argv[]) {
     printf("    => native vnnb/vnbf track the rate (20/20/19 bands @48k/44.1k/32k);\n"
            "       only the sample rate moves them — they're read-only otherwise.\n");
 
+    /* ── D. bare handle — the ddp-engine-arm flow, no handshake ────────── */
+    printf("\n=== D. BARE HANDLE — the custom layout is plain registry state ===\n");
+    printf("    (create/INIT/SET_CONFIG/ENABLE + ak_* only, 44.1 kHz — the shim's\n"
+           "     flow. No DEFINE handshake, so nothing pre-fills vcnb/vcbf.)\n");
+    C(&desc.uuid, 300, 300, &H);
+    (*H)->command(H, EFFECT_CMD_INIT, 0, NULL, &rs, &r);
+    send_config(44100);
+    ak_attach();
+    (*H)->command(H, EFFECT_CMD_ENABLE, 0, NULL, &rs, &r);
+    ak_wr("ven", &one, 1);                  /* fresh handles boot ven = 0 */
+    warm(in, out, frames, 60);
+    int nz_n = 0, nz_c = 0;
+    for (int e = 0; e < 20; e++) {
+        if (akv("vnbe", e)) nz_n++;
+        if (akv("vcbe", e)) nz_c++;
+    }
+    printf("    boot:      vcnb=%2d  vnbe nonzero %2d/20, vcbe nonzero %2d/20  "
+           "(native live; custom unset => zero)\n",
+           akv("vcnb", 0), nz_n, nz_c);
+    ak_wr("vcnb", &cnt, 1);
+    ak_wr("vcbf", bf, 20);                  /* the 44.1 kHz native table */
+    warm(in, out, frames, 60);
+    printf("    written:   vcnb=%2d  vcbg==vnbg %2d/20, vcbe==vnbe %2d/20  "
+           "(filled from the next blocks — no other write involved)\n",
+           akv("vcnb", 0), 20 - diffcount("vnbg", "vcbg", 20),
+           20 - diffcount("vnbe", "vcbe", 20));
+    ak_wr("vcbf", cf, 20);                  /* remap to the 120..2400 ramp */
+    warm(in, out, frames, 60);
+    printf("    rewritten: vcbf[0]=%d  vcbe==vnbe %2d/20  (mirror broken — the\n"
+           "     layout is read per block; ven only gates whether the DSP fills)\n",
+           akv("vcbf", 0), 20 - diffcount("vnbe", "vcbe", 20));
+
     printf("\n=== VERDICT ===\n");
     printf("    vn* = engine's NATIVE filterbank visualizer (read-only ground truth),\n");
     printf("          in two halves: vnnb/vnbf = the RATE-DERIVED band grid (A,C) and\n");
@@ -338,5 +390,8 @@ int main(int argc, char *argv[]) {
     printf("    vc* = that native data INTERPOLATED onto host-set vcnb/vcbf (vc==vn\n");
     printf("          only when the custom layout matches native, B). Not redundant —\n");
     printf("          vn* is the zero-config source; vc* is the configurable view.\n");
+    printf("    vcnb/vcbf = ordinary registry params: unset on a bare handle (vcnb\n");
+    printf("          boots 0 => vc* reads zero), applied from the next block once\n");
+    printf("          written, re-read per block (D). ven gates DSP fill only.\n");
     _Exit(0);
 }

@@ -208,19 +208,22 @@ measurements, they're one source and a resampled view of it (engine help text,
   gains/excitations onto them, filling `vcbg`/`vcbe`. Command 4
   (`DS_PARAM_VISUALIZER_DATA`) returns `vcbg‖vcbe` as 40 int16s.
 
-So **`vc*` = resample(`vn*`, onto `vcbf`)**. The custom grid is **not seeded on
-a bare handle**: `vcnb` boots 0 and `vcbg`/`vcbe` read zero — even through the
-full DEFINE handshake, `ven` = 1, and processing — until the host writes
-`vcnb`/`vcbf` and a `ven` → ON write latches the layout (Slice 07 #15; the
-engine's own help: the custom config "takes effect when `ven` is set to ON").
-The byte-for-byte `vc*` == `vn*` identity the probes report is a side effect of
-their cmd-3 init flow arriving at `vcnb` = 20 / `vcbf` = the native table — set
-the same grid and you get the same mirror. After a *different* `vcbf` is
-latched, `vc*` follows the new grid while `vn*` holds steady (proven in
-[tools/ddp_probe/](../../tools/ddp_probe/README.md), `make vis`: a `vcbf` remap
-swings `vc*` by max |Δ|≈430 while `vn*` stays at the noise floor; its section C
-then sweeps the **sample rate** and the native count itself tracks 20/20/19
-@48k/44.1k/32k). The whole `vn*` family and the
+So **`vc*` = resample(`vn*`, onto `vcbf`)**. The custom layout is **ordinary
+registry state, unset on a bare handle**: `vcnb`'s power-on default is 0, and
+while it is 0 `vcbg`/`vcbe` read zero — through `ven` = 1 and processing.
+Write `vcnb`/`vcbf` and the resample fills from the next block; rewrite
+`vcbf` and the output follows again — the layout is re-read per block, and
+`ven` only gates whether the DSP fills the arrays at all (that level gate is
+what the engine help's "takes effect when `ven` is set to ON" describes). The
+byte-for-byte `vc*` == `vn*` identity the probes report is a side effect of
+their cmd-3 init flow arriving at `vcnb` = 20 / `vcbf` = the native table —
+set the same grid and you get the same mirror. After a *different* `vcbf` is
+written, `vc*` follows the new grid while `vn*` holds steady (proven in
+[tools/ddp_probe/](../../tools/ddp_probe/README.md), `make vis`: a `vcbf`
+remap swings `vc*` by max |Δ|≈430 while `vn*` stays at the noise floor;
+section C sweeps the **sample rate** and the native count itself tracks
+20/20/19 @48k/44.1k/32k; section D drives the bare-handle
+flow). The whole `vn*` family and the
 `vcbg`/`vcbe` data arrays are read-only (write-protect bit `0x2`); only the
 custom **layout** — `vcnb`/`vcbf` — is host-writable. The native grid's one
 lever is the **sample rate** (cmd 1), which picks the rate-indexed array.
