@@ -43,11 +43,15 @@
   container-type: size;
   /* One row: 1 dB of the 48-dB window. */
   --row: calc(100cqh / 48);
-  /* Quantization steps (ADR-0011), in dB — 1 dB ≡ 1 row. The fill
-     snaps to whole rows; the pip stays continuous, like the original.
-     Derived skins retune by overriding these two. */
+  /* Quantization steps (ADR-0011), in dB — 1 dB ≡ 1 row; derived
+     skins retune by overriding these two. The fill snaps to whole
+     rows. The pip's step is the wire's own 1/16-dB quantum: every
+     `vis` value is a multiple of it, so rounding is an exact identity
+     and the pip stays continuous, like the original — while a literal
+     `none` could never feed round(), it would void the whole
+     `bottom` declaration at computed-value time. */
   --exc-step: 1;
-  --gain-step: none;
+  --gain-step: 0.0625;
   /* Zone colors: mock_gv_brick_{blue,yellow,red}, all 60% alpha. */
   --brick-blue: rgb(102 197 220 / 60%);
   --brick-yellow: rgb(202 181 145 / 60%);
@@ -89,15 +93,17 @@
   background-size: 100% var(--row);
 }
 
-/* The pip displays `--gain`, continuous (`--gain-step: none`): one
-   brick-sized marker whose travel is the field minus one brick, riding
-   half a brick high — the original's placement — so it straddles
-   lattice lines. brick_blue_light: a soft #2bc9fd glow. */
+/* The pip displays `--gain`, continuous (`--gain-step` = the wire
+   quantum — see the steps above): one brick-sized marker whose travel
+   is the field minus one brick, riding half a brick high — the
+   original's placement — so it straddles lattice lines.
+   brick_blue_light: a soft #2bc9fd glow. */
 .vis-column__pip {
   position: absolute;
   right: 0;
   bottom: calc(
-    (var(--gain) + 12) / 48 * (100cqh - var(--row)) + var(--row) / 2
+    round(down, var(--gain) + 12, var(--gain-step)) / 48 *
+      (100cqh - var(--row)) + var(--row) / 2
   );
   left: 1px;
   z-index: 3;

@@ -85,7 +85,9 @@ z-order is entirely skin CSS. DOM order carries no z meaning.
   lattice < pips < tracks < thumbs < curve` (bricks then pip per
   column; per-slider track then thumb; curve last). The lattice chrome
   reproduces the original's 1-px brick insets per column; the pip
-  stays continuous (`--gain-step: none`) and straddles lattice lines.
+  stays continuous (`--gain-step`: the wire's 1/16-dB quantum —
+  rounding to the data's own resolution is an exact identity) and
+  straddles lattice lines.
 - Off-looks: `.app--off` — bricks off + greyed, like the original;
   `.visualizer--off` (resolved `ven` = 0) — fills + pips dark, chrome
   and background stay. The eq family reads state, not the vis stream,

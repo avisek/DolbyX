@@ -49,19 +49,28 @@ test('fills snap to whole rows, the floor is empty, the pip rides continuously',
   await setExc('-4')
   expect(Math.abs((await height(fill)) - quantized)).toBeLessThan(0.01)
 
-  // The pip is continuous (`--gain-step: none`): at 2.5 dB it sits on
-  // the original's travel — (gain + 12) / 48 · (field − row) + row / 2
-  // — mid-row, where a row-snapped position could not land.
+  // The pip is continuous (Classic's `--gain-step` is the wire's own
+  // 1/16-dB quantum — an exact identity): at 2.5 dB it sits on the
+  // original's travel — (gain + 12) / 48 · (field − row) + row / 2 —
+  // mid-row, where a row-snapped position could not land.
+  const pipBottom = () =>
+    column.locator('.vis-column__pip').evaluate((el) => {
+      const field = el.closest('.vis-column')?.getBoundingClientRect()
+      return field ? field.bottom - el.getBoundingClientRect().bottom : NaN
+    })
   await column.evaluate((el) => {
     el.style.setProperty('--gain', '2.5')
   })
-  const pipBottom = await column.locator('.vis-column__pip').evaluate((el) => {
-    const field = el.closest('.vis-column')?.getBoundingClientRect()
-    return field ? field.bottom - el.getBoundingClientRect().bottom : NaN
+  const travel = (dB: number) =>
+    ((dB + 12) / 48) * (columnHeight - rowHeight) + rowHeight / 2
+  expect(Math.abs((await pipBottom()) - travel(2.5))).toBeLessThan(1)
+
+  // …and the ADR-0011 retune convention is real: a derived skin's
+  // `--gain-step` override snaps the pip (round(down, 14.5, 12) → 12).
+  await column.evaluate((el) => {
+    el.style.setProperty('--gain-step', '12')
   })
-  const expected =
-    ((2.5 + 12) / 48) * (columnHeight - rowHeight) + rowHeight / 2
-  expect(Math.abs(pipBottom - expected)).toBeLessThan(1)
+  expect(Math.abs((await pipBottom()) - travel(0))).toBeLessThan(1)
 })
 
 // Behavior 13: a synthetic plugin tone through the real engine moves
