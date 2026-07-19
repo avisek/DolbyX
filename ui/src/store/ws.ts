@@ -6,11 +6,16 @@ import { createSignal } from 'solid-js'
 import { WsClient } from '../lib/ws'
 import {
   applyEqPreset,
+  applyEqPresetAdd,
   applyEqPresetEdit,
+  applyEqPresetRename,
   applyPower,
   applyProfile,
+  applyProfileAdd,
   applyProfileEdit,
+  applyProfileRename,
   applySnapshot,
+  state,
 } from './state'
 import { applyVisFrame } from './vis'
 
@@ -140,4 +145,122 @@ export function editEqPresetLive(
   void client?.request({ cmd: 'edit_eq_preset', id, params }).catch(() => {
     // The error-path reconcile restores daemon truth.
   })
+}
+
+/**
+ * Pulls a fresh snapshot — for acked mutations whose full effect the
+ * client can't mirror (remove fallbacks are daemon-owned, baselines
+ * never ride the snapshot). The `state` event does the applying.
+ */
+function reconcile(): void {
+  void client?.request({ cmd: 'get_state' }).catch(() => {
+    // The next state event or reconnect resyncs.
+  })
+}
+
+/**
+ * `add_profile` — clones `from` under the server-minted id the ack
+ * carries, applied locally without waiting for a snapshot (ADR-0005),
+ * then chains the selection onto the clone: the flow is add → tweak.
+ */
+export function addProfile(from: string, name: string): void {
+  void client
+    ?.request({ cmd: 'add_profile', from, name })
+    .then((id) => {
+      if (id === undefined) return
+      applyProfileAdd(from, name, id)
+      setProfile(id)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/** Local-first `rename_profile`, applied on the daemon's ack. */
+export function renameProfile(id: string, name: string): void {
+  void client
+    ?.request({ cmd: 'rename_profile', id, name })
+    .then(() => {
+      applyProfileRename(id, name)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/**
+ * `remove_profile` — the fallback rules (selection → factory default,
+ * preset selectors → None) are daemon-owned: reconcile on the ack
+ * instead of mirroring them.
+ */
+export function removeProfile(id: string): void {
+  void client
+    ?.request({ cmd: 'remove_profile', id })
+    .then(reconcile)
+    .catch(() => {
+      // The error-path reconcile restores daemon truth.
+    })
+}
+
+/** `reset_profile` — baselines never ride the snapshot: reconcile. */
+export function resetProfile(id: string): void {
+  void client
+    ?.request({ cmd: 'reset_profile', id })
+    .then(reconcile)
+    .catch(() => {
+      // The error-path reconcile restores daemon truth.
+    })
+}
+
+/**
+ * `add_eq_preset` — [`addProfile`]'s preset counterpart: the clone is
+ * selected onto the active profile, so edits continue on the copy.
+ */
+export function addEqPreset(from: string, name: string): void {
+  void client
+    ?.request({ cmd: 'add_eq_preset', from, name })
+    .then((id) => {
+      if (id === undefined) return
+      applyEqPresetAdd(from, name, id)
+      setEqPreset(state.selected_profile, id)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/** Local-first `rename_eq_preset`, applied on the daemon's ack. */
+export function renameEqPreset(id: string, name: string): void {
+  void client
+    ?.request({ cmd: 'rename_eq_preset', id, name })
+    .then(() => {
+      applyEqPresetRename(id, name)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/**
+ * `remove_eq_preset` — selectors falling back to `None` is
+ * daemon-owned (every selecting profile, not just the active one):
+ * reconcile on the ack.
+ */
+export function removeEqPreset(id: string): void {
+  void client
+    ?.request({ cmd: 'remove_eq_preset', id })
+    .then(reconcile)
+    .catch(() => {
+      // The error-path reconcile restores daemon truth.
+    })
+}
+
+/** `reset_eq_preset` — baselines never ride the snapshot: reconcile. */
+export function resetEqPreset(id: string): void {
+  void client
+    ?.request({ cmd: 'reset_eq_preset', id })
+    .then(reconcile)
+    .catch(() => {
+      // The error-path reconcile restores daemon truth.
+    })
 }

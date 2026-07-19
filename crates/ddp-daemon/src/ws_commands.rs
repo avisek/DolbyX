@@ -3,6 +3,7 @@
 //! one `ack`/`error`; `state` events are pub/sub.
 
 use ddp_engine::VisFrame;
+use ddp_state::Command;
 use serde::{Deserialize, Serialize};
 
 use crate::engine_supervisor::SupervisorError;
@@ -74,6 +75,119 @@ pub(crate) enum WsCommand {
         /// The preset to reset.
         id: ddp_state::PresetId,
     },
+    /// Clone one profile into a new custom profile; the minted id rides
+    /// the ack.
+    AddProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to clone.
+        from: ddp_state::ProfileId,
+        /// The new profile's display name.
+        name: String,
+    },
+    /// Rename a custom profile (renames go by `name` — the id never
+    /// changes).
+    RenameProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to rename.
+        id: ddp_state::ProfileId,
+        /// The new display name.
+        name: String,
+    },
+    /// Remove a custom profile.
+    RemoveProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to remove.
+        id: ddp_state::ProfileId,
+    },
+    /// Clone one EQ preset into a new custom preset; the minted id
+    /// rides the ack.
+    AddEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to clone.
+        from: ddp_state::PresetId,
+        /// The new preset's display name.
+        name: String,
+    },
+    /// Rename a custom EQ preset.
+    RenameEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to rename.
+        id: ddp_state::PresetId,
+        /// The new display name.
+        name: String,
+    },
+    /// Remove a custom EQ preset.
+    RemoveEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to remove.
+        id: ddp_state::PresetId,
+    },
+}
+
+impl WsCommand {
+    /// Splits the frame into its echoed `request_id` and the
+    /// [`Command`] it carries — `None` for the read-only `get_state`,
+    /// which the WS layer answers with a snapshot directly.
+    pub(crate) fn into_parts(self) -> (String, Option<Command>) {
+        match self {
+            Self::GetState { request_id } => (request_id, None),
+            Self::SetPower { request_id, on } => (request_id, Some(Command::SetPower { on })),
+            Self::SetProfile { request_id, id } => (request_id, Some(Command::SetProfile { id })),
+            Self::EditProfile {
+                request_id,
+                id,
+                params,
+            } => (request_id, Some(Command::EditProfile { id, params })),
+            Self::ResetProfile { request_id, id } => {
+                (request_id, Some(Command::ResetProfile { id }))
+            }
+            Self::SetEqPreset {
+                request_id,
+                profile_id,
+                id,
+            } => (request_id, Some(Command::SetEqPreset { profile_id, id })),
+            Self::EditEqPreset {
+                request_id,
+                id,
+                params,
+            } => (request_id, Some(Command::EditEqPreset { id, params })),
+            Self::ResetEqPreset { request_id, id } => {
+                (request_id, Some(Command::ResetEqPreset { id }))
+            }
+            Self::AddProfile {
+                request_id,
+                from,
+                name,
+            } => (request_id, Some(Command::AddProfile { from, name })),
+            Self::RenameProfile {
+                request_id,
+                id,
+                name,
+            } => (request_id, Some(Command::RenameProfile { id, name })),
+            Self::RemoveProfile { request_id, id } => {
+                (request_id, Some(Command::RemoveProfile { id }))
+            }
+            Self::AddEqPreset {
+                request_id,
+                from,
+                name,
+            } => (request_id, Some(Command::AddEqPreset { from, name })),
+            Self::RenameEqPreset {
+                request_id,
+                id,
+                name,
+            } => (request_id, Some(Command::RenameEqPreset { id, name })),
+            Self::RemoveEqPreset { request_id, id } => {
+                (request_id, Some(Command::RemoveEqPreset { id }))
+            }
+        }
+    }
 }
 
 /// A daemon → client event frame.
@@ -98,6 +212,11 @@ pub(crate) enum WsEvent<'a> {
         request_id: &'a str,
         /// Always `true` — failures use [`WsEvent::Error`].
         ok: bool,
+        /// The server-minted id an `add_*` created, so the originator
+        /// applies locally without waiting for a snapshot (ADR-0005);
+        /// absent on every other ack.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<&'a str>,
     },
     /// The one failure reply per command; `request_id` is `null` when
     /// the frame was too malformed to carry one.
@@ -159,11 +278,13 @@ impl WsEvent<'_> {
     }
 }
 
-/// Builds the standard success reply.
-pub(crate) fn ack(request_id: &str) -> WsEvent<'_> {
+/// Builds the standard success reply; `id` is the minted id on an
+/// `add_*` ack, `None` everywhere else.
+pub(crate) fn ack<'a>(request_id: &'a str, id: Option<&'a str>) -> WsEvent<'a> {
     WsEvent::Ack {
         request_id,
         ok: true,
+        id,
     }
 }
 

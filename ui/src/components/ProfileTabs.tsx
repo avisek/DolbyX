@@ -1,30 +1,112 @@
-import { For, type Component } from 'solid-js'
-import { state } from '../store/state'
-import { setProfile } from '../store/ws'
+import { For, Show, createSignal, type Component } from 'solid-js'
+import { selectedProfile, state } from '../store/state'
+import {
+  addProfile,
+  removeProfile,
+  renameProfile,
+  resetProfile,
+  setProfile,
+} from '../store/ws'
+import RenameInput from './RenameInput'
 import './ProfileTabs.css'
 
 /**
  * The profile tabs: rendered from the snapshot's profiles (factory
- * four for now), selection switches local-first on ack.
+ * first, custom after), selection switching local-first on ack — plus
+ * the CRUD affordances on the active profile (issue #26): Add clones
+ * it under a server-minted id; factory items reset, custom items
+ * rename and delete.
  */
-const ProfileTabs: Component = () => (
-  <div class="profile-tabs" role="tablist" aria-label="Profiles">
-    <For each={state.profiles}>
-      {(profile) => (
-        <button
-          type="button"
-          class="profile-tabs__tab"
-          role="tab"
-          aria-selected={state.selected_profile === profile.id}
-          onClick={() => {
-            setProfile(profile.id)
-          }}
+const ProfileTabs: Component = () => {
+  const [renaming, setRenaming] = createSignal(false)
+  const active = () => selectedProfile()
+  return (
+    <div class="profile-tabs">
+      <div class="profile-tabs__list" role="tablist" aria-label="Profiles">
+        <For each={state.profiles}>
+          {(profile) => (
+            <button
+              type="button"
+              class="profile-tabs__tab"
+              role="tab"
+              aria-selected={state.selected_profile === profile.id}
+              onClick={() => {
+                setProfile(profile.id)
+              }}
+            >
+              {profile.name}
+            </button>
+          )}
+        </For>
+      </div>
+      <div class="profile-tabs__actions">
+        <Show
+          when={renaming() && active()}
+          fallback={
+            <>
+              <button
+                type="button"
+                class="profile-tabs__action"
+                aria-label="Add profile"
+                onClick={() => {
+                  const profile = active()
+                  if (profile) addProfile(profile.id, `${profile.name} Copy`)
+                }}
+              >
+                Add
+              </button>
+              <Show when={active()?.is_factory === false}>
+                <button
+                  type="button"
+                  class="profile-tabs__action"
+                  aria-label="Rename profile"
+                  onClick={() => setRenaming(true)}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  class="profile-tabs__action"
+                  aria-label="Delete profile"
+                  onClick={() => {
+                    const profile = active()
+                    if (profile) removeProfile(profile.id)
+                  }}
+                >
+                  Delete
+                </button>
+              </Show>
+              <Show when={active()?.is_factory === true}>
+                <button
+                  type="button"
+                  class="profile-tabs__action"
+                  aria-label="Reset profile"
+                  onClick={() => {
+                    const profile = active()
+                    if (profile) resetProfile(profile.id)
+                  }}
+                >
+                  Reset
+                </button>
+              </Show>
+            </>
+          }
         >
-          {profile.name}
-        </button>
-      )}
-    </For>
-  </div>
-)
+          {(profile) => (
+            <RenameInput
+              class="profile-tabs__rename"
+              label="Profile name"
+              value={profile().name}
+              onRename={(name) => {
+                renameProfile(profile().id, name)
+              }}
+              onClose={() => setRenaming(false)}
+            />
+          )}
+        </Show>
+      </div>
+    </div>
+  )
+}
 
 export default ProfileTabs

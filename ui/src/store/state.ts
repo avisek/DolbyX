@@ -76,6 +76,47 @@ export function applyProfile(id: string): void {
 }
 
 /**
+ * Appends this tab's own acked `add_profile` clone under the minted id
+ * (local-first — the ack carries the id so no snapshot round-trip is
+ * needed). The spread clones what the daemon clones: resolved params
+ * and the EQ preset selection.
+ */
+export function applyProfileAdd(from: string, name: string, id: string): void {
+  setState('profiles', (profiles) => {
+    const source = profiles.find((profile) => profile.id === from)
+    return source
+      ? [...profiles, { ...source, id, name, is_factory: false }]
+      : profiles
+  })
+}
+
+/** Applies this tab's own acked profile rename (local-first). */
+export function applyProfileRename(id: string, name: string): void {
+  setState('profiles', (profiles) =>
+    profiles.map((profile) =>
+      profile.id === id ? { ...profile, name } : profile,
+    ),
+  )
+}
+
+/** [`applyProfileAdd`]'s EQ preset counterpart. */
+export function applyEqPresetAdd(from: string, name: string, id: string): void {
+  setState('eq_presets', (presets) => {
+    const source = presets.find((preset) => preset.id === from)
+    return source
+      ? [...presets, { ...source, id, name, is_factory: false }]
+      : presets
+  })
+}
+
+/** Applies this tab's own acked EQ preset rename (local-first). */
+export function applyEqPresetRename(id: string, name: string): void {
+  setState('eq_presets', (presets) =>
+    presets.map((preset) => (preset.id === id ? { ...preset, name } : preset)),
+  )
+}
+
+/**
  * Applies this tab's own acked EQ preset selection (local-first) —
  * per-profile, `null` detaching to the profile's own EQ params.
  */

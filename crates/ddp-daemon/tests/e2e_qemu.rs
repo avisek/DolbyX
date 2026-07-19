@@ -9,6 +9,9 @@
 //! Slice 15 (#23) adds its behavior 8: the EQ preset overlay lands
 //! Rich's curve in the registry. Slice 16 (#24) adds its behavior 6:
 //! `vis` events mirror the real reply tails, custom grid live.
+//! Slice 18 (#26) adds its behavior 9: the CRUD tracer bullet — a
+//! custom profile survives a restart, and removing it while selected
+//! falls the registry back to Music.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -371,6 +374,84 @@ async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
         .expect("get_params");
     assert_eq!(values[0], vec![0; 40], "the profile's own flat targets");
     assert_eq!(values[1], [0], "the profile's own ieon = 0");
+}
+
+/// Behavior 9 (issue #26): the CRUD tracer bullet against the real
+/// engine — add a custom profile from Music, rename it, restart the
+/// daemon: it survives with the new name and Music's overrides. Then
+/// select it, diverge it (registry-confirmed), and remove it — the
+/// selection and the live registry fall back to Music.
+#[tokio::test]
+async fn custom_profile_crud_replays_on_the_real_engine() {
+    let daemon = start_qemu_daemon().await;
+    let mut ws = connected(daemon.handle.addr()).await;
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "add_profile", "request_id": "r1", "from": "music", "name": "Late Night" }),
+    )
+    .await;
+    let ack = recv_json(&mut ws).await;
+    assert_eq!(ack["type"], "ack");
+    let id = ack["id"].as_str().expect("minted id").to_string();
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "rename_profile", "request_id": "r2", "id": id, "name": "Nocturne" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+
+    // Restart — fresh daemon, fresh engine process.
+    drop(ws);
+    let dir = daemon.dir;
+    daemon.handle.shutdown().await;
+    drop(daemon.backend);
+    let restarted = start_qemu_daemon_over(dir).await;
+    let mut ws = ws_connect(restarted.handle.addr()).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    let profile = &snapshot["profiles"][4];
+    assert_eq!(profile["id"], id.as_str(), "the clone survived the restart");
+    assert_eq!(profile["name"], "Nocturne", "with its rename");
+    assert_eq!(profile["is_factory"], false);
+    assert_eq!(
+        profile["params"]["dvla"],
+        json!([4]),
+        "and Music's cloned overrides"
+    );
+
+    // Select it and diverge it: the registry follows the clone…
+    let session = restarted
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    for request in [
+        json!({ "cmd": "set_profile", "request_id": "r3", "id": id }),
+        json!({ "cmd": "edit_profile", "request_id": "r4", "id": id, "params": { "dvla": [9] } }),
+    ] {
+        send_json(&mut ws, &request).await;
+        assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    }
+    let read_dvla = || {
+        restarted
+            .handle
+            .supervisor()
+            .get_params(session, &["dvla"])
+            .expect("get_params")
+    };
+    assert_eq!(read_dvla()[0], [9], "the clone's divergence, live");
+
+    // …and removing the selected clone falls back to Music.
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "remove_profile", "request_id": "r5", "id": id }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    assert_eq!(read_dvla()[0], [4], "Music's resolved set landed");
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r6" })).await;
+    let snapshot = recv_state(&mut ws).await["snapshot"].take();
+    assert_eq!(snapshot["selected_profile"], "music");
+    assert_eq!(snapshot["profiles"].as_array().expect("array").len(), 4);
 }
 
 /// Behavior 9 / tracer bullet (issue #19), plugin behaviors 2 + 3: a

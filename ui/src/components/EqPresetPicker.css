@@ -1,9 +1,50 @@
 .eq-preset-picker {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.eq-preset-picker__options {
+  display: flex;
   gap: 0.25rem;
   padding: 0.25rem;
   border-radius: 0.5rem;
   background: var(--color-surface);
+}
+
+.eq-preset-picker__actions {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+.eq-preset-picker__action {
+  padding: 0.25rem 0.625rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.eq-preset-picker__action:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.eq-preset-picker__rename {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 0.375rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.8125rem;
 }
 
 .eq-preset-picker__option {

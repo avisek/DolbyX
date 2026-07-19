@@ -25,5 +25,6 @@ pub use param_def::{
 pub use preset::{EqPreset, PresetId};
 pub use profile::{Profile, ProfileId};
 pub use state::{
-    Command, Defaults, State, StateDiff, ValidationError, validate_eq_preset_write, validate_write,
+    Command, Defaults, ItemKind, State, StateDiff, ValidationError, validate_eq_preset_write,
+    validate_write,
 };

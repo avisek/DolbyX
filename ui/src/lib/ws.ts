@@ -76,12 +76,45 @@ export type Command =
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
       readonly params: Readonly<Record<string, readonly number[]>>
     }
+  | { readonly cmd: 'reset_profile'; readonly id: string }
+  | { readonly cmd: 'reset_eq_preset'; readonly id: string }
+  | {
+      readonly cmd: 'add_profile'
+      /** The profile to clone; the minted id rides the ack. */
+      readonly from: string
+      readonly name: string
+    }
+  | {
+      readonly cmd: 'rename_profile'
+      readonly id: string
+      /** Renames go by name — the id never changes. */
+      readonly name: string
+    }
+  | { readonly cmd: 'remove_profile'; readonly id: string }
+  | {
+      readonly cmd: 'add_eq_preset'
+      /** The preset to clone; the minted id rides the ack. */
+      readonly from: string
+      readonly name: string
+    }
+  | {
+      readonly cmd: 'rename_eq_preset'
+      readonly id: string
+      readonly name: string
+    }
+  | { readonly cmd: 'remove_eq_preset'; readonly id: string }
 
 /** A daemon → client event frame. */
 export type ServerEvent =
   | { readonly type: 'state'; readonly snapshot: StateSnapshot }
   | { readonly type: 'vis'; readonly params: VisParams }
-  | { readonly type: 'ack'; readonly request_id: string; readonly ok: true }
+  | {
+      readonly type: 'ack'
+      readonly request_id: string
+      readonly ok: true
+      /** The server-minted id an `add_*` created; absent otherwise. */
+      readonly id?: string
+    }
   | {
       readonly type: 'error'
       /** `null` when the frame was too malformed to carry one. */
@@ -103,7 +136,8 @@ export interface WsClientHandlers {
 /** One command awaiting its `ack`/`error`. */
 interface Pending {
   readonly cmd: Command['cmd']
-  readonly resolve: () => void
+  /** Resolves with the ack's minted `id` when one rides it (`add_*`). */
+  readonly resolve: (id?: string) => void
   readonly reject: (reason: Error) => void
 }
 
@@ -171,10 +205,11 @@ export class WsClient {
 
   /**
    * Sends one command with a fresh `request_id`; the returned promise
-   * settles on the daemon's matching `ack` (resolve) or `error`
-   * (reject). Rejects immediately while the socket is not open.
+   * settles on the daemon's matching `ack` (resolving the minted `id`
+   * when one rides it — `add_*`) or `error` (reject). Rejects
+   * immediately while the socket is not open.
    */
-  request(command: Command): Promise<void> {
+  request(command: Command): Promise<string | undefined> {
     if (this.#socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('WS not open'))
     }
@@ -205,7 +240,7 @@ export class WsClient {
         this.#handlers.onVis(parsed.params)
         break
       case 'ack':
-        this.#settle(parsed.request_id)?.resolve()
+        this.#settle(parsed.request_id)?.resolve(parsed.id)
         break
       case 'error': {
         const pending = this.#settle(parsed.request_id)
