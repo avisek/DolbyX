@@ -134,8 +134,8 @@ _Avoid_: config, init payload, manifest.
 
 **`vis` event**:
 The per-block visualizer broadcast — the vis tail's four arrays keyed by
-4-CC; a pure event stream (no audio → no events; the client holds the
-last frame — no idle concept, no client-side smoothing).
+4-CC; a pure event stream (no audio → no events, no client-side
+smoothing; 250 ms without a frame is Vis idle).
 _Avoid_: visualizer data (see `vcbg`/`vcbe`); `vis_suspended` /
 suspended (removed concept).
 
@@ -196,6 +196,13 @@ _Avoid_: built-in, default item, preset flag.
 "Graphic EQ" — the user-driven curve, backed by `gebg` (band gains) and
 `geon` (enable).
 
+**GEQ editor**:
+The EQ editing surface inside the visualizer — the sliders and curve
+riding the `vis` feed; revealed and hidden per skin policy (Classic:
+hover / focus / drag, 5 s linger).
+_Avoid_: eq overlay ("overlay" is taken — an EQ preset shadowing a
+profile's params); GEQ overlay.
+
 **Master control**:
 One of the three main-screen controls — Surround Virtualizer
 (`vdhe`+`dhsb`), Dialog Enhancer (`deon`+`dea`), Volume Leveller
@@ -232,3 +239,25 @@ The per-visible-band EQ control unit — track chrome + draggable thumb
 (the original's `mSliderBg`/`mSliderThumb`), riding a fractional `gebf`
 index; visible count `N ∈ [2, genb]`, default 5.
 _Avoid_: band (sliders sit at fractional indices, between bands).
+
+**Vis idle**:
+The feed state entered 250 ms after the last `vis` event — feed death
+only (zero sessions, host stopped processing, WS down), never `ven` or
+power (bypassed blocks keep emitting). The visualizer returns to the
+silence floor; the GEQ editor renders resolved state; a fresh frame
+exits instantly. Mount starts idle.
+_Avoid_: suspended (the original's removed concept); stale frame.
+
+**Brush buffer**:
+The GEQ smoother's pre-convolution user-gain state — what a stroke
+actually paints; the kernel convolves it into the smoothed curve the
+engine receives. Never persisted — rehydrated from the stored curve.
+_Avoid_: temp gains (the Java field); user gains (ambiguous with
+`gebg`).
+
+**Rehydrate**:
+Rebuilding the brush buffer from a stored curve via the kernel's
+pseudoinverse, so the convolution reproduces that curve exactly and the
+next stroke continues it without a jump — run whenever the active
+`gebg` changes by any path other than the smoother's own write.
+_Avoid_: inverse smoothing (the mechanism, not the purpose).

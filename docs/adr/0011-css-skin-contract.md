@@ -29,5 +29,18 @@ continuous), so derived skins retune by overriding two vars. A step
 must stay numeric — `round()` can't consume a `none`, and an invalid
 substitution voids the whole declaration; "no quantization" is spelled
 "the data's own resolution".
+
+Second instance — the GEQ editor's visibility (ADR-0008): the
+component publishes one drag-state modifier (`visualizer--eq-drag`)
+and zero timers; the reveal triggers (`:hover`, `:focus-within`, the
+modifier), both fades, and the idle linger are skin CSS (asymmetric
+`transition-delay`), so a skin can pick click-only reveal or an
+always-visible editor without code changes. Contract consequence:
+skins hide such interactive chrome with `opacity`, never `visibility`
+or `display` — hidden elements must stay focusable, or keyboard users
+could never trigger the focus reveal (and screen readers keep working
+sliders regardless of visual state). Timed *state* (Vis idle's 250 ms)
+stays component-side — it changes what the data *is*; timed
+*appearance* (the linger, the descent) is the skin's.
 Consequence: jsdom tests see only the var/class seam;
 rendered-geometry truth needs a real browser (Playwright).
