@@ -23,6 +23,13 @@ test('fills snap to whole rows, the floor is empty, the pip rides continuously',
   const columns = page.locator('.vis-column')
   await expect(columns).toHaveCount(20) // the defaults-carried custom grid
 
+  // This probe drives the vars by hand; shed the mount-idle modifier
+  // (no feed, no repaint to re-raise it) so Classic's idle descent
+  // transition (#25) doesn't animate the probe's writes.
+  await page.evaluate(() => {
+    document.querySelector('.visualizer')?.classList.remove('visualizer--idle')
+  })
+
   const column = columns.first()
   const fill = column.locator('.vis-column__fill')
   const columnHeight = await height(column)

@@ -10,6 +10,12 @@ const I16_MIN = -32768
 const I16_MAX = 32767
 
 /**
+ * The dB-coded params' wire coding: i16 1/16 dB (`frac_bits = 4`,
+ * ADR-0005) — the vis arrays, `gebg`, and every other decibel kind.
+ */
+export const DB_FRAC_BITS = 4
+
+/**
  * The display value of an engine-native `raw`: `raw / 2^fracBits`
  * (`fracBits = 4` ⇒ 1/16-dB coding). Exact for every i16 — dividing by
  * a power of two loses no float bits.

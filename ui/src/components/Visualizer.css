@@ -33,13 +33,43 @@
   );
   inline-size: min(36rem, 90vw);
   aspect-ratio: 885 / 390; /* the background asset's own proportions */
+  /* Vis idle descent duration — HITL-eyeballed Classic constant. */
+  --idle-descent: 700ms;
+}
+
+/* The data vars, registered so Classic can transition them — numbers,
+   inherited to the leaves that display them; initials = the floor. */
+@property --exc {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: -12;
+}
+
+@property --gain {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Vis idle: the component snaps the vars to the floor and raises the
+   modifier in one recalc (ADR-0008); Classic animates the *descent* by
+   transitioning the vars under idle only — live tracking stays exact
+   (0 s), and round() re-quantizes per frame, so fills walk down
+   brick-by-brick while the pip glides. A fresh frame drops the
+   modifier in the same recalc as its vars, so exit snaps through the
+   live rule with no floor flash. */
+.visualizer--idle .vis-column {
+  transition:
+    --exc var(--idle-descent) linear,
+    --gain var(--idle-descent) linear;
 }
 
 .vis-column {
   /* Classic's per-band coordinate device: cqh below measures the
-     column. (contain: layout makes each column its own stacking
-     context — the painters' per-column paint order; columns never
-     overlap.) */
+     column. (No stacking context here — contain: layout creates none —
+     so the leaves' z 1–3 interleave across columns in the shared
+     context; harmless, columns never overlap. The editor rides above
+     at z 4–5, EqCurve.css.) */
   container-type: size;
   /* One row: 1 dB of the 48-dB window. */
   --row: calc(100cqh / 48);
