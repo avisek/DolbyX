@@ -6,6 +6,7 @@ import { createSignal } from 'solid-js'
 import { WsClient } from '../lib/ws'
 import {
   applyEqPreset,
+  applyEqPresetEdit,
   applyPower,
   applyProfile,
   applyProfileEdit,
@@ -122,6 +123,21 @@ export function editProfileLive(
 ): void {
   applyProfileEdit(id, params)
   void client?.request({ cmd: 'edit_profile', id, params }).catch(() => {
+    // The error-path reconcile restores daemon truth.
+  })
+}
+
+/**
+ * Optimistic `edit_eq_preset` for continuous drags — the GEQ editor's
+ * write path when a preset is active (issue #25 part C), same
+ * local-first shape as [`editProfileLive`].
+ */
+export function editEqPresetLive(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  applyEqPresetEdit(id, params)
+  void client?.request({ cmd: 'edit_eq_preset', id, params }).catch(() => {
     // The error-path reconcile restores daemon truth.
   })
 }

@@ -32,7 +32,7 @@ export const KERNELS = {
 export type KernelName = keyof typeof KERNELS
 
 /** `gebg`'s fixed wire shape — the smoother is 20-slot end to end. */
-const BANDS = 20
+export const WIRE_BANDS = 20
 
 /** `gebg` is dB-coded at 1/16 dB. */
 const FRAC_BITS = 4
@@ -72,20 +72,20 @@ export class GainSmoother {
   /** The Brush buffer — 2L edge cells around the 20 band cells. */
   private readonly temp: Float64Array
   /** The convolved curve in dB — what the engine carries. */
-  private readonly smooth = new Float64Array(BANDS)
+  private readonly smooth = new Float64Array(WIRE_BANDS)
   /** Per-band coalescing queue; insertion order = drain order. */
   private readonly queue = new Map<
     number,
     { dB: number; ref: number | undefined }
   >()
-  private lastEmitted = new Int16Array(BANDS)
+  private lastEmitted = new Int16Array(WIRE_BANDS)
   /** Last tick's timestamp; `null` ⇒ the next tick sees Δt = 0. */
   private lastTick: number | null = null
 
   constructor(kernel: KernelName) {
     this.kernel = KERNELS[kernel]
     this.inv = INVERSES[kernel]
-    this.temp = new Float64Array(BANDS + 2 * this.kernel.L)
+    this.temp = new Float64Array(WIRE_BANDS + 2 * this.kernel.L)
   }
 
   /**
@@ -97,18 +97,18 @@ export class GainSmoother {
    */
   rehydrate(gebg: readonly number[]): void {
     const { L } = this.kernel
-    for (let band = 0; band < BANDS; band += 1) {
+    for (let band = 0; band < WIRE_BANDS; band += 1) {
       const raw = clampToWindow(gebg[band] ?? 0)
       this.smooth[band] = rawToDisplay(raw, FRAC_BITS)
       this.lastEmitted[band] = raw
     }
-    for (let band = 0; band < BANDS; band += 1) {
+    for (let band = 0; band < WIRE_BANDS; band += 1) {
       let cell = 0
       if (this.inv === null) {
         cell = this.smooth[band] ?? 0
       } else {
         const row = this.inv[band] ?? []
-        for (let i = 0; i < BANDS; i += 1) {
+        for (let i = 0; i < WIRE_BANDS; i += 1) {
           cell += (row[i] ?? 0) * (this.smooth[i] ?? 0)
         }
       }
@@ -116,7 +116,7 @@ export class GainSmoother {
     }
     for (let i = 0; i < L; i += 1) {
       this.temp[i] = this.temp[L] ?? 0
-      this.temp[L + BANDS + i] = this.temp[L + BANDS - 1] ?? 0
+      this.temp[L + WIRE_BANDS + i] = this.temp[L + WIRE_BANDS - 1] ?? 0
     }
     this.queue.clear()
     this.lastTick = null
@@ -179,7 +179,7 @@ export class GainSmoother {
     }
     // Convolve: smooth[b] = Σ kernel[i] · temp[b + i], skipping moves
     // within 0.02 dB (the original's per-band threshold).
-    for (let band = 0; band < BANDS; band += 1) {
+    for (let band = 0; band < WIRE_BANDS; band += 1) {
       let gain = 0
       for (let i = 0; i <= 2 * L; i += 1) {
         gain += (k[i] ?? 0) * (this.temp[band + i] ?? 0)
@@ -189,9 +189,9 @@ export class GainSmoother {
       }
     }
     // Emit: quantize clamped to the edit window; dedupe post-quantization.
-    const batch = new Int16Array(BANDS)
+    const batch = new Int16Array(WIRE_BANDS)
     let changed = false
-    for (let band = 0; band < BANDS; band += 1) {
+    for (let band = 0; band < WIRE_BANDS; band += 1) {
       batch[band] = clampToWindow(
         displayToRaw(this.smooth[band] ?? 0, FRAC_BITS),
       )

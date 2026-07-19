@@ -6,6 +6,10 @@
 .eq-sliders {
   position: absolute;
   inset: 0;
+  /* The pointer surface is the field (issue #25 part C): the layer
+     owns the drag, so touch never pans/zooms out from under the
+     pointer capture. */
+  touch-action: none;
 }
 
 .eq-slider {
@@ -29,6 +33,8 @@
   block-size: 100%;
   /* Open paths, not regions — both polylines are pure strokes. */
   fill: none;
+  /* Decorative (aria-hidden): never swallow the field's pointer downs. */
+  pointer-events: none;
 }
 
 /* — Classic: the faithful DDP editor look. Constants from
@@ -94,9 +100,7 @@
 
 /* The thumb (`eq_thumb`): a hollow cyan ring with a soft bloom,
    centered on its vertex — the component's `top` is the vertex y, the
-   `thumbHeight/4` track padding rides its rendered size. The active
-   state (`eq-slider--active` → `eq_thumb_touch_state`) lands with
-   part C's pointer work. */
+   `thumbHeight/4` track padding rides its rendered size. */
 .eq-slider__thumb {
   left: 50%;
   inline-size: 28px;
@@ -110,6 +114,21 @@
     #8fd2ff 44% 60%,
     rgb(90 180 255 / 28%) 72%,
     transparent 80%
+  );
+}
+
+/* The snapped Slider under a drag (`eq-slider--active` →
+   `eq_thumb_touch_state`): the original's Bright1/2/3 cascade
+   collapses — only distance 0 is distinct. A hotter core, a solid
+   ring, a wider bloom; HITL-eyeballed like the rest of the pass. */
+.eq-slider--active .eq-slider__thumb {
+  background: radial-gradient(
+    circle,
+    rgb(225 245 255 / 85%) 0 14%,
+    rgb(150 225 255 / 25%) 26% 32%,
+    #c2e9ff 42% 62%,
+    rgb(120 200 255 / 45%) 76%,
+    transparent 88%
   );
 }
 

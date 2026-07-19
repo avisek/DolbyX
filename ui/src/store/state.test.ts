@@ -7,8 +7,13 @@ window.__BOOTSTRAP__ = fixtureBootstrap({
   power: false,
   selected_profile: 'movie',
 })
-const { state, applyProfileEdit, applySnapshot, resolvedEqParam } =
-  await import('./state')
+const {
+  state,
+  applyEqPresetEdit,
+  applyProfileEdit,
+  applySnapshot,
+  resolvedEqParam,
+} = await import('./state')
 
 it('hydrates the store from window.__BOOTSTRAP__ at module init', () => {
   expect(state.power).toBe(false)
@@ -36,6 +41,21 @@ it('applies a profile edit by overlaying the head of the allocation', () => {
   expect(music?.params['dea']).toEqual([8, 2, 3])
   const movie = state.profiles.find((profile) => profile.id === 'movie')
   expect(movie?.params['dvla']).toEqual([7])
+})
+
+// The GEQ editor's drag writes route to the active preset (issue #25
+// part C) — the local-first apply merges like the profile one, and a
+// preset edit is global: every profile selecting it sees the change.
+it('applies an EQ preset edit by overlaying the head of the allocation', () => {
+  applySnapshot(fixtureState())
+
+  applyEqPresetEdit('rich', { gebg: [96], geon: [1] })
+
+  const rich = state.eq_presets.find((preset) => preset.id === 'rich')
+  expect(rich?.params['gebg']?.slice(0, 3)).toEqual([96, 0, 0])
+  expect(rich?.params['geon']).toEqual([1])
+  const open = state.eq_presets.find((preset) => preset.id === 'open')
+  expect(open?.params['geon']).toEqual([0])
 })
 
 // ADR-0003: a selected preset's EQ params shadow the profile's own

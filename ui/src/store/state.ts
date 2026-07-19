@@ -89,6 +89,18 @@ export function applyEqPreset(profileId: string, id: string | null): void {
   )
 }
 
+/** Overlays edited entries onto the head of each param's allocation. */
+function mergeParams(
+  base: Readonly<Record<string, readonly number[]>>,
+  params: Readonly<Record<string, readonly number[]>>,
+): Record<string, readonly number[]> {
+  const merged: Record<string, readonly number[]> = { ...base }
+  for (const [name, values] of Object.entries(params)) {
+    merged[name] = [...values, ...(base[name] ?? []).slice(values.length)]
+  }
+  return merged
+}
+
 /**
  * Applies one of this tab's own profile edits. Short value arrays
  * overlay the head of the param's full allocation — the daemon merges
@@ -99,16 +111,27 @@ export function applyProfileEdit(
   params: Readonly<Record<string, readonly number[]>>,
 ): void {
   setState('profiles', (profiles) =>
-    profiles.map((profile) => {
-      if (profile.id !== id) return profile
-      const merged: Record<string, readonly number[]> = { ...profile.params }
-      for (const [name, values] of Object.entries(params)) {
-        merged[name] = [
-          ...values,
-          ...(profile.params[name] ?? []).slice(values.length),
-        ]
-      }
-      return { ...profile, params: merged }
-    }),
+    profiles.map((profile) =>
+      profile.id === id
+        ? { ...profile, params: mergeParams(profile.params, params) }
+        : profile,
+    ),
+  )
+}
+
+/**
+ * Applies one of this tab's own EQ preset edits — same head overlay;
+ * presets are global, so the change reaches every profile selecting it.
+ */
+export function applyEqPresetEdit(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  setState('eq_presets', (presets) =>
+    presets.map((preset) =>
+      preset.id === id
+        ? { ...preset, params: mergeParams(preset.params, params) }
+        : preset,
+    ),
   )
 }
