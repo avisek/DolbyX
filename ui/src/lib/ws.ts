@@ -70,6 +70,12 @@ export type Command =
       /** `null` ⇒ the profile's own EQ params apply. */
       readonly id: string | null
     }
+  | {
+      readonly cmd: 'edit_eq_preset'
+      readonly id: string
+      /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
+      readonly params: Readonly<Record<string, readonly number[]>>
+    }
 
 /** A daemon → client event frame. */
 export type ServerEvent =

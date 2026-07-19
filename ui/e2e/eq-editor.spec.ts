@@ -1,10 +1,10 @@
 /**
- * Slice 17 (#25) part B, seam 3: the GEQ editor's rendered geometry
- * and the Classic skin's visibility + idle descent — real browser,
- * real daemon, real engine (jsdom sees only the var/class seam,
- * ADR-0011). Factory state: music profile, `gebg` all zero, no
- * sessions → the page mounts Vis idle and the editor renders resolved
- * state.
+ * Slice 17 (#25) parts B + C, seam 3: the GEQ editor's rendered
+ * geometry, the Classic skin's visibility + idle descent, and the
+ * drag replay through the real daemon + engine (jsdom sees only the
+ * var/class seam, ADR-0011). Factory state: music profile, `gebg` all
+ * zero, no sessions → the page mounts Vis idle and the editor renders
+ * resolved state.
  */
 import type { Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
@@ -202,5 +202,185 @@ test('idle descent walks the fills down brick-by-brick', async ({
     expect(
       Math.abs(height / rowHeight - Math.round(height / rowHeight)),
     ).toBeLessThan(0.15)
+  }
+})
+
+/** One sent live-edit frame, as captured off the page's WS. */
+interface EditFrame {
+  readonly cmd: string
+  readonly params: {
+    readonly gebg?: readonly number[]
+    readonly geon?: readonly number[]
+  }
+}
+
+// Behavior 16 (part C): a drag trace through the real daemon + engine.
+// Factory music: no preset (writes route to `edit_profile`), ieon 0 —
+// once the auto-flipped `geon` lands, the composed `vcbg` the engine
+// emits *is* the clamped GEQ registry on the mirrored grid, so the
+// `vis`-fed curve following the emitted batch pins `get_params("gebg")`
+// end to end: daemon validation, `Profile::splice`, the engine's
+// AK-direct write + commit, the per-block registry read.
+test('a drag lands in the engine: the vis-fed curve follows the emitted batch', async ({
+  page,
+  daemon,
+}) => {
+  test.slow() // real engine blocks under qemu
+  const sent: EditFrame[] = []
+  const errors: unknown[] = []
+  let latestVcbg: readonly number[] | undefined
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (frame) => {
+      const command = JSON.parse(String(frame.payload)) as EditFrame
+      if (command.cmd.startsWith('edit_')) sent.push(command)
+    })
+    ws.on('framereceived', (frame) => {
+      const event = JSON.parse(String(frame.payload)) as {
+        type: string
+        params?: { vcbg?: readonly number[] }
+      }
+      if (event.type === 'vis') latestVcbg = event.params?.vcbg
+      if (event.type === 'error') errors.push(event)
+    })
+  })
+  await page.goto('/')
+
+  // Real audio: silence keeps the feed alive — the editor rides `vcbg`.
+  const plugin = await SyntheticPlugin.connect(daemon.socketPath)
+  await plugin.hello(48_000, 512)
+  const pump = { stopped: false }
+  const pumped = (async () => {
+    const silence = new Int16Array(512 * 2)
+    while (!pump.stopped) await plugin.process(silence)
+  })()
+  try {
+    await expect.poll(() => latestVcbg, { timeout: 30_000 }).toBeTruthy()
+
+    // The drag: a slow flat sweep across the whole field, then a held
+    // hand — every Slider snap paints its brush window at one level,
+    // the waits let the vis-fed reference keep up (the rebase math
+    // converges on the finger), and a flat curve is the one shape the
+    // engine's composed response reports verbatim, so the follow
+    // assertion stays tight.
+    const field = await box(page.locator('.visualizer'))
+    const y = field.y + field.height * 0.5
+    await page.mouse.move(field.x + field.width * 0.05, y)
+    await page.mouse.down()
+    await expect(page.locator('.visualizer')).toHaveClass(/visualizer--eq-drag/)
+    await expect(page.locator('.eq-slider--active')).toHaveCount(1)
+    for (const frac of [0.2, 0.35, 0.5, 0.65, 0.8, 0.95]) {
+      await page.mouse.move(field.x + field.width * frac, y, { steps: 4 })
+      await page.waitForTimeout(150)
+    }
+    await page.waitForTimeout(500) // the held hand
+    await page.mouse.up()
+    await expect(page.locator('.eq-slider--active')).toHaveCount(0)
+
+    // Release isn't quiescence: the vis-fed rebase can leave
+    // out-of-window brush cells, so the tick loop keeps decay-writing
+    // briefly after the pointer lifts. Wait for a 600 ms window with
+    // no new writes — the settled batch is what every pin below
+    // compares against (CI caught the race as a ±1 band).
+    let seen = -1
+    await expect
+      .poll(
+        () => {
+          const grew = sent.length !== seen
+          seen = sent.length
+          return grew
+        },
+        { intervals: [600], timeout: 15_000 },
+      )
+      .toBe(false)
+
+    // The daemon accepted every write; the engine rejected none.
+    expect(errors).toEqual([])
+    const batches = sent.filter((frame) => frame.params.gebg)
+    expect(batches.length).toBeGreaterThan(0)
+    expect(batches.every((frame) => frame.cmd === 'edit_profile')).toBe(true)
+    // The first gains batch flipped the bypassed filterbank, once.
+    expect(batches[0]?.params.geon).toEqual([1])
+    expect(
+      batches.slice(1).every((frame) => frame.params.geon === undefined),
+    ).toBe(true)
+
+    // The daemon's own truth carries the settled batch verbatim — a
+    // fresh connection's snapshot pins validation + `Profile::splice`
+    // exactness (the engine feeds from exactly this). Polled to 0
+    // deviation: the probe's snapshot can still race the last frame
+    // in flight on the drag connection.
+    const final = batches.at(-1)?.params.gebg ?? []
+    const probeGebg = () =>
+      page.evaluate(async () => {
+        interface Snapshot {
+          readonly profiles: readonly {
+            readonly id: string
+            readonly params: Readonly<Record<string, readonly number[]>>
+          }[]
+        }
+        const probe = new WebSocket(`ws://${location.host}/ws`)
+        const snapshot = await new Promise<Snapshot>((resolve, reject) => {
+          // The daemon pushes a full snapshot on connect (ADR-0005).
+          probe.onmessage = (event) => {
+            const parsed = JSON.parse(String(event.data)) as {
+              type: string
+              snapshot?: Snapshot
+            }
+            if (parsed.type === 'state' && parsed.snapshot) {
+              resolve(parsed.snapshot)
+            }
+          }
+          probe.onerror = () => {
+            reject(new Error('probe socket failed'))
+          }
+        })
+        probe.close()
+        const music = snapshot.profiles.find(
+          (profile) => profile.id === 'music',
+        )
+        return music?.params['gebg']?.slice(0, 20)
+      })
+    await expect
+      .poll(
+        async () => {
+          const daemonGebg = await probeGebg()
+          if (!daemonGebg || daemonGebg.length !== final.length) {
+            return Number.POSITIVE_INFINITY
+          }
+          return Math.max(
+            ...final.map((gain, band) =>
+              Math.abs(gain - (daemonGebg[band] ?? Number.POSITIVE_INFINITY)),
+            ),
+          )
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(0)
+
+    // Within a block the vis feed reports the engine applying it: the
+    // composed response — not a registry echo, so transition slopes
+    // spill between neighbouring bands (3 dB grants that); the held
+    // band converged on the finger (½ dB), and the once-bypassed
+    // filterbank is audibly engaged.
+    await expect
+      .poll(
+        () => {
+          const vis = latestVcbg
+          if (!vis) return Number.POSITIVE_INFINITY
+          return Math.max(
+            ...final.map((gain, band) => Math.abs(gain - (vis[band] ?? 0))),
+          )
+        },
+        { timeout: 30_000 },
+      )
+      .toBeLessThanOrEqual(48)
+    expect(
+      Math.abs((latestVcbg?.[19] ?? 0) - (final[19] ?? 0)),
+    ).toBeLessThanOrEqual(8)
+    expect(latestVcbg?.[19] ?? 0).toBeGreaterThanOrEqual(128)
+  } finally {
+    pump.stopped = true
+    await pumped.catch(() => undefined)
+    plugin.goodbye()
   }
 })
