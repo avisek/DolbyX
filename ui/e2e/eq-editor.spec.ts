@@ -276,6 +276,23 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
     await page.mouse.up()
     await expect(page.locator('.eq-slider--active')).toHaveCount(0)
 
+    // Release isn't quiescence: the vis-fed rebase can leave
+    // out-of-window brush cells, so the tick loop keeps decay-writing
+    // briefly after the pointer lifts. Wait for a 600 ms window with
+    // no new writes — the settled batch is what every pin below
+    // compares against (CI caught the race as a ±1 band).
+    let seen = -1
+    await expect
+      .poll(
+        () => {
+          const grew = sent.length !== seen
+          seen = sent.length
+          return grew
+        },
+        { intervals: [600], timeout: 15_000 },
+      )
+      .toBe(false)
+
     // The daemon accepted every write; the engine rejected none.
     expect(errors).toEqual([])
     const batches = sent.filter((frame) => frame.params.gebg)
@@ -287,38 +304,58 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
       batches.slice(1).every((frame) => frame.params.geon === undefined),
     ).toBe(true)
 
-    // The daemon's own truth carries the final batch verbatim — a
+    // The daemon's own truth carries the settled batch verbatim — a
     // fresh connection's snapshot pins validation + `Profile::splice`
-    // exactness (the engine feeds from exactly this).
+    // exactness (the engine feeds from exactly this). Polled to 0
+    // deviation: the probe's snapshot can still race the last frame
+    // in flight on the drag connection.
     const final = batches.at(-1)?.params.gebg ?? []
-    const daemonGebg = await page.evaluate(async () => {
-      interface Snapshot {
-        readonly profiles: readonly {
-          readonly id: string
-          readonly params: Readonly<Record<string, readonly number[]>>
-        }[]
-      }
-      const probe = new WebSocket(`ws://${location.host}/ws`)
-      const snapshot = await new Promise<Snapshot>((resolve, reject) => {
-        // The daemon pushes a full snapshot on connect (ADR-0005).
-        probe.onmessage = (event) => {
-          const parsed = JSON.parse(String(event.data)) as {
-            type: string
-            snapshot?: Snapshot
-          }
-          if (parsed.type === 'state' && parsed.snapshot) {
-            resolve(parsed.snapshot)
-          }
+    const probeGebg = () =>
+      page.evaluate(async () => {
+        interface Snapshot {
+          readonly profiles: readonly {
+            readonly id: string
+            readonly params: Readonly<Record<string, readonly number[]>>
+          }[]
         }
-        probe.onerror = () => {
-          reject(new Error('probe socket failed'))
-        }
+        const probe = new WebSocket(`ws://${location.host}/ws`)
+        const snapshot = await new Promise<Snapshot>((resolve, reject) => {
+          // The daemon pushes a full snapshot on connect (ADR-0005).
+          probe.onmessage = (event) => {
+            const parsed = JSON.parse(String(event.data)) as {
+              type: string
+              snapshot?: Snapshot
+            }
+            if (parsed.type === 'state' && parsed.snapshot) {
+              resolve(parsed.snapshot)
+            }
+          }
+          probe.onerror = () => {
+            reject(new Error('probe socket failed'))
+          }
+        })
+        probe.close()
+        const music = snapshot.profiles.find(
+          (profile) => profile.id === 'music',
+        )
+        return music?.params['gebg']?.slice(0, 20)
       })
-      probe.close()
-      const music = snapshot.profiles.find((profile) => profile.id === 'music')
-      return music?.params['gebg']?.slice(0, 20)
-    })
-    expect(daemonGebg).toEqual(final)
+    await expect
+      .poll(
+        async () => {
+          const daemonGebg = await probeGebg()
+          if (!daemonGebg || daemonGebg.length !== final.length) {
+            return Number.POSITIVE_INFINITY
+          }
+          return Math.max(
+            ...final.map((gain, band) =>
+              Math.abs(gain - (daemonGebg[band] ?? Number.POSITIVE_INFINITY)),
+            ),
+          )
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(0)
 
     // Within a block the vis feed reports the engine applying it: the
     // composed response — not a registry echo, so transition slopes
