@@ -66,9 +66,10 @@
 
 .vis-column {
   /* Classic's per-band coordinate device: cqh below measures the
-     column. (contain: layout makes each column its own stacking
-     context — the painters' per-column paint order; columns never
-     overlap.) */
+     column. (No stacking context here — contain: layout creates none —
+     so the leaves' z 1–3 interleave across columns in the shared
+     context; harmless, columns never overlap. The editor rides above
+     at z 4–5, EqCurve.css.) */
   container-type: size;
   /* One row: 1 dB of the 48-dB window. */
   --row: calc(100cqh / 48);

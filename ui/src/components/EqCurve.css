@@ -36,15 +36,17 @@
    docs/ui-reference/original-ui-visualizer-eq-overlay.png. — */
 
 /* z — the painter's own order: tracks < thumbs < curve, above all vis
-   layers (vis-columns sits at z auto, below these). Within a slider,
-   DOM order paints track then thumb — the painter's per-slider pass;
-   sliders sit a pitch apart, so cross-slider overlap never arises. */
+   layers. One shared stacking context (`contain: layout` does *not*
+   create per-column ones), so these sit above the columns' fill/
+   lattice/pip z 1–3. Within a slider, DOM order paints track then
+   thumb — the painter's per-slider pass; sliders sit a pitch apart,
+   so cross-slider overlap never arises. */
 .eq-sliders {
-  z-index: 1;
+  z-index: 4;
 }
 
 .eq-curve {
-  z-index: 2;
+  z-index: 5;
   /* The glow bleeds past the vertices and the flat edge extensions —
      never clip it to the viewport box. */
   overflow: visible;
@@ -69,18 +71,25 @@
   transition-delay: 0s;
 }
 
-/* The track (their `eq_bar`): a soft full-height light line centered
-   on the slider's column. */
+/* The track (their `eq_bar`): a full-height light-blue line, two
+   passes like the curve — a soft wide glow under a sharp core. */
 .eq-slider__track {
   left: 50%;
-  inline-size: 5px;
+  inline-size: 12px;
   translate: -50%;
-  background: linear-gradient(
-    to right,
-    transparent,
-    rgb(214 239 255 / 72%) 40% 60%,
-    transparent
-  );
+  background:
+    linear-gradient(
+      to right,
+      transparent calc(50% - 1px),
+      rgb(158 216 255 / 55%) calc(50% - 0.75px) calc(50% + 0.75px),
+      transparent calc(50% + 1px)
+    ),
+    linear-gradient(
+      to right,
+      transparent,
+      rgb(110 190 255 / 16%) 30% 70%,
+      transparent
+    );
 }
 
 /* The thumb (`eq_thumb`): a hollow cyan ring with a soft bloom,
@@ -96,10 +105,10 @@
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgb(213 243 255 / 55%) 0 12%,
-    rgb(117 210 255 / 14%) 26% 34%,
-    #bfe9ff 44% 60%,
-    rgb(117 210 255 / 30%) 72%,
+    rgb(170 225 255 / 45%) 0 12%,
+    rgb(117 210 255 / 12%) 26% 34%,
+    #8fd2ff 44% 60%,
+    rgb(90 180 255 / 28%) 72%,
     transparent 80%
   );
 }
@@ -111,7 +120,7 @@
    butt caps (the glow's round ends swallow them). */
 .eq-curve__glow {
   stroke: #75d2ff;
-  stroke-opacity: 0.502;
+  stroke-opacity: 0.45; /* painter α 0x80, eased in the HITL pass */
   stroke-width: 10px;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -121,7 +130,8 @@
 .eq-curve__stroke {
   stroke: #75d2ff;
   stroke-opacity: 0.816;
-  stroke-width: 3px;
+  /* The painter's 3 px is canvas-scale; HITL-halved for this field. */
+  stroke-width: 1.5px;
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
