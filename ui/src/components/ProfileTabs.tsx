@@ -19,7 +19,6 @@ import './ProfileTabs.css'
  */
 const ProfileTabs: Component = () => {
   const [renaming, setRenaming] = createSignal(false)
-  const active = () => selectedProfile()
   return (
     <div class="profile-tabs">
       <div class="profile-tabs__list" role="tablist" aria-label="Profiles">
@@ -41,7 +40,7 @@ const ProfileTabs: Component = () => {
       </div>
       <div class="profile-tabs__actions">
         <Show
-          when={renaming() && active()}
+          when={renaming() && selectedProfile()}
           fallback={
             <>
               <button
@@ -49,13 +48,13 @@ const ProfileTabs: Component = () => {
                 class="profile-tabs__action"
                 aria-label="Add profile"
                 onClick={() => {
-                  const profile = active()
+                  const profile = selectedProfile()
                   if (profile) addProfile(profile.id, `${profile.name} Copy`)
                 }}
               >
                 Add
               </button>
-              <Show when={active()?.is_factory === false}>
+              <Show when={selectedProfile()?.is_factory === false}>
                 <button
                   type="button"
                   class="profile-tabs__action"
@@ -69,20 +68,20 @@ const ProfileTabs: Component = () => {
                   class="profile-tabs__action"
                   aria-label="Delete profile"
                   onClick={() => {
-                    const profile = active()
+                    const profile = selectedProfile()
                     if (profile) removeProfile(profile.id)
                   }}
                 >
                   Delete
                 </button>
               </Show>
-              <Show when={active()?.is_factory === true}>
+              <Show when={selectedProfile()?.is_factory === true}>
                 <button
                   type="button"
                   class="profile-tabs__action"
                   aria-label="Reset profile"
                   onClick={() => {
-                    const profile = active()
+                    const profile = selectedProfile()
                     if (profile) resetProfile(profile.id)
                   }}
                 >

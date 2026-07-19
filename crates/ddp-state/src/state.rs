@@ -158,7 +158,7 @@ impl State {
     }
 
     /// The selected profile's effective EQ batch — the preset-carried
-    /// subset of [`State::resolved_batch`]: the selected preset's
+    /// subset of [`State::resolved_batch`]: the selected EQ preset's
     /// params when one is selected, else the profile's own — what a
     /// live EQ preset switch/detach/reset flushes.
     fn eq_batch(&self, defs: &[ParameterDef]) -> Vec<(String, Vec<i16>)> {
@@ -582,7 +582,7 @@ pub enum Command {
         /// selection is per-profile, unlike the global
         /// [`Command::SetProfile`]).
         profile_id: ProfileId,
-        /// The preset to select; `None` ⇒ the profile's own EQ params
+        /// The EQ preset to select; `None` ⇒ the profile's own EQ params
         /// apply ("Off" is `None`, not a preset).
         id: Option<PresetId>,
     },
@@ -592,14 +592,14 @@ pub enum Command {
     /// that preset — and, presets being global, is visible to every
     /// profile selecting it.
     EditEqPreset {
-        /// The preset to edit.
+        /// The EQ preset to edit.
         id: PresetId,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
     },
     /// Drops an EQ preset's own overrides, restoring its baseline.
     ResetEqPreset {
-        /// The preset to reset.
+        /// The EQ preset to reset.
         id: PresetId,
     },
     /// Clones one profile — resolved params and EQ preset selection, so
@@ -627,10 +627,10 @@ pub enum Command {
         /// The profile to remove.
         id: ProfileId,
     },
-    /// Clones one EQ preset into a new custom preset under a freshly
+    /// Clones one EQ preset into a new custom EQ preset under a freshly
     /// minted id, reported as [`StateDiff::minted_id`].
     AddEqPreset {
-        /// The preset to clone.
+        /// The EQ preset to clone.
         from: PresetId,
         /// The new preset's display name.
         name: String,
@@ -638,7 +638,7 @@ pub enum Command {
     /// Renames a custom EQ preset (factory names are immutable); the id
     /// never changes.
     RenameEqPreset {
-        /// The preset to rename.
+        /// The EQ preset to rename.
         id: PresetId,
         /// The new display name.
         name: String,
@@ -647,7 +647,7 @@ pub enum Command {
     /// Every profile selecting it falls back to `None` — its own EQ
     /// params, flushed iff one of them is the selected profile.
     RemoveEqPreset {
-        /// The preset to remove.
+        /// The EQ preset to remove.
         id: PresetId,
     },
 }

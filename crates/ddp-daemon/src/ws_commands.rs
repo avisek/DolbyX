@@ -56,14 +56,14 @@ pub(crate) enum WsCommand {
         request_id: String,
         /// The profile whose selection changes.
         profile_id: ddp_state::ProfileId,
-        /// The preset to select; `null` ⇒ the profile's own EQ params.
+        /// The EQ preset to select; `null` ⇒ the profile's own EQ params.
         id: Option<ddp_state::PresetId>,
     },
     /// Write a param map into one EQ preset (preset-carried params only).
     EditEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
-        /// The preset to edit.
+        /// The EQ preset to edit.
         id: ddp_state::PresetId,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
         params: std::collections::HashMap<String, Vec<i16>>,
@@ -72,7 +72,7 @@ pub(crate) enum WsCommand {
     ResetEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
-        /// The preset to reset.
+        /// The EQ preset to reset.
         id: ddp_state::PresetId,
     },
     /// Clone one profile into a new custom profile; the minted id rides
@@ -102,12 +102,12 @@ pub(crate) enum WsCommand {
         /// The profile to remove.
         id: ddp_state::ProfileId,
     },
-    /// Clone one EQ preset into a new custom preset; the minted id
+    /// Clone one EQ preset into a new custom EQ preset; the minted id
     /// rides the ack.
     AddEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
-        /// The preset to clone.
+        /// The EQ preset to clone.
         from: ddp_state::PresetId,
         /// The new preset's display name.
         name: String,
@@ -116,7 +116,7 @@ pub(crate) enum WsCommand {
     RenameEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
-        /// The preset to rename.
+        /// The EQ preset to rename.
         id: ddp_state::PresetId,
         /// The new display name.
         name: String,
@@ -125,7 +125,7 @@ pub(crate) enum WsCommand {
     RemoveEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
-        /// The preset to remove.
+        /// The EQ preset to remove.
         id: ddp_state::PresetId,
     },
 }

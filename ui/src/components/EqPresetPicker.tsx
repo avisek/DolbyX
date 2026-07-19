@@ -15,7 +15,7 @@ import './EqPresetPicker.css'
  * `null`, not a preset) plus the global presets from the snapshot.
  * Selection is per-profile and applies local-first on ack; the daemon
  * has already overlaid the resolved nine EQ params (ADR-0003). The
- * CRUD affordances (issue #26) target the selected preset: Add clones
+ * CRUD affordances (issue #26) target the selected EQ preset: Add clones
  * it under a server-minted id; factory presets reset, custom ones
  * rename and delete — with None selected there is nothing to act on.
  */

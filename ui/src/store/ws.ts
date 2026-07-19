@@ -189,8 +189,8 @@ export function renameProfile(id: string, name: string): void {
 }
 
 /**
- * `remove_profile` — the fallback rules (selection → factory default,
- * preset selectors → None) are daemon-owned: reconcile on the ack
+ * `remove_profile` — the fallback rules (selection → the factory selection,
+ * EQ preset selectors → None) are daemon-owned: reconcile on the ack
  * instead of mirroring them.
  */
 export function removeProfile(id: string): void {
@@ -213,7 +213,7 @@ export function resetProfile(id: string): void {
 }
 
 /**
- * `add_eq_preset` — [`addProfile`]'s preset counterpart: the clone is
+ * `add_eq_preset` — [`addProfile`]'s EQ preset counterpart: the clone is
  * selected onto the active profile, so edits continue on the copy.
  */
 export function addEqPreset(from: string, name: string): void {
