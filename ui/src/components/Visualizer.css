@@ -33,6 +33,35 @@
   );
   inline-size: min(36rem, 90vw);
   aspect-ratio: 885 / 390; /* the background asset's own proportions */
+  /* Vis idle descent duration — HITL-eyeballed Classic constant. */
+  --idle-descent: 700ms;
+}
+
+/* The data vars, registered so Classic can transition them — numbers,
+   inherited to the leaves that display them; initials = the floor. */
+@property --exc {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: -12;
+}
+
+@property --gain {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Vis idle: the component snaps the vars to the floor and raises the
+   modifier in one recalc (ADR-0008); Classic animates the *descent* by
+   transitioning the vars under idle only — live tracking stays exact
+   (0 s), and round() re-quantizes per frame, so fills walk down
+   brick-by-brick while the pip glides. A fresh frame drops the
+   modifier in the same recalc as its vars, so exit snaps through the
+   live rule with no floor flash. */
+.visualizer--idle .vis-column {
+  transition:
+    --exc var(--idle-descent) linear,
+    --gain var(--idle-descent) linear;
 }
 
 .vis-column {

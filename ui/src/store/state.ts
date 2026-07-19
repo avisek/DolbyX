@@ -5,7 +5,7 @@
  * events reconcile any drift after connect.
  */
 import { createStore, reconcile } from 'solid-js/store'
-import type { Profile, StateSnapshot } from '../lib/ws'
+import type { EqPreset, Profile, StateSnapshot } from '../lib/ws'
 
 // The wire type is readonly; the store's setter needs writable paths.
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
@@ -31,6 +31,33 @@ export { state }
 /** The selected profile — carries every resolved non-readonly param. */
 export function selectedProfile(): Profile | undefined {
   return state.profiles.find((profile) => profile.id === state.selected_profile)
+}
+
+/**
+ * Resolved `ven` — whether the DSP fills the vis slots. The Visualizer
+ * mirrors it as `visualizer--off`; the GEQ editor's source rule treats
+ * `ven = 0`'s frozen frames as unable to speak. Never a data gate.
+ */
+export function visEnabled(): boolean {
+  return (selectedProfile()?.params['ven']?.[0] ?? 0) !== 0
+}
+
+/** The selected profile's EQ preset, when one is selected. */
+export function selectedEqPreset(): EqPreset | undefined {
+  const id = selectedProfile()?.selected_eq_preset
+  if (id == null) return undefined
+  return state.eq_presets.find((preset) => preset.id === id)
+}
+
+/**
+ * The resolved active value of an EQ-preset-carried param: the
+ * selected preset's entry shadows the profile's own *entirely*
+ * (ADR-0003) — presets arrive complete, so resolution never falls
+ * through per-param.
+ */
+export function resolvedEqParam(name: string): readonly number[] | undefined {
+  const preset = selectedEqPreset()
+  return preset ? preset.params[name] : selectedProfile()?.params[name]
 }
 
 /** Reconciles a full daemon snapshot into the store. */

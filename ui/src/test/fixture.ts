@@ -75,6 +75,25 @@ export function fixtureParams(): readonly ParameterDef[] {
   ]
 }
 
+/**
+ * The `defaults.toml` shared 20-band GEQ grid — `gebf` on profiles and
+ * presets, mirrored by the profiles' `vcbf` so the custom vis grid
+ * tracks the GEQ grid (issue #25). Live resolves carry the full
+ * 40-slot allocation; the head-20 the UI reads is identical.
+ */
+const GEQ_GRID = [
+  43, 129, 215, 301, 431, 603, 775, 947, 1206, 1550, 2067, 2756, 3618, 4651,
+  5685, 7063, 8958, 11025, 13781, 18777,
+] as const
+
+/** The 20-band structure both `[profile]` and `[eq_preset]` share. */
+const eqStructure = () => ({
+  geon: [0],
+  genb: [20],
+  gebf: [...GEQ_GRID],
+  gebg: Array.from({ length: 20 }, () => 0),
+})
+
 /** One factory profile as the snapshot carries it. */
 function factoryProfile(
   id: string,
@@ -86,15 +105,30 @@ function factoryProfile(
     name,
     is_factory: true,
     selected_eq_preset: null,
-    // The `defaults.toml [profile]` shared visualizer pins (issue #24
-    // part A) — every resolved profile carries them.
-    params: { ven: [1], vcnb: [20], ...params },
+    // The `defaults.toml [profile]` shared visualizer + GEQ pins
+    // (issues #24, #25) — every resolved profile carries them.
+    params: {
+      ven: [1],
+      vcnb: [20],
+      vcbf: [...GEQ_GRID],
+      ...eqStructure(),
+      ...params,
+    },
   }
 }
 
-/** One factory EQ preset as the snapshot carries it (issue #23). */
+/**
+ * One factory EQ preset as the snapshot carries it (issue #23) —
+ * complete: the `[eq_preset]` shared block resolves the 20-band
+ * structure into every preset, so a selection shadows standalone.
+ */
 function factoryPreset(id: string, name: string): EqPreset {
-  return { id, name, is_factory: true, params: { ieon: [1] } }
+  return {
+    id,
+    name,
+    is_factory: true,
+    params: { ieon: [1], ...eqStructure() },
+  }
 }
 
 /**
@@ -175,4 +209,24 @@ export function fixtureBootstrap(
   overrides: Partial<StateSnapshot> = {},
 ): Bootstrap {
   return { params: fixtureParams(), state: fixtureState(overrides) }
+}
+
+/** The fixture state with the active profile's params overridden. */
+export function fixtureStateWithParams(
+  params: Record<string, readonly number[]>,
+): StateSnapshot {
+  const seeded = fixtureState()
+  return {
+    ...seeded,
+    profiles: seeded.profiles.map((profile) =>
+      profile.id === seeded.selected_profile
+        ? { ...profile, params: { ...profile.params, ...params } }
+        : profile,
+    ),
+  }
+}
+
+/** A 20-slot ramp: value = band · step — distinct per-slot values. */
+export function fixtureRamp(step: number): number[] {
+  return Array.from({ length: 20 }, (_slot, band) => band * step)
 }
