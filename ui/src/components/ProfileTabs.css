@@ -1,5 +1,11 @@
 .profile-tabs {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.profile-tabs__tabs {
+  display: flex;
   gap: 0.25rem;
   padding: 0.25rem;
   border-radius: 0.5rem;
@@ -27,4 +33,12 @@
 .profile-tabs__tab[aria-selected='true'] {
   background: var(--color-accent);
   color: var(--color-bg);
+}
+
+/* The inline field keeps the tab's box — no layout shift mid-rename. */
+.profile-tabs__rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 1rem;
+  text-align: center;
 }

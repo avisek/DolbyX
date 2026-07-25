@@ -77,13 +77,21 @@ export function applyProfile(id: string): void {
 
 /**
  * Applies this tab's own acked EQ preset selection (local-first) —
- * per-profile, `null` detaching to the profile's own EQ params.
+ * per-profile, `null` detaching to the profile's own EQ params. The
+ * selection is a content key (ADR-0007), so it unions into
+ * `overridden` like any edit.
  */
 export function applyEqPreset(profileId: string, id: string | null): void {
   setState('profiles', (profiles) =>
     profiles.map((profile) =>
       profile.id === profileId
-        ? { ...profile, selected_eq_preset: id }
+        ? {
+            ...profile,
+            selected_eq_preset: id,
+            overridden: unionOverridden(profile.overridden, [
+              'selected_eq_preset',
+            ]),
+          }
         : profile,
     ),
   )
@@ -102,6 +110,22 @@ function mergeParams(
 }
 
 /**
+ * Unions freshly edited content keys into an item's `overridden`.
+ * `overridden` is daemon-derived (the baselines live in the cascade),
+ * but the originator's own snapshots are suppressed (ADR-0005) — this
+ * keeps its Reset affordances flipping live as edits land. Approximate
+ * on purpose: an edit back to the baseline value keeps the key until
+ * the next snapshot corrects it; a wrongly enabled Reset is a no-op
+ * whose reconcile then disables it.
+ */
+function unionOverridden(
+  overridden: readonly string[],
+  edited: readonly string[],
+): readonly string[] {
+  return [...overridden, ...edited.filter((key) => !overridden.includes(key))]
+}
+
+/**
  * Applies one of this tab's own profile edits. Short value arrays
  * overlay the head of the param's full allocation — the daemon merges
  * the same way (`Profile::splice`).
@@ -113,9 +137,47 @@ export function applyProfileEdit(
   setState('profiles', (profiles) =>
     profiles.map((profile) =>
       profile.id === id
-        ? { ...profile, params: mergeParams(profile.params, params) }
+        ? {
+            ...profile,
+            params: mergeParams(profile.params, params),
+            overridden: unionOverridden(
+              profile.overridden,
+              Object.keys(params),
+            ),
+          }
         : profile,
     ),
+  )
+}
+
+/**
+ * Inserts this tab's own acked clone — content as sent, id as minted
+ * (ADR-0005: the ack id exists so the originator applies locally
+ * without waiting for a snapshot). `overridden` starts as the caller's
+ * guess; the add's `get_state` chaser trues it up.
+ */
+export function applyProfileAdded(profile: Profile): void {
+  setState('profiles', (profiles) => [...profiles, profile])
+}
+
+/** As [`applyProfileAdded`], for a fresh custom EQ preset. */
+export function applyEqPresetAdded(preset: EqPreset): void {
+  setState('eq_presets', (presets) => [...presets, preset])
+}
+
+/** Applies this tab's own acked rename — a label change, id stable. */
+export function applyProfileRename(id: string, name: string): void {
+  setState('profiles', (profiles) =>
+    profiles.map((profile) =>
+      profile.id === id ? { ...profile, name } : profile,
+    ),
+  )
+}
+
+/** As [`applyProfileRename`], for an EQ preset. */
+export function applyEqPresetRename(id: string, name: string): void {
+  setState('eq_presets', (presets) =>
+    presets.map((preset) => (preset.id === id ? { ...preset, name } : preset)),
   )
 }
 
@@ -130,7 +192,11 @@ export function applyEqPresetEdit(
   setState('eq_presets', (presets) =>
     presets.map((preset) =>
       preset.id === id
-        ? { ...preset, params: mergeParams(preset.params, params) }
+        ? {
+            ...preset,
+            params: mergeParams(preset.params, params),
+            overridden: unionOverridden(preset.overridden, Object.keys(params)),
+          }
         : preset,
     ),
   )

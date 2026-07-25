@@ -72,6 +72,68 @@ export function fixtureParams(): readonly ParameterDef[] {
       category: 'visualizer',
       access: 'read_only_static',
     }),
+    // The nine preset-carried params (ADR-0003: category ∈ {Ieq, Geq})
+    // — the EqPresetPicker derives "the 9" from these rows.
+    def({ name: 'ieon', kind: 'toggle', category: 'ieq' }),
+    def({
+      name: 'ienb',
+      min: 1,
+      max: 40,
+      default: [10],
+      kind: 'integer',
+      category: 'ieq',
+    }),
+    def({
+      name: 'iebf',
+      length: 40,
+      min: 20,
+      max: 20000,
+      kind: 'frequency_hz',
+      category: 'ieq',
+    }),
+    def({
+      name: 'iebt',
+      length: 40,
+      min: -480,
+      max: 480,
+      frac_bits: 4,
+      kind: { decibel: { lkfs: false } },
+      category: 'ieq',
+    }),
+    def({
+      name: 'iea',
+      max: 16,
+      frac_bits: 4,
+      default: [10],
+      kind: 'integer',
+      category: 'ieq',
+    }),
+    def({ name: 'geon', kind: 'toggle', category: 'geq' }),
+    def({
+      name: 'genb',
+      min: 1,
+      max: 40,
+      default: [10],
+      kind: 'integer',
+      category: 'geq',
+    }),
+    def({
+      name: 'gebf',
+      length: 40,
+      min: 20,
+      max: 20000,
+      kind: 'frequency_hz',
+      category: 'geq',
+    }),
+    def({
+      name: 'gebg',
+      length: 40,
+      min: -576,
+      max: 576,
+      frac_bits: 4,
+      kind: { decibel: { lkfs: false } },
+      category: 'geq',
+    }),
   ]
 }
 
@@ -86,12 +148,21 @@ const GEQ_GRID = [
   5685, 7063, 8958, 11025, 13781, 18777,
 ] as const
 
-/** The 20-band structure both `[profile]` and `[eq_preset]` share. */
+/**
+ * The nine preset-carried params as the shared `[profile]` /
+ * `[eq_preset]` layers resolve them — the 20-band structure on the
+ * grid, GEQ and IEQ off, flat curves.
+ */
 const eqStructure = () => ({
   geon: [0],
   genb: [20],
   gebf: [...GEQ_GRID],
   gebg: Array.from({ length: 20 }, () => 0),
+  ieon: [0],
+  ienb: [20],
+  iebf: [...GEQ_GRID],
+  iebt: Array.from({ length: 20 }, () => 0),
+  iea: [10],
 })
 
 /** One factory profile as the snapshot carries it. */
@@ -114,6 +185,8 @@ function factoryProfile(
       ...eqStructure(),
       ...params,
     },
+    // A freshly resolved factory item diverges nowhere.
+    overridden: [],
   }
 }
 
@@ -127,7 +200,8 @@ function factoryPreset(id: string, name: string): EqPreset {
     id,
     name,
     is_factory: true,
-    params: { ieon: [1], ...eqStructure() },
+    params: { ...eqStructure(), ieon: [1] },
+    overridden: [],
   }
 }
 
