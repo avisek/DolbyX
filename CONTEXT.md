@@ -183,10 +183,25 @@ with Profile); "Off" preset (replaced by `None`).
 
 **Factory item** (`is_factory`):
 A profile or EQ preset whose id appears in `defaults.toml` — derived at
-load, never stored; resettable to bundled defaults but never deleted or
-renamed. Factory profiles: Movie, Music, Game, Voice; factory EQ
-presets: Open, Rich, Focused.
+load, never stored; never deleted or renamed (a Reset falls it back to
+its bundled defaults). Factory profiles: Movie, Music, Game, Voice;
+factory EQ presets: Open, Rich, Focused.
 _Avoid_: built-in, default item, preset flag.
+
+**Content key**:
+One resettable key of an item's own config row — any writable param
+4-CC, plus `selected_eq_preset` for profiles. `name` is excluded (a
+label, never reset). The vocabulary of Reset scopes and divergence
+tracking.
+_Avoid_: field, property, override key.
+
+**Reset**:
+Clearing an item's `config.toml` divergences — whole-item or scoped to
+named content keys — so the Cascade's layers beneath resolve: a factory
+item falls to its bundled defaults, a custom item to the shared layers.
+Valid on every item; never touches `name`, never restores a custom
+item's birth clone.
+_Avoid_: restore defaults, factory reset (reset isn't factory-only).
 
 **IEQ**:
 "Intelligent EQ" — the engine-driven target curve, backed by `iebt`
