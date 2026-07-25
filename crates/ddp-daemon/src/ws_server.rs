@@ -95,6 +95,10 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
 /// Handles one command frame; returns the reply frames for the
 /// originator, in order. Mutations broadcast the resulting `state` to
 /// every *other* connection before the originator's ack is queued.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a flat match, one arm per wire command — length tracks the vocabulary"
+)]
 async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
     let command = match serde_json::from_str::<WsCommand>(text) {
         Ok(command) => command,
@@ -124,6 +128,7 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::EditProfile {
             request_id,
             id,
+            name,
             params,
             selected_eq_preset,
         } => {
@@ -133,9 +138,41 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
                 &request_id,
                 Command::EditProfile {
                     id,
+                    name,
                     params,
                     selected_eq_preset,
                 },
+            )
+            .await
+        }
+        WsCommand::AddProfile {
+            request_id,
+            name,
+            params,
+            selected_eq_preset,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::AddProfile {
+                    name,
+                    params,
+                    selected_eq_preset,
+                },
+            )
+            .await
+        }
+        WsCommand::AddEqPreset {
+            request_id,
+            name,
+            params,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::AddEqPreset { name, params },
             )
             .await
         }
@@ -145,18 +182,25 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::EditEqPreset {
             request_id,
             id,
+            name,
             params,
         } => {
             mutate(
                 app,
                 conn_id,
                 &request_id,
-                Command::EditEqPreset { id, params },
+                Command::EditEqPreset { id, name, params },
             )
             .await
         }
         WsCommand::ResetEqPreset { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::ResetEqPreset { id }).await
+        }
+        WsCommand::RemoveProfile { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::RemoveProfile { id }).await
+        }
+        WsCommand::RemoveEqPreset { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::RemoveEqPreset { id }).await
         }
     }
 }
@@ -173,7 +217,7 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
         Err(error) => return vec![invalid_request(Some(request_id), error.to_string()).to_text()],
     };
     if diff.is_empty() {
-        return vec![ack(request_id).to_text()];
+        return vec![ack(request_id, None).to_text()];
     }
     let mut engine_failure = None;
     if let Some(power) = diff.power
@@ -203,7 +247,7 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     let _ = app.updates.send((conn_id, event.into()));
     drop(state);
     vec![match engine_failure {
-        None => ack(request_id).to_text(),
+        None => ack(request_id, diff.minted.as_deref()).to_text(),
         Some(error) => engine_rejected(request_id, &error).to_text(),
     }]
 }

@@ -188,6 +188,22 @@ its bundled defaults). Factory profiles: Movie, Music, Game, Voice;
 factory EQ presets: Open, Rich, Focused.
 _Avoid_: built-in, default item, preset flag.
 
+**Fallback profile**:
+Where the selection lands when the selected profile is deleted —
+`defaults.toml`'s `selected_profile`, a factory id, so the fallback
+itself can never be deleted.
+_Avoid_: default profile (ambiguous with the factory defaults).
+
+**Custom baseline**:
+What resolves beneath a custom item's `config.toml` row —
+`ParameterDef.default` ⊕ the shared layers (customs have no
+`defaults.toml` row) — filling an `add_*`'s unstated params and serving
+as the custom item's Reset floor. Covers the selection too: nothing
+ships a `selected_eq_preset` beneath a custom, so its row states one
+iff `Some` (the write law,
+[ADR-0007](docs/adr/0007-toml-overlay-persistence-with-file-watcher.md)).
+_Avoid_: birth clone (a custom never resets to it).
+
 **Content key**:
 One resettable key of an item's own config row — any writable param
 4-CC, plus `selected_eq_preset` for profiles. `name` is excluded (a

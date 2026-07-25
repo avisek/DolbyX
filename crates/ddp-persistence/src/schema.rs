@@ -55,10 +55,16 @@ impl ParamValue {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ItemTable {
     pub(crate) name: Option<String>,
-    /// Only meaningful on `config.toml` profile items (factory
-    /// selection ships `None`, key absent — issue #23); rejected
-    /// everywhere else.
-    pub(crate) selected_eq_preset: Option<PresetId>,
+    /// The profile row's stated selection (ADR-0007): key absent =
+    /// outer `None` (inherit what resolves beneath), the reserved
+    /// `"none"` sentinel = `Some(None)` (a diverging no-preset), an
+    /// id = `Some(Some(id))`. Only meaningful on `config.toml` profile
+    /// items; rejected everywhere else.
+    #[expect(
+        clippy::option_option,
+        reason = "the row's statement: key absent ≠ \"none\" ≠ id (ADR-0007)"
+    )]
+    pub(crate) selected_eq_preset: Option<Option<PresetId>>,
     pub(crate) params: IndexMap<String, ParamValue>,
 }
 
@@ -138,7 +144,10 @@ fn split_item(id: &str, table: toml::Table) -> Result<ItemTable, String> {
                 return Err(format!("[{id}]: `name` must be a string, got {other}"));
             }
             ("selected_eq_preset", toml::Value::String(preset)) => {
-                item.selected_eq_preset = Some(PresetId(preset));
+                item.selected_eq_preset = Some(match preset.as_str() {
+                    "none" => None, // the reserved explicit no-preset sentinel
+                    _ => Some(PresetId(preset)),
+                });
             }
             ("selected_eq_preset", other) => {
                 return Err(format!(
@@ -257,16 +266,23 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
             id: ProfileId(id.clone()),
             name,
             selected_eq_preset: None,
+            selection_baseline: None,
             is_factory: true,
             params: params.clone(),
             baseline: params,
         });
     }
+    let mut custom_profile_baseline = base_params(defs);
+    overlay_params(&mut custom_profile_baseline, &profile.shared);
+    let mut custom_eq_preset_baseline = base_eq_params(defs);
+    overlay_params(&mut custom_eq_preset_baseline, &eq_preset.shared);
     let defaults = Defaults {
         power: file.power,
         selected_profile: file.selected_profile,
         profiles,
         eq_presets,
+        custom_profile_baseline,
+        custom_eq_preset_baseline,
     };
     if defaults
         .profiles
@@ -292,15 +308,17 @@ fn reject_selection(id: &str, item: &ItemTable) -> Result<(), String> {
 }
 
 /// Parses `config.toml` into the user's overlay, validated against the
-/// param table and the factory truth.
+/// param table and the factory truth. An item row whose id `defaults.toml`
+/// doesn't ship is a **custom item** (issue #26): its id is the table
+/// key, its `name` lives in the row.
 ///
 /// # Errors
 ///
 /// [`Error::Config`] when the document is malformed, a param fails
-/// validation, an item names an unknown profile or EQ preset (custom
-/// items arrive in Slice 18), a factory row carries a rename, or a
-/// selection (`selected_profile` / a profile's `selected_eq_preset`)
-/// dangles — refuse to start rather than silently discard user state.
+/// validation, a factory row carries a rename, a custom row lacks its
+/// `name` or claims the reserved id `none`, or a selection
+/// (`selected_profile` / a profile's `selected_eq_preset`) dangles —
+/// refuse to start rather than silently discard user state.
 pub fn parse_config(
     document: &str,
     defs: &[ParameterDef],
@@ -312,20 +330,17 @@ pub fn parse_config(
     validate_namespace(defs, &profile, validate_write).map_err(Error::Config)?;
     validate_namespace(defs, &eq_preset, validate_eq_preset_write).map_err(Error::Config)?;
 
-    let known = |id: &ProfileId| defaults.profiles.iter().any(|profile| profile.id == *id);
-    let known_preset = |id: &PresetId| defaults.eq_presets.iter().any(|preset| preset.id == *id);
+    let factory_profile = |id: &str| defaults.profiles.iter().any(|profile| profile.id.0 == id);
+    let factory_preset = |id: &str| defaults.eq_presets.iter().any(|preset| preset.id.0 == id);
+    for (id, item) in &eq_preset.items {
+        validate_row_identity("eq_preset", id, item, factory_preset(id)).map_err(Error::Config)?;
+        reject_selection(id, item).map_err(Error::Config)?;
+    }
+    // A selection may name a factory preset or any custom row above.
+    let known_preset = |id: &PresetId| factory_preset(&id.0) || eq_preset.items.contains_key(&id.0);
     for (id, item) in &profile.items {
-        if !known(&ProfileId(id.clone())) {
-            return Err(Error::Config(format!(
-                "[profile.{id}]: unknown profile (custom profiles arrive in Slice 18)"
-            )));
-        }
-        if item.name.is_some() {
-            return Err(Error::Config(format!(
-                "[profile.{id}]: factory profiles cannot be renamed"
-            )));
-        }
-        if let Some(preset) = &item.selected_eq_preset
+        validate_row_identity("profile", id, item, factory_profile(id)).map_err(Error::Config)?;
+        if let Some(Some(preset)) = &item.selected_eq_preset
             && !known_preset(preset)
         {
             return Err(Error::Config(format!(
@@ -334,21 +349,9 @@ pub fn parse_config(
             )));
         }
     }
-    for (id, item) in &eq_preset.items {
-        if !known_preset(&PresetId(id.clone())) {
-            return Err(Error::Config(format!(
-                "[eq_preset.{id}]: unknown EQ preset (custom presets arrive in Slice 18)"
-            )));
-        }
-        if item.name.is_some() {
-            return Err(Error::Config(format!(
-                "[eq_preset.{id}]: factory EQ presets cannot be renamed"
-            )));
-        }
-        reject_selection(id, item).map_err(Error::Config)?;
-    }
     if let Some(selected) = &file.selected_profile
-        && !known(selected)
+        && !factory_profile(&selected.0)
+        && !profile.items.contains_key(&selected.0)
     {
         return Err(Error::Config(format!(
             "selected_profile `{}` names no profile",
@@ -363,12 +366,51 @@ pub fn parse_config(
     })
 }
 
+/// The id + `name` rules per row kind: factory rows never carry a
+/// `name` (their shipped names are fixed), custom rows must (the id is
+/// the table key, the display name lives in the row — ADR-0007) — and
+/// no custom row may claim the reserved `"none"` sentinel id.
+fn validate_row_identity(
+    namespace: &str,
+    id: &str,
+    item: &ItemTable,
+    is_factory: bool,
+) -> Result<(), String> {
+    if is_factory {
+        if item.name.is_some() {
+            return Err(format!(
+                "[{namespace}.{id}]: factory items cannot be renamed"
+            ));
+        }
+    } else {
+        if id == "none" {
+            return Err(format!(
+                "[{namespace}.none]: the id `none` is reserved (the explicit no-preset sentinel)"
+            ));
+        }
+        if item.name.is_none() {
+            return Err(format!(
+                "[{namespace}.{id}]: missing `name` (custom rows carry their display name)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Resolves the user overlay over the factory defaults into a
 /// [`State`]: per item (profile or EQ preset), `baseline` = factory ⊕
 /// config-shared and `params` = baseline ⊕ config-item — complete at
 /// load, so a switch pushes one atomic batch with no per-param
-/// fallback. A profile's `selected_eq_preset` comes from its config
-/// item when present (factory selection is always `None`).
+/// fallback. A profile's `selected_eq_preset` resolves like any
+/// content key: the row's statement shadows what resolves beneath
+/// (key absent = inherit, `"none"` = no-preset, an id = select). Rows
+/// `defaults.toml` doesn't ship are custom items, appended after the
+/// factory ones over the custom baseline.
+///
+/// # Panics
+///
+/// Never in practice: [`parse_config`] requires every custom row to
+/// carry its `name`.
 #[must_use]
 pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     let mut state = State::new_from_defaults(defaults);
@@ -376,12 +418,19 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     if let Some(selected) = &overlay.selected_profile {
         state.selected_profile = selected.clone();
     }
+    overlay_params(&mut state.custom_profile_baseline, &overlay.profile.shared);
+    overlay_params(
+        &mut state.custom_eq_preset_baseline,
+        &overlay.eq_preset.shared,
+    );
     for profile in &mut state.profiles {
         overlay_params(&mut profile.baseline, &overlay.profile.shared);
         profile.params = profile.baseline.clone();
         if let Some(item) = overlay.profile.items.get(&profile.id.0) {
             overlay_params(&mut profile.params, &item.params);
-            profile.selected_eq_preset = item.selected_eq_preset.clone();
+            if let Some(stated) = &item.selected_eq_preset {
+                profile.selected_eq_preset = stated.clone();
+            }
         }
     }
     for preset in &mut state.eq_presets {
@@ -391,16 +440,57 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
             overlay_params(&mut preset.params, &item.params);
         }
     }
+    // Custom items — the rows defaults.toml doesn't ship — append after
+    // the factory ones in row order, each resolving over the custom
+    // baseline; `is_factory` is derived right here, never stored.
+    for (id, item) in &overlay.profile.items {
+        if defaults.profiles.iter().any(|profile| profile.id.0 == *id) {
+            continue;
+        }
+        let mut params = state.custom_profile_baseline.clone();
+        overlay_params(&mut params, &item.params);
+        state.profiles.push(Profile {
+            id: ProfileId(id.clone()),
+            name: item
+                .name
+                .clone()
+                .expect("parse_config requires custom names"),
+            // Absent and the `"none"` sentinel both resolve `None` —
+            // customs have nothing beneath to inherit.
+            selected_eq_preset: item.selected_eq_preset.clone().flatten(),
+            selection_baseline: None,
+            is_factory: false,
+            params,
+            baseline: state.custom_profile_baseline.clone(),
+        });
+    }
+    for (id, item) in &overlay.eq_preset.items {
+        if defaults.eq_presets.iter().any(|preset| preset.id.0 == *id) {
+            continue;
+        }
+        let mut params = state.custom_eq_preset_baseline.clone();
+        overlay_params(&mut params, &item.params);
+        state.eq_presets.push(EqPreset {
+            id: PresetId(id.clone()),
+            name: item
+                .name
+                .clone()
+                .expect("parse_config requires custom names"),
+            is_factory: false,
+            params,
+            baseline: state.custom_eq_preset_baseline.clone(),
+        });
+    }
     state
 }
 
 /// Serializes the divergence of `state` from the factory truth — the
 /// exact bytes `config.toml` should hold. Root keys, `[profile.<id>]`
-/// and `[eq_preset.<id>]` tables carry only divergences (per-item
-/// write-back; a profile's `selected_eq_preset` is a divergence exactly
-/// when `Some` — factory selection is always `None`); the shared layers
-/// re-emit from `loaded` verbatim. No divergence and no hand-edits ⇒
-/// the empty string (a 0-byte file).
+/// and `[eq_preset.<id>]` tables carry only divergences (the write
+/// law, per-item; a profile's selection is a content key like any
+/// other — stored iff it diverges from the selection beneath); the
+/// shared layers re-emit from `loaded` verbatim. No divergence and no
+/// hand-edits ⇒ the empty string (a 0-byte file).
 #[must_use]
 pub fn serialize_overlay(
     state: &State,
@@ -423,8 +513,21 @@ pub fn serialize_overlay(
     emit_shared(&mut doc, "profile", &loaded.profile.shared);
     for profile in &state.profiles {
         let mut item = String::new();
-        if let Some(preset) = &profile.selected_eq_preset {
-            emit_value(&mut item, "selected_eq_preset", &toml_string(&preset.0));
+        // A custom row always carries its display name (ADR-0007) — so
+        // the row exists even with zero divergences; factory names are
+        // fixed and never stored.
+        if !profile.is_factory {
+            emit_value(&mut item, "name", &toml_string(&profile.name));
+        }
+        if profile.selected_eq_preset != profile.selection_baseline {
+            // TOML has no null: a diverging no-preset is the reserved
+            // `"none"` sentinel — unreachable while nothing ships
+            // beneath (part A), so A never writes it.
+            let stated = profile
+                .selected_eq_preset
+                .as_ref()
+                .map_or("none", |preset| preset.0.as_str());
+            emit_value(&mut item, "selected_eq_preset", &toml_string(stated));
         }
         emit_param_divergences(&mut item, &profile.params, &profile.baseline, defs);
         if !item.is_empty() {
@@ -435,6 +538,9 @@ pub fn serialize_overlay(
     emit_shared(&mut doc, "eq_preset", &loaded.eq_preset.shared);
     for preset in &state.eq_presets {
         let mut item = String::new();
+        if !preset.is_factory {
+            emit_value(&mut item, "name", &toml_string(&preset.name));
+        }
         emit_param_divergences(&mut item, &preset.params, &preset.baseline, defs);
         if !item.is_empty() {
             let _ = write!(doc, "\n[eq_preset.{}]\n{item}", preset.id.0);
@@ -777,13 +883,24 @@ iebt = [67, 95]
     fn rejects_invalid_config() {
         let cases = [
             ("powr = false\n", "powr"),
-            ("[profile.gost]\ndvla = 1\n", "unknown profile"),
+            // A non-factory row is a custom item — its name is required
+            // (also the guard against typo'd factory ids).
+            ("[profile.gost]\ndvla = 1\n", "missing `name`"),
             ("[profile.music]\nname = \"Loud\"\n", "renamed"),
             ("[profile.music]\ndvla = 99\n", "outside"),
             ("[profile]\nvnnb = 5\n", "read-only"),
             ("[eq_preset.rich]\niebt = [999]\n", "outside"),
-            ("[eq_preset.ghost]\niebt = [1]\n", "unknown EQ preset"),
+            ("[eq_preset.ghost]\niebt = [1]\n", "missing `name`"),
             ("[eq_preset.rich]\nname = \"Loud\"\n", "renamed"),
+            // The explicit no-preset sentinel is not an id any item may
+            // claim — a `[eq_preset.none]` row would make every
+            // `selected_eq_preset = "none"` ambiguous.
+            ("[eq_preset.none]\nname = \"X\"\n", "reserved"),
+            ("[profile.none]\nname = \"X\"\n", "reserved"),
+            (
+                "[profile.user_a1]\nname = \"X\"\nselected_eq_preset = \"ghost\"\n",
+                "names no EQ preset",
+            ),
             ("[eq_preset.rich]\ndvla = 5\n", "not preset-carried"),
             ("[eq_preset]\nven = 1\n", "not preset-carried"),
             (
@@ -914,6 +1031,7 @@ iebt = [67, 95]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![5_i16])].into(),
                     selected_eq_preset: None,
@@ -924,6 +1042,7 @@ iebt = [67, 95]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("movie".into()),
                     params: [("gebf".to_string(), vec![99_i16, 64])].into(),
                     selected_eq_preset: None,
@@ -969,6 +1088,7 @@ iebt = [44, 55]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![9_i16])].into(),
                     selected_eq_preset: None,
@@ -1000,6 +1120,70 @@ iebt = [44, 55, 0, 0]
         assert_eq!(reloaded.profile.shared, loaded.profile.shared);
         assert_eq!(reloaded.eq_preset.shared, loaded.eq_preset.shared);
         assert_eq!(resolve(&defaults, &reloaded), state);
+    }
+
+    /// Behaviors 1 + 7 (issue #26 A), schema half: custom rows —
+    /// `name` in the row, id as the key — parse, resolve over the
+    /// custom baseline (config-shared included), may select custom
+    /// presets and be the `selected_profile`, and round-trip through
+    /// `serialize_overlay` byte for byte.
+    #[test]
+    fn custom_rows_resolve_over_the_custom_baseline_and_round_trip() {
+        let defs = defs();
+        let defaults = defaults();
+        let document = "\
+selected_profile = \"user_a3f1\"
+
+[profile]
+dvla = 3
+
+[profile.user_a3f1]
+name = \"Late Night\"
+selected_eq_preset = \"user_91c2\"
+dvla = 2
+
+[eq_preset.user_91c2]
+name = \"Warmth\"
+iebt = [44, 55, 0, 0]
+";
+        let overlay = parse_config(document, &defs, &defaults).unwrap();
+        let state = resolve(&defaults, &overlay);
+
+        assert_eq!(state.selected_profile, ProfileId("user_a3f1".into()));
+        let custom = state.selected();
+        assert!(!custom.is_factory, "derived from defaults.toml absence");
+        assert_eq!(custom.name, "Late Night");
+        assert_eq!(custom.params["dvla"], vec![2], "its own row");
+        assert_eq!(
+            custom.baseline["dvla"],
+            vec![3],
+            "the custom baseline carries config-shared"
+        );
+        assert_eq!(
+            custom.params["ven"],
+            vec![1],
+            "…and the defaults [profile] shared layer"
+        );
+        assert_eq!(
+            custom.selected_eq_preset,
+            Some(PresetId("user_91c2".into())),
+            "customs may select custom presets"
+        );
+        let warmth = state.eq_preset(&PresetId("user_91c2".into())).unwrap();
+        assert!(!warmth.is_factory);
+        assert_eq!(warmth.params["iebt"], vec![44, 55, 0, 0]);
+        assert_eq!(
+            warmth.params["gebf"],
+            vec![43, 129, 215, 20],
+            "the [eq_preset] shared band structure applies to customs"
+        );
+
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &overlay, &defs),
+            document,
+            "the loaded document re-emits byte for byte (band arrays at \
+             full allocation, as write-back always emits them)"
+        );
     }
 
     /// The `[eq_preset]` cascade mirrors the profile one: config-shared
@@ -1041,6 +1225,7 @@ iebt = [44, 55, 0, 0]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(Some(PresetId("rich".into()))),
@@ -1051,6 +1236,7 @@ iebt = [44, 55, 0, 0]
         let _ = state
             .apply(
                 Command::EditEqPreset {
+                    name: None,
                     id: PresetId("rich".into()),
                     params: [("iebt".to_string(), vec![100_i16])].into(),
                 },
@@ -1069,10 +1255,12 @@ iebt = [44, 55, 0, 0]
         );
         assert_eq!(reloaded, state);
 
-        // Detach + reset ⇒ no divergence left ⇒ an empty file again.
+        // Detach + reset ⇒ no divergence left ⇒ an empty file again
+        // (the write law: `None` over nothing-beneath stores no key).
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(None),

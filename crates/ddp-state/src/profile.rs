@@ -25,10 +25,19 @@ pub struct Profile {
     pub id: ProfileId,
     /// User-editable display name (factory names ship in `defaults.toml`).
     pub name: String,
-    /// The EQ overlay in effect; `None` ⇒ the profile's own EQ params
-    /// apply (factory profiles ship `None` — first-run parity with the
-    /// original's `ieon = 0`).
+    /// The resolved EQ selection — `None` ⇒ the profile's own EQ
+    /// params apply (factory profiles ship no selection — first-run
+    /// parity with the original's `ieon = 0`). Stores like any content
+    /// key (ADR-0007): the config row states it iff it diverges from
+    /// [`Self::selection_baseline`].
     pub selected_eq_preset: Option<PresetId>,
+    /// The selection resolving beneath this profile's own `config.toml`
+    /// row — `selected_eq_preset`'s write-law divergence base, the
+    /// selection twin of [`Self::baseline`]. Always `None` until
+    /// `defaults.toml` rows may ship selections (issue #26 part B);
+    /// customs never have one (no `defaults.toml` row, and the shared
+    /// tables stay params-only).
+    pub selection_baseline: Option<PresetId>,
     /// Whether the id appears in `defaults.toml` — derived at load,
     /// never stored; factory items reset instead of delete/rename.
     pub is_factory: bool,

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::param_def::{ParameterDef, lookup};
+use crate::param_def::{ParameterDef, lookup, splice_head};
 use crate::preset::{EqPreset, PresetId};
 use crate::profile::{Profile, ProfileId};
 
@@ -26,6 +26,12 @@ pub struct Defaults {
     /// Factory EQ presets in declaration order, resolved the same way
     /// over the preset-carried params.
     pub eq_presets: Vec<EqPreset>,
+    /// What a custom profile resolves to beneath any `config.toml`
+    /// layer: `ParameterDef.default` ⊕ the `[profile]` shared layer —
+    /// the factory half of the custom baseline (ADR-0007).
+    pub custom_profile_baseline: HashMap<String, Vec<i16>>,
+    /// The EQ-preset counterpart, over the preset-carried params.
+    pub custom_eq_preset_baseline: HashMap<String, Vec<i16>>,
 }
 
 /// The daemon's user-facing state.
@@ -37,16 +43,25 @@ pub struct State {
     /// The one active profile, applied to all sessions. Invariant: it
     /// always names an entry of `profiles`.
     pub selected_profile: ProfileId,
-    /// Every profile, factory first (custom profiles join in Slice 18,
-    /// [#26](https://github.com/avisek/DolbyX/issues/26)). Invariant:
-    /// every `Some` `selected_eq_preset` names an entry of `eq_presets`
-    /// (load rejects a dangling selection; the `EditProfile` selection
-    /// patch validates).
+    /// Every profile, factory first, customs in creation order.
+    /// Invariant: every `Some` `selected_eq_preset` names an entry of
+    /// `eq_presets` (load rejects a dangling selection; the
+    /// `EditProfile` selection patch validates; `RemoveEqPreset` falls
+    /// selecting profiles to `None`).
     pub profiles: Vec<Profile>,
-    /// Every EQ preset, factory first — global across profiles
-    /// (custom presets join in Slice 18,
-    /// [#26](https://github.com/avisek/DolbyX/issues/26)).
+    /// Every EQ preset, factory first — global across profiles.
     pub eq_presets: Vec<EqPreset>,
+    /// `defaults.toml`'s `selected_profile` — where the selection falls
+    /// when the selected profile is deleted (a factory id, so the
+    /// fallback itself can never be deleted).
+    pub fallback_profile: ProfileId,
+    /// What resolves beneath a custom profile's `config.toml` row
+    /// ([`Defaults::custom_profile_baseline`] ⊕ the config `[profile]`
+    /// shared layer): [`Command::AddProfile`]'s fill for unstated
+    /// params and every custom profile's `baseline`.
+    pub custom_profile_baseline: HashMap<String, Vec<i16>>,
+    /// The EQ-preset counterpart, over the preset-carried params.
+    pub custom_eq_preset_baseline: HashMap<String, Vec<i16>>,
 }
 
 impl State {
@@ -58,6 +73,9 @@ impl State {
             selected_profile: defaults.selected_profile.clone(),
             profiles: defaults.profiles.clone(),
             eq_presets: defaults.eq_presets.clone(),
+            fallback_profile: defaults.selected_profile.clone(),
+            custom_profile_baseline: defaults.custom_profile_baseline.clone(),
+            custom_eq_preset_baseline: defaults.custom_eq_preset_baseline.clone(),
         }
     }
 
@@ -172,6 +190,7 @@ impl State {
                     power: changed.then_some(on),
                     params: None,
                     changed,
+                    minted: None,
                 })
             }
             Command::SetProfile { id } => {
@@ -186,13 +205,21 @@ impl State {
                     power: None,
                     params: Some(self.resolved_batch(defs)),
                     changed: true,
+                    minted: None,
                 })
             }
             Command::EditProfile {
                 id,
+                name,
                 params,
                 selected_eq_preset,
-            } => self.edit_profile(id, &params, selected_eq_preset, defs),
+            } => self.edit_profile(id, name, &params, selected_eq_preset, defs),
+            Command::AddProfile {
+                name,
+                params,
+                selected_eq_preset,
+            } => self.add_profile(name, &params, selected_eq_preset, defs),
+            Command::AddEqPreset { name, params } => self.add_eq_preset(name, &params, defs),
             Command::ResetProfile { id } => {
                 let live = self.selected_profile == id;
                 let profile = self
@@ -206,15 +233,67 @@ impl State {
                     power: None,
                     params: live.then(|| self.resolved_batch(defs)),
                     changed: true,
+                    minted: None,
                 })
             }
-            Command::EditEqPreset { id, params } => self.edit_eq_preset(id, &params, defs),
+            Command::EditEqPreset { id, name, params } => {
+                self.edit_eq_preset(id, name, &params, defs)
+            }
+            Command::RemoveProfile { id } => {
+                let profile = self
+                    .profile(&id)
+                    .ok_or_else(|| ValidationError::UnknownProfile(id.0.clone()))?;
+                if profile.is_factory {
+                    return Err(ValidationError::FactoryDelete(id.0));
+                }
+                let was_selected = self.selected_profile == id;
+                self.profiles.retain(|profile| profile.id != id);
+                if was_selected {
+                    self.selected_profile = self.fallback_profile.clone();
+                }
+                Ok(StateDiff {
+                    power: None,
+                    params: was_selected.then(|| self.resolved_batch(defs)),
+                    changed: true,
+                    minted: None,
+                })
+            }
+            Command::RemoveEqPreset { id } => {
+                let preset = self
+                    .eq_preset(&id)
+                    .ok_or_else(|| ValidationError::UnknownEqPreset(id.0.clone()))?;
+                if preset.is_factory {
+                    return Err(ValidationError::FactoryDelete(id.0));
+                }
+                // Deleting the selected profile's overlay ⇒ its own EQ
+                // params apply again — computed before the fall below
+                // rewrites the selections.
+                let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
+                // Every selecting profile falls to `None` at delete
+                // time — resolved, never re-inherited, so a delete can
+                // never activate a different preset (ADR-0003; a
+                // selection beneath would persist as the diverging
+                // `"none"` sentinel under the write law).
+                for profile in &mut self.profiles {
+                    if profile.selected_eq_preset.as_ref() == Some(&id) {
+                        profile.selected_eq_preset = None;
+                    }
+                }
+                self.eq_presets.retain(|preset| preset.id != id);
+                Ok(StateDiff {
+                    power: None,
+                    params: live.then(|| self.eq_batch(defs)),
+                    changed: true,
+                    minted: None,
+                })
+            }
             Command::ResetEqPreset { id } => self.reset_eq_preset(id, defs),
         }
     }
 
     /// [`Command::EditProfile`]: merge the param patch, apply the
-    /// tri-state selection patch, flush-iff-live — atomically.
+    /// tri-state selection patch and/or the rename, flush-iff-live —
+    /// atomically.
     #[expect(
         clippy::option_option,
         reason = "tri-state: absent ≠ null ≠ id (ADR-0005)"
@@ -222,14 +301,18 @@ impl State {
     fn edit_profile(
         &mut self,
         id: ProfileId,
+        name: Option<String>,
         params: &HashMap<String, Vec<i16>>,
         selection: Option<Option<PresetId>>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
         // Validate everything before mutating anything — commands are
         // atomic: reject all or apply all (ADR-0005).
-        for (name, values) in params {
-            validate_write(defs, name, values)?;
+        if let Some(name) = &name {
+            validate_name(name)?;
+        }
+        for (param, values) in params {
+            validate_write(defs, param, values)?;
         }
         if let Some(Some(preset_id)) = &selection
             && self.eq_preset(preset_id).is_none()
@@ -240,6 +323,10 @@ impl State {
         let profile = self
             .profile_mut(&id)
             .ok_or(ValidationError::UnknownProfile(id.0))?;
+        if name.is_some() && profile.is_factory {
+            return Err(ValidationError::FactoryRename(profile.id.0.clone()));
+        }
+        let name_changed = name.as_ref().is_some_and(|new| profile.name != *new);
         let selection_changed = selection
             .as_ref()
             .is_some_and(|new| profile.selected_eq_preset != *new);
@@ -256,7 +343,10 @@ impl State {
         if let Some(new) = selection {
             profile.selected_eq_preset = new;
         }
-        if !params_changed && !selection_changed {
+        if let Some(new) = name {
+            profile.name = new;
+        }
+        if !params_changed && !selection_changed && !name_changed {
             return Ok(StateDiff::default());
         }
         // Live ⇒ the targeted profile is the selected one.
@@ -265,6 +355,7 @@ impl State {
             power: None,
             params: batch.filter(|batch| !batch.is_empty()),
             changed: true,
+            minted: None,
         })
     }
 
@@ -301,38 +392,134 @@ impl State {
             .collect()
     }
 
-    /// [`Command::EditEqPreset`]: merge into the global preset; flush
-    /// iff the selected profile selects it.
+    /// [`Command::AddProfile`]: validate the content, mint the id,
+    /// birth the item over the custom baseline.
+    fn add_profile(
+        &mut self,
+        name: String,
+        params: &HashMap<String, Vec<i16>>,
+        selection: Option<PresetId>,
+        defs: &[ParameterDef],
+    ) -> Result<StateDiff, ValidationError> {
+        validate_name(&name)?;
+        for (param, values) in params {
+            validate_write(defs, param, values)?;
+        }
+        if let Some(preset_id) = &selection
+            && self.eq_preset(preset_id).is_none()
+        {
+            return Err(ValidationError::UnknownEqPreset(preset_id.0.clone()));
+        }
+        let id = mint_id(&name, |candidate| {
+            self.profiles
+                .iter()
+                .any(|profile| profile.id.0 == candidate)
+        });
+        let mut resolved = self.custom_profile_baseline.clone();
+        for (param, values) in params {
+            splice_head(&mut resolved, param, values);
+        }
+        self.profiles.push(Profile {
+            id: ProfileId(id.clone()),
+            name,
+            selected_eq_preset: selection,
+            // Customs never have a selection beneath (the shared
+            // tables stay params-only — ADR-0007).
+            selection_baseline: None,
+            is_factory: false,
+            params: resolved,
+            baseline: self.custom_profile_baseline.clone(),
+        });
+        Ok(StateDiff {
+            power: None,
+            // The daemon never moves selection on an add — no batch.
+            params: None,
+            changed: true,
+            minted: Some(id),
+        })
+    }
+
+    /// [`Command::AddEqPreset`]: as [`State::add_profile`], over the
+    /// preset-carried params.
+    fn add_eq_preset(
+        &mut self,
+        name: String,
+        params: &HashMap<String, Vec<i16>>,
+        defs: &[ParameterDef],
+    ) -> Result<StateDiff, ValidationError> {
+        validate_name(&name)?;
+        for (param, values) in params {
+            validate_eq_preset_write(defs, param, values)?;
+        }
+        let id = mint_id(&name, |candidate| {
+            self.eq_presets
+                .iter()
+                .any(|preset| preset.id.0 == candidate)
+        });
+        let mut resolved = self.custom_eq_preset_baseline.clone();
+        for (param, values) in params {
+            splice_head(&mut resolved, param, values);
+        }
+        self.eq_presets.push(EqPreset {
+            id: PresetId(id.clone()),
+            name,
+            is_factory: false,
+            params: resolved,
+            baseline: self.custom_eq_preset_baseline.clone(),
+        });
+        Ok(StateDiff {
+            power: None,
+            params: None,
+            changed: true,
+            minted: Some(id),
+        })
+    }
+
+    /// [`Command::EditEqPreset`]: merge the param patch and/or apply
+    /// the rename into the global preset; flush iff the selected
+    /// profile selects it (a rename alone never flushes).
     fn edit_eq_preset(
         &mut self,
         id: PresetId,
+        name: Option<String>,
         params: &HashMap<String, Vec<i16>>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
         // Validate everything before mutating anything.
-        for (name, values) in params {
-            validate_eq_preset_write(defs, name, values)?;
+        if let Some(name) = &name {
+            validate_name(name)?;
+        }
+        for (param, values) in params {
+            validate_eq_preset_write(defs, param, values)?;
         }
         let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
             .ok_or(ValidationError::UnknownEqPreset(id.0))?;
+        if name.is_some() && preset.is_factory {
+            return Err(ValidationError::FactoryRename(preset.id.0.clone()));
+        }
+        let name_changed = name.as_ref().is_some_and(|new| preset.name != *new);
         let mut batch = Vec::with_capacity(params.len());
-        let mut changed = false;
+        let mut params_changed = false;
         for def in defs {
             let Some(values) = params.get(&def.name) else {
                 continue;
             };
             if preset.params[&def.name][..values.len()] != values[..] {
                 preset.splice(&def.name, values);
-                changed = true;
+                params_changed = true;
             }
             batch.push((def.name.clone(), values.clone()));
         }
+        if let Some(new) = name {
+            preset.name = new;
+        }
         Ok(StateDiff {
             power: None,
-            params: (changed && live).then_some(batch),
-            changed,
+            params: (params_changed && live).then_some(batch),
+            changed: params_changed || name_changed,
+            minted: None,
         })
     }
 
@@ -355,6 +542,7 @@ impl State {
             power: None,
             params: live.then(|| self.eq_batch(defs)),
             changed: true,
+            minted: None,
         })
     }
 }
@@ -380,6 +568,9 @@ pub enum Command {
     EditProfile {
         /// The profile to edit.
         id: ProfileId,
+        /// A rename patch — the new display name; `None` = untouched.
+        /// Factory ids reject (their shipped names are fixed).
+        name: Option<String>,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
         /// Tri-state selection patch: `None` = untouched, `Some(None)`
@@ -388,6 +579,30 @@ pub enum Command {
         /// selection is per-profile — the target is explicit, unlike
         /// the global [`Command::SetProfile`].
         selected_eq_preset: Option<Option<PresetId>>,
+    },
+    /// Creates a custom profile from its **content** (ADR-0005): name +
+    /// optional params + optional EQ selection — never a source
+    /// reference ("clone" is a UI gesture; the client copies resolved
+    /// values it already holds). Unstated params resolve from the
+    /// custom baseline. The daemon mints the `user_<hash>` id, reported
+    /// on [`StateDiff::minted`] — and never moves the selection.
+    AddProfile {
+        /// The display name — a label, not identity (duplicates
+        /// tolerated).
+        name: String,
+        /// The stated content params, keyed by 4-CC.
+        params: HashMap<String, Vec<i16>>,
+        /// The birth EQ selection; `None` (key absent on the wire) ⇒
+        /// no preset.
+        selected_eq_preset: Option<PresetId>,
+    },
+    /// Creates a custom EQ preset from its content — as
+    /// [`Command::AddProfile`], over the preset-carried params.
+    AddEqPreset {
+        /// The display name.
+        name: String,
+        /// The stated content params, keyed by 4-CC.
+        params: HashMap<String, Vec<i16>>,
     },
     /// Drops a profile's own overrides, restoring its baseline (factory
     /// rows in `defaults.toml` stay untouched).
@@ -403,12 +618,29 @@ pub enum Command {
     EditEqPreset {
         /// The preset to edit.
         id: PresetId,
+        /// A rename patch — as [`Command::EditProfile`]'s.
+        name: Option<String>,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
     },
     /// Drops an EQ preset's own overrides, restoring its baseline.
     ResetEqPreset {
         /// The preset to reset.
+        id: PresetId,
+    },
+    /// Deletes a custom profile (factory ids reject). Deleting the
+    /// selected profile falls the selection back to `defaults.toml`'s
+    /// `selected_profile`, batching its full resolved set.
+    RemoveProfile {
+        /// The profile to delete.
+        id: ProfileId,
+    },
+    /// Deletes a custom EQ preset (factory ids reject). Every profile
+    /// selecting it falls to an **explicit** `None` — never the
+    /// selection beneath (ADR-0003); flush-iff-live pushes the selected
+    /// profile's own EQ.
+    RemoveEqPreset {
+        /// The preset to delete.
         id: PresetId,
     },
 }
@@ -431,6 +663,10 @@ pub struct StateDiff {
     /// when the engine hears nothing, e.g. an edit to a non-selected
     /// profile).
     pub changed: bool,
+    /// The server-minted id of an `add_*`'s fresh item — echoed on the
+    /// wire ack's `id`, so the originator applies locally without
+    /// waiting for a snapshot (ADR-0005).
+    pub minted: Option<String>,
 }
 
 impl StateDiff {
@@ -455,6 +691,19 @@ pub enum ValidationError {
     /// `category ∈ {Ieq, Geq}` params (ADR-0003).
     #[error("parameter `{0}` is not preset-carried (not an IEQ/GEQ param)")]
     NotPresetCarried(String),
+    /// The display name is empty after trimming — names are labels
+    /// (duplicates tolerated; identity lives in the id), but a blank
+    /// label is unusable.
+    #[error("name is empty after trimming")]
+    EmptyName,
+    /// Factory items keep their shipped names — a `name` patch on one
+    /// rejects (a Reset restores content, never names).
+    #[error("factory item `{0}` cannot be renamed")]
+    FactoryRename(String),
+    /// Factory items never delete — a Reset falls them back to their
+    /// bundled defaults instead.
+    #[error("factory item `{0}` cannot be deleted")]
+    FactoryDelete(String),
     /// The 4-CC names no declared parameter.
     #[error("unknown parameter `{0}`")]
     UnknownParam(String),
@@ -485,6 +734,39 @@ pub enum ValidationError {
         /// The declared upper bound.
         max: i16,
     },
+}
+
+/// Validates a display name: non-empty after trimming (ADR-0005 —
+/// names are labels, duplicates tolerated).
+fn validate_name(name: &str) -> Result<(), ValidationError> {
+    if name.trim().is_empty() {
+        return Err(ValidationError::EmptyName);
+    }
+    Ok(())
+}
+
+/// Mints a fresh custom-item id — `user_` + four hex digits of a name
+/// hash, re-hashed until it collides with nothing `taken` reports (the
+/// `user_` prefix keeps factory ids and the reserved `"none"` sentinel
+/// out of reach). Ids persist in `config.toml`; a mint is a one-shot —
+/// stability across restarts comes from persistence, never
+/// re-derivation.
+fn mint_id(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    use std::hash::{Hash, Hasher};
+    let rehash = |seed: u64, salt: &str| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        seed.hash(&mut hasher);
+        salt.hash(&mut hasher);
+        hasher.finish()
+    };
+    let mut hash = rehash(0, name);
+    loop {
+        let id = format!("user_{:04x}", hash & 0xffff);
+        if !taken(&id) {
+            return id;
+        }
+        hash = rehash(hash, name);
+    }
 }
 
 /// Validates one param write against the `ParameterDef` table: the 4-CC
@@ -647,6 +929,7 @@ mod tests {
             id: ProfileId(id.into()),
             name: name.into(),
             selected_eq_preset: None,
+            selection_baseline: None,
             is_factory: true,
             params: params.clone(),
             baseline: params,
@@ -679,6 +962,8 @@ mod tests {
                 preset("open", "Open", &[117, 133, -27, -240], &table),
                 preset("rich", "Rich", &[67, 95, -55, -235], &table),
             ],
+            custom_profile_baseline: base_params(&table),
+            custom_eq_preset_baseline: base_eq_params(&table),
         }
     }
 
@@ -690,6 +975,7 @@ mod tests {
     /// `Some(None)` detaches, `Some(Some(id))` selects.
     fn select_preset(profile_id: &str, id: Option<PresetId>) -> Command {
         Command::EditProfile {
+            name: None,
             id: ProfileId(profile_id.into()),
             params: HashMap::new(),
             selected_eq_preset: Some(id),
@@ -801,6 +1087,7 @@ mod tests {
 
     fn edit(id: &str, entries: &[(&str, &[i16])]) -> Command {
         Command::EditProfile {
+            name: None,
             id: ProfileId(id.into()),
             params: entries
                 .iter()
@@ -1085,6 +1372,7 @@ mod tests {
         let diff = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [
                         ("dvla".to_string(), vec![9_i16]),
@@ -1121,6 +1409,7 @@ mod tests {
         let diff = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("gebg".to_string(), vec![5_i16, -5])].into(),
                     selected_eq_preset: Some(None),
@@ -1150,6 +1439,7 @@ mod tests {
         let rejected = [
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![9_i16])].into(),
                     selected_eq_preset: Some(Some(PresetId("ghost".into()))),
@@ -1158,6 +1448,7 @@ mod tests {
             ),
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![11_i16])].into(),
                     selected_eq_preset: Some(Some(rich())),
@@ -1172,6 +1463,7 @@ mod tests {
             ),
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("ghost".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(Some(rich())),
@@ -1197,6 +1489,7 @@ mod tests {
 
         // Selected profile (music) doesn't select rich: persist only.
         let edit_rich = |values: &'static [i16]| Command::EditEqPreset {
+            name: None,
             id: PresetId("rich".into()),
             params: [("iebt".to_string(), values.to_vec())].into(),
         };
@@ -1239,6 +1532,7 @@ mod tests {
         let mut state = State::new_from_defaults(&defaults());
         let before = state.clone();
         let edit = |id: &str, name: &str, values: &[i16]| Command::EditEqPreset {
+            name: None,
             id: PresetId(id.into()),
             params: [(name.to_string(), values.to_vec())].into(),
         };
@@ -1318,6 +1612,314 @@ mod tests {
         );
     }
 
+    /// Behavior 2 (issue #26 A), state half: `add_profile` births the
+    /// item over the **custom baseline** (not any factory profile's
+    /// values), reports the minted id with no engine batch — and two
+    /// adds with identical content mint distinct ids (the collision
+    /// loop), so names stay labels and ids identity.
+    #[test]
+    fn add_profile_fills_from_the_custom_baseline_and_never_collides() {
+        let mut state = State::new_from_defaults(&defaults());
+        let add = || Command::AddProfile {
+            name: "Late Night".into(),
+            params: [("gebg".to_string(), vec![5_i16, -5])].into(),
+            selected_eq_preset: None,
+        };
+
+        let diff = state.apply(add(), &defs()).unwrap();
+        let id = diff.minted.clone().expect("an add mints an id");
+        // Opaque beyond the prefix (epic) — the format is unpinned.
+        assert!(id.starts_with("user_"), "got {id:?}");
+        assert!(!diff.is_empty());
+        assert_eq!(diff.params, None, "an add never touches the engine");
+
+        let profile = state.profile(&ProfileId(id.clone())).unwrap();
+        assert_eq!(profile.name, "Late Night");
+        assert!(!profile.is_factory);
+        assert_eq!(profile.selected_eq_preset, None, "absent ⇒ no preset");
+        assert_eq!(profile.params["gebg"], vec![5, -5, 0, 0], "stated content");
+        assert_eq!(
+            profile.params["dvla"],
+            vec![7],
+            "unstated params run the custom baseline — not Music's 4"
+        );
+        assert_eq!(profile.baseline, state.custom_profile_baseline);
+
+        // Identical content again: a fresh id, both items live.
+        let second = state.apply(add(), &defs()).unwrap().minted.unwrap();
+        assert_ne!(second, id, "identical content must not collide");
+        assert_eq!(state.profiles.len(), 4);
+
+        // The add family validates like edit (ADR-0005): bad content
+        // rejects whole, nothing minted.
+        let before = state.clone();
+        let rejected: [(Command, ValidationError); 3] = [
+            (
+                Command::AddProfile {
+                    name: "  \t ".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                ValidationError::EmptyName,
+            ),
+            (
+                Command::AddProfile {
+                    name: "X".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(PresetId("ghost".into())),
+                },
+                ValidationError::UnknownEqPreset("ghost".into()),
+            ),
+            (
+                Command::AddEqPreset {
+                    name: "X".into(),
+                    params: [("dvla".to_string(), vec![4_i16])].into(),
+                },
+                ValidationError::NotPresetCarried("dvla".into()),
+            ),
+        ];
+        for (command, expected) in rejected {
+            assert_eq!(state.apply(command, &defs()), Err(expected));
+            assert_eq!(state, before, "a rejected add must not mutate");
+        }
+        assert_eq!(
+            ValidationError::EmptyName.to_string(),
+            "name is empty after trimming"
+        );
+    }
+
+    /// Behavior 3 (issue #26 A), state half: a rename is a `name`
+    /// patch on the one sparse verb — atomic with the rest (a valid
+    /// name beside a bad param rejects whole), a same-name patch a
+    /// no-op, factory names immutable.
+    #[test]
+    fn a_name_patch_renames_customs_atomically() {
+        let mut state = State::new_from_defaults(&defaults());
+        let minted = state
+            .apply(
+                Command::AddProfile {
+                    name: "Music 2".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .unwrap();
+        let rename = |name: &str, dvla: &[i16]| Command::EditProfile {
+            id: ProfileId(minted.clone()),
+            name: Some(name.into()),
+            params: [("dvla".to_string(), dvla.to_vec())].into(),
+            selected_eq_preset: None,
+        };
+
+        let diff = state.apply(rename("Late Night", &[3]), &defs()).unwrap();
+        assert!(!diff.is_empty());
+        let profile = state.profile(&ProfileId(minted.clone())).unwrap();
+        assert_eq!(profile.name, "Late Night");
+        assert_eq!(profile.params["dvla"], vec![3], "one atomic patch");
+
+        let before = state.clone();
+        assert_eq!(
+            state.apply(rename("Later", &[99]), &defs()),
+            Err(ValidationError::OutOfRange {
+                name: "dvla".into(),
+                index: 0,
+                value: 99,
+                min: 0,
+                max: 10,
+            }),
+        );
+        assert_eq!(state, before, "a valid rename beside a bad param");
+
+        let diff = state.apply(rename("Late Night", &[3]), &defs()).unwrap();
+        assert!(diff.is_empty(), "restating the current name and value");
+
+        assert_eq!(
+            state.apply(
+                Command::EditEqPreset {
+                    id: PresetId("rich".into()),
+                    name: Some("Loud".into()),
+                    params: HashMap::new(),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryRename("rich".into())),
+        );
+        assert_eq!(
+            ValidationError::FactoryRename("rich".into()).to_string(),
+            "factory item `rich` cannot be renamed"
+        );
+    }
+
+    /// Behavior 2 (issue #26 A), preset half: `add_eq_preset` births
+    /// over the preset-carried custom baseline; a birth selection on
+    /// `add_profile` resolves at once.
+    #[test]
+    fn add_eq_preset_fills_from_the_custom_baseline_and_is_selectable() {
+        let mut state = State::new_from_defaults(&defaults());
+        let diff = state
+            .apply(
+                Command::AddEqPreset {
+                    name: "My Rich".into(),
+                    params: [("iebt".to_string(), vec![9_i16])].into(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        let id = diff.minted.expect("an add mints an id");
+        let preset = state.eq_preset(&PresetId(id.clone())).unwrap();
+        assert!(!preset.is_factory);
+        assert_eq!(preset.params["iebt"], vec![9, 0, 0, 0]);
+        assert_eq!(
+            preset.params["ieon"],
+            vec![0],
+            "unstated params run the custom baseline — no factory row leaks"
+        );
+        assert_eq!(preset.baseline, state.custom_eq_preset_baseline);
+
+        let diff = state
+            .apply(
+                Command::AddProfile {
+                    name: "Paired".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(PresetId(id.clone())),
+                },
+                &defs(),
+            )
+            .unwrap();
+        let paired = state.profile(&ProfileId(diff.minted.unwrap())).unwrap();
+        assert_eq!(
+            paired.selected_eq_preset,
+            Some(PresetId(id)),
+            "a birth selection resolves at once"
+        );
+    }
+
+    /// Adds a bare custom EQ preset, returning the minted id.
+    fn add_eq_preset(state: &mut State, name: &str) -> PresetId {
+        state
+            .apply(
+                Command::AddEqPreset {
+                    name: name.into(),
+                    params: HashMap::new(),
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .map(PresetId)
+            .unwrap()
+    }
+
+    /// Behavior 5 (issue #26 A), state half: deleting a custom EQ
+    /// preset falls every selector to a resolved `None` — never
+    /// re-inherited, so a selection beneath can't surface (ADR-0003) —
+    /// and flushes iff the selected profile selected it.
+    #[test]
+    fn removing_an_eq_preset_falls_every_selector_to_none() {
+        let mut state = State::new_from_defaults(&defaults());
+        let preset_id = add_eq_preset(&mut state, "Doomed");
+        let _ = state
+            .apply(select_preset("movie", Some(preset_id.clone())), &defs())
+            .unwrap();
+        let _ = state
+            .apply(select_preset("music", Some(preset_id.clone())), &defs())
+            .unwrap();
+
+        let diff = state
+            .apply(
+                Command::RemoveEqPreset {
+                    id: preset_id.clone(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        assert!(state.eq_preset(&preset_id).is_none(), "the preset is gone");
+        for id in ["movie", "music"] {
+            assert_eq!(
+                state
+                    .profile(&ProfileId(id.into()))
+                    .unwrap()
+                    .selected_eq_preset,
+                None,
+                "{id}: fallen to None at delete time"
+            );
+        }
+        let batch = diff.params.expect("music selected it — the delete flushes");
+        assert_eq!(batch.len(), 4, "the fixture's preset-carried set");
+        assert!(
+            batch.contains(&("ieon".to_string(), vec![0])),
+            "music's own"
+        );
+
+        // No selectors ⇒ nothing falls, engine silent.
+        let idle = add_eq_preset(&mut state, "Idle");
+        let diff = state
+            .apply(Command::RemoveEqPreset { id: idle }, &defs())
+            .unwrap();
+        assert!(!diff.is_empty());
+        assert_eq!(diff.params, None);
+    }
+
+    /// Behaviors 4 + 6 (issue #26 A), state half: deleting the
+    /// selected profile falls the selection back to `fallback_profile`
+    /// with its resolved set; factory deletes reject.
+    #[test]
+    fn removing_the_selected_profile_falls_back_and_factories_reject() {
+        let mut state = State::new_from_defaults(&defaults());
+        let profile_id = state
+            .apply(
+                Command::AddProfile {
+                    name: "Bass".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .map(ProfileId)
+            .unwrap();
+        let _ = state
+            .apply(
+                Command::SetProfile {
+                    id: profile_id.clone(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        let diff = state
+            .apply(Command::RemoveProfile { id: profile_id }, &defs())
+            .unwrap();
+        assert_eq!(state.selected_profile, ProfileId("music".into()));
+        assert!(diff.params.is_some(), "the fallback's resolved set flushes");
+
+        assert_eq!(
+            state.apply(
+                Command::RemoveProfile {
+                    id: ProfileId("music".into()),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryDelete("music".into())),
+        );
+        assert_eq!(
+            state.apply(
+                Command::RemoveEqPreset {
+                    id: PresetId("rich".into()),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryDelete("rich".into())),
+        );
+        assert_eq!(
+            ValidationError::FactoryDelete("music".into()).to_string(),
+            "factory item `music` cannot be deleted"
+        );
+    }
+
     /// `reset_eq_preset` restores the baseline and batches iff the
     /// selected profile selects the preset.
     #[test]
@@ -1325,6 +1927,7 @@ mod tests {
         let mut state = State::new_from_defaults(&defaults());
         let rich_id = PresetId("rich".into());
         let edit_rich = Command::EditEqPreset {
+            name: None,
             id: rich_id.clone(),
             params: [("iebt".to_string(), vec![100_i16])].into(),
         };

@@ -40,6 +40,9 @@ pub(crate) enum WsCommand {
         request_id: String,
         /// The profile to edit.
         id: ddp_state::ProfileId,
+        /// A rename patch — absent = untouched; factory ids reject.
+        #[serde(default)]
+        name: Option<String>,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
         #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
@@ -52,6 +55,32 @@ pub(crate) enum WsCommand {
         )]
         selected_eq_preset: Option<Option<ddp_state::PresetId>>,
     },
+    /// Create a custom profile from its content (ADR-0005) — never a
+    /// source reference; the ack returns the server-minted id.
+    AddProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The display name — a label, not identity.
+        name: String,
+        /// The stated content params: `{ "<4-CC>": [i16, …] }`;
+        /// unstated params resolve from the custom baseline.
+        #[serde(default)]
+        params: std::collections::HashMap<String, Vec<i16>>,
+        /// The birth EQ selection; absent (or `null`) ⇒ no preset.
+        #[serde(default)]
+        selected_eq_preset: Option<ddp_state::PresetId>,
+    },
+    /// Create a custom EQ preset from its content — as `add_profile`,
+    /// over the preset-carried params.
+    AddEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The display name.
+        name: String,
+        /// The stated content params: `{ "<4-CC>": [i16, …] }`.
+        #[serde(default)]
+        params: std::collections::HashMap<String, Vec<i16>>,
+    },
     /// Drop a profile's own overrides, restoring its baseline.
     ResetProfile {
         /// Correlation id echoed on the reply.
@@ -59,13 +88,18 @@ pub(crate) enum WsCommand {
         /// The profile to reset.
         id: ddp_state::ProfileId,
     },
-    /// Write a param map into one EQ preset (preset-carried params only).
+    /// Patch one EQ preset: a param map (preset-carried params only)
+    /// and/or a rename.
     EditEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The preset to edit.
         id: ddp_state::PresetId,
+        /// A rename patch — absent = untouched; factory ids reject.
+        #[serde(default)]
+        name: Option<String>,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
+        #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
     },
     /// Drop an EQ preset's own overrides, restoring its baseline.
@@ -73,6 +107,21 @@ pub(crate) enum WsCommand {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The preset to reset.
+        id: ddp_state::PresetId,
+    },
+    /// Delete a custom profile (factory ids reject).
+    RemoveProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to delete.
+        id: ddp_state::ProfileId,
+    },
+    /// Delete a custom EQ preset (factory ids reject); selecting
+    /// profiles fall to explicit `None`.
+    RemoveEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to delete.
         id: ddp_state::PresetId,
     },
 }
@@ -113,11 +162,15 @@ pub(crate) enum WsEvent<'a> {
         params: VisParams,
     },
     /// The one success reply per command — failures use
-    /// [`WsEvent::Error`] (the minted-id field for `add_*` arrives
-    /// with [#26](https://github.com/avisek/DolbyX/issues/26)).
+    /// [`WsEvent::Error`].
     Ack {
         /// The echoed correlation id.
         request_id: &'a str,
+        /// The server-minted item id — present exactly on `add_*` acks,
+        /// so the originator applies locally without waiting for a
+        /// snapshot (ADR-0005).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<&'a str>,
     },
     /// The one failure reply per command; `request_id` is `null` when
     /// the frame was too malformed to carry one.
@@ -179,9 +232,13 @@ impl WsEvent<'_> {
     }
 }
 
-/// Builds the standard success reply.
-pub(crate) fn ack(request_id: &str) -> WsEvent<'_> {
-    WsEvent::Ack { request_id }
+/// Builds the standard success reply; `minted` carries the fresh item
+/// id on `add_*` acks.
+pub(crate) fn ack<'a>(request_id: &'a str, minted: Option<&'a str>) -> WsEvent<'a> {
+    WsEvent::Ack {
+        request_id,
+        id: minted,
+    }
 }
 
 /// Builds an `INVALID_REQUEST` error reply.
