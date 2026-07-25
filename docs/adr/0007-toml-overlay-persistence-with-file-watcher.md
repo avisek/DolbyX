@@ -13,6 +13,22 @@ never writes. This echoes the original DDP's `ds1-default.xml` +
 layers are v2 refinements (the original repeated the factory defaults in
 full in every profile).
 
+A profile's `selected_eq_preset` is itself a cascaded key, item rows
+only (the shared tables stay params-only): a `defaults.toml` item row
+may ship a factory selection — it must name a `defaults.toml` preset —
+and the `config.toml` row shadows it. Key absent = inherit; the
+reserved id `"none"` states an explicit no-preset override (TOML has no
+null; customs mint `user_<hash>`, and `defaults.toml` may not define an
+item named `none`, so it never collides). On the wire the same override
+is JSON `null`.
+
+Reset is the cascade's undo, valid on **every** item: it drops the
+id's `config.toml` divergences — whole-row or scoped to named content
+keys — so the layers beneath resolve. A factory item falls to its
+bundled defaults; a custom item, having no `defaults.toml` row, falls
+to the shared layers — *not* its birth clone. `name` is never reset
+(customs would lose their identity's label).
+
 DolbyX is system-level — one install serves all users; the daemon runs
 as a system service — so both paths (and the plugin socket) are
 machine-wide.
