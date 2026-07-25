@@ -459,6 +459,102 @@ async fn factory_and_unknown_deletes_are_invalid_request() {
     assert_eq!(snapshot["eq_presets"].as_array().expect("array").len(), 3);
 }
 
+/// The slice's tracer bullet + behaviors 1 & 7 (issue #26 A): add a
+/// custom profile with Music's content, rename it, add a custom preset
+/// and select it, add-and-remove a second profile — restart — the
+/// customs survive in `config.toml` rows (`[profile.user_<hash>]`, id
+/// as the table key, `name` in the row), the removed one stays gone,
+/// and `is_factory` is derived from `defaults.toml` presence — nothing
+/// stored on disk.
+#[tokio::test]
+async fn tracer_bullet_add_rename_restart_survives() {
+    let daemon = start_daemon().await;
+    let mut ws = connected(daemon.addr()).await;
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r1" })).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    let music_params = snapshot["profiles"][1]["params"].clone();
+
+    let profile_id = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_profile", "request_id": "r2", "name": "Music 2", "params": music_params }),
+    )
+    .await;
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r3", "id": profile_id, "name": "Late Night" }),
+    )
+    .await;
+    let preset_id = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_eq_preset", "request_id": "r4", "name": "Warmth", "params": { "iebt": [67, 95], "ieon": [1] } }),
+    )
+    .await;
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r5", "id": profile_id, "selected_eq_preset": preset_id }),
+    )
+    .await;
+    // Removed customs stay gone — the row is deleted, not blanked.
+    let doomed = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_profile", "request_id": "r6", "name": "Temp" }),
+    )
+    .await;
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "remove_profile", "request_id": "r7", "id": doomed }),
+    )
+    .await;
+
+    drop(ws);
+    daemon.handle.shutdown().await;
+
+    // Behavior 1: the rows carry content only — factory-ness is derived
+    // from defaults.toml presence at load, never stored.
+    let config =
+        std::fs::read_to_string(daemon.dir.path().join("data").join("config.toml")).unwrap();
+    assert!(
+        !config.contains("is_factory"),
+        "factory-ness must not be stored: {config}"
+    );
+    let profile_key = format!("[profile.{}]", profile_id.as_str().unwrap());
+    assert!(config.contains(&profile_key), "id is the table key: {config}");
+    assert!(
+        config.contains("name = \"Late Night\""),
+        "the rename landed in the row: {config}"
+    );
+
+    let (restarted, _stub) = start_over(&daemon.dir).await;
+    let mut ws = ws_connect(restarted.addr()).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+
+    let profiles = snapshot["profiles"].as_array().expect("array");
+    assert_eq!(profiles.len(), 5, "four factory + the surviving custom");
+    for (index, factory) in [true, true, true, true, false].into_iter().enumerate() {
+        assert_eq!(profiles[index]["is_factory"], factory, "index {index}");
+    }
+    let custom = &profiles[4];
+    assert_eq!(custom["id"], profile_id, "id stable across restart");
+    assert_eq!(custom["name"], "Late Night", "the rename survived");
+    assert_eq!(
+        custom["params"], snapshot["profiles"][1]["params"],
+        "Music's content survived, value for value"
+    );
+    assert_eq!(
+        custom["selected_eq_preset"], preset_id,
+        "the selection survived"
+    );
+
+    let presets = snapshot["eq_presets"].as_array().expect("array");
+    assert_eq!(presets.len(), 4);
+    assert_eq!(presets[3]["id"], preset_id);
+    assert_eq!(presets[3]["name"], "Warmth");
+    assert_eq!(presets[3]["is_factory"], false);
+    assert_eq!(presets[3]["params"]["iebt"][0], 67);
+    assert_eq!(presets[3]["params"]["ieon"], json!([1]));
+}
+
 /// `add_*` validation (epic validation section): empty-after-trim
 /// names, undeclared/read-only/out-of-range params, non-preset-carried
 /// preset params, and an unknown `selected_eq_preset` are
