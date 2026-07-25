@@ -15,7 +15,7 @@ Broadcast `state` / `vis` events carry no `request_id`.
 
 **Content grammar.** Items are config rows; commands are row
 operations, uniform across profiles and EQ presets: `add_*` creates an
-item from its **content** (`name` + params + profile selection), never
+item from its **content** (`name` + params + EQ selection), never
 from a source reference — "clone" is a UI gesture, the client copies
 resolved values it already holds, so capturing the None state needs no
 special wire support and add validation is `edit_*`'s verbatim.
@@ -23,9 +23,13 @@ special wire support and add validation is `edit_*`'s verbatim.
 an EQ selection is `edit_profile { id, selected_eq_preset }` — there
 are no `rename_*` / `set_eq_preset` commands). `reset_*
 { id, only?: [content-key…] }` is the un-edit — dropping divergences so
-the cascade beneath resolves ([ADR-0007](0007-toml-overlay-persistence-with-file-watcher.md))
-— and the snapshot's per-item `overridden` list is its dual: exactly
-the content keys a whole-item reset would clear. Commands are atomic —
+the cascade beneath resolves ([ADR-0007](0007-toml-overlay-persistence-with-file-watcher.md)).
+Each item's snapshot carries its `baseline` — what resolves beneath its
+config row, mirroring the item's content shape — so divergence
+(resolved ≠ baseline, per content key) is **client-derived**: exactly
+the keys a whole-item reset would clear. The snapshot ships inputs,
+never precomputed affordances — originator suppression (below) would
+starve them on the very tab that's editing. Commands are atomic —
 reject all or apply all.
 
 **Originator-aware broadcast.** While handling a command from connection
