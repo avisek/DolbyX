@@ -40,7 +40,8 @@ pub struct State {
     /// Every profile, factory first (custom profiles join in Slice 18,
     /// [#26](https://github.com/avisek/DolbyX/issues/26)). Invariant:
     /// every `Some` `selected_eq_preset` names an entry of `eq_presets`
-    /// (load rejects a dangling selection; `SetEqPreset` validates).
+    /// (load rejects a dangling selection; the `EditProfile` selection
+    /// patch validates).
     pub profiles: Vec<Profile>,
     /// Every EQ preset, factory first — global across profiles
     /// (custom presets join in Slice 18,
@@ -85,8 +86,8 @@ impl State {
     /// # Panics
     ///
     /// Never in practice: every `Some` selection names an existing
-    /// preset (load rejects a dangling selection; `SetEqPreset`
-    /// validates).
+    /// preset (load rejects a dangling selection; the `EditProfile`
+    /// selection patch validates).
     fn overlay_of(&self, profile: &Profile) -> Option<&EqPreset> {
         profile.selected_eq_preset.as_ref().map(|id| {
             self.eq_preset(id)
@@ -187,41 +188,11 @@ impl State {
                     changed: true,
                 })
             }
-            Command::EditProfile { id, params } => {
-                // Validate everything before mutating anything.
-                for (name, values) in &params {
-                    validate_write(defs, name, values)?;
-                }
-                let live = self.selected_profile == id;
-                let profile = self
-                    .profile_mut(&id)
-                    .ok_or(ValidationError::UnknownProfile(id.0))?;
-                let overlaid = profile.selected_eq_preset.is_some();
-                // Table order: structural counts precede their group's
-                // commit leaf, so a genb+gebg edit reshapes correctly.
-                let mut batch = Vec::with_capacity(params.len());
-                let mut changed = false;
-                for def in defs {
-                    let Some(values) = params.get(&def.name) else {
-                        continue;
-                    };
-                    if profile.params[&def.name][..values.len()] != values[..] {
-                        profile.splice(&def.name, values);
-                        changed = true;
-                    }
-                    // A selected preset shadows the profile's own EQ
-                    // params entirely — the engine must not hear a
-                    // shadowed write (ADR-0003).
-                    if !(overlaid && def.category.is_preset_carried()) {
-                        batch.push((def.name.clone(), values.clone()));
-                    }
-                }
-                Ok(StateDiff {
-                    power: None,
-                    params: (changed && live && !batch.is_empty()).then_some(batch),
-                    changed,
-                })
-            }
+            Command::EditProfile {
+                id,
+                params,
+                selected_eq_preset,
+            } => self.edit_profile(id, &params, selected_eq_preset, defs),
             Command::ResetProfile { id } => {
                 let live = self.selected_profile == id;
                 let profile = self
@@ -237,38 +208,97 @@ impl State {
                     changed: true,
                 })
             }
-            Command::SetEqPreset { profile_id, id } => self.set_eq_preset(profile_id, id, defs),
             Command::EditEqPreset { id, params } => self.edit_eq_preset(id, &params, defs),
             Command::ResetEqPreset { id } => self.reset_eq_preset(id, defs),
         }
     }
 
-    /// [`Command::SetEqPreset`]: store the selection, flush-iff-live.
-    fn set_eq_preset(
+    /// [`Command::EditProfile`]: merge the param patch, apply the
+    /// tri-state selection patch, flush-iff-live — atomically.
+    #[expect(
+        clippy::option_option,
+        reason = "tri-state: absent ≠ null ≠ id (ADR-0005)"
+    )]
+    fn edit_profile(
         &mut self,
-        profile_id: ProfileId,
-        id: Option<PresetId>,
+        id: ProfileId,
+        params: &HashMap<String, Vec<i16>>,
+        selection: Option<Option<PresetId>>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
-        if let Some(preset_id) = &id
+        // Validate everything before mutating anything — commands are
+        // atomic: reject all or apply all (ADR-0005).
+        for (name, values) in params {
+            validate_write(defs, name, values)?;
+        }
+        if let Some(Some(preset_id)) = &selection
             && self.eq_preset(preset_id).is_none()
         {
             return Err(ValidationError::UnknownEqPreset(preset_id.0.clone()));
         }
-        let live = self.selected_profile == profile_id;
+        let live = self.selected_profile == id;
         let profile = self
-            .profile_mut(&profile_id)
-            .ok_or(ValidationError::UnknownProfile(profile_id.0))?;
-        if profile.selected_eq_preset == id {
+            .profile_mut(&id)
+            .ok_or(ValidationError::UnknownProfile(id.0))?;
+        let selection_changed = selection
+            .as_ref()
+            .is_some_and(|new| profile.selected_eq_preset != *new);
+        let mut params_changed = false;
+        for def in defs {
+            let Some(values) = params.get(&def.name) else {
+                continue;
+            };
+            if profile.params[&def.name][..values.len()] != values[..] {
+                profile.splice(&def.name, values);
+                params_changed = true;
+            }
+        }
+        if let Some(new) = selection {
+            profile.selected_eq_preset = new;
+        }
+        if !params_changed && !selection_changed {
             return Ok(StateDiff::default());
         }
-        profile.selected_eq_preset = id;
+        // Live ⇒ the targeted profile is the selected one.
+        let batch = live.then(|| self.edit_batch(params, selection_changed, defs));
         Ok(StateDiff {
             power: None,
-            // Live ⇒ the targeted profile is the selected one.
-            params: live.then(|| self.eq_batch(defs)),
+            params: batch.filter(|batch| !batch.is_empty()),
             changed: true,
         })
+    }
+
+    /// The engine batch a live [`Command::EditProfile`] flushes, in
+    /// table order (structural counts precede their group's commit
+    /// leaf). A selected preset shadows the profile's own EQ params
+    /// *entirely* — the engine must not hear a shadowed write; and when
+    /// the selection itself moved, the whole effective EQ set lands
+    /// alongside the non-EQ edits, never a half-apply (ADR-0003).
+    fn edit_batch(
+        &self,
+        params: &HashMap<String, Vec<i16>>,
+        selection_changed: bool,
+        defs: &[ParameterDef],
+    ) -> Vec<(String, Vec<i16>)> {
+        let profile = self.selected();
+        let overlay = self.overlay_of(profile);
+        defs.iter()
+            .filter(|def| def.access.is_writable())
+            .filter_map(|def| {
+                if def.category.is_preset_carried() {
+                    if selection_changed {
+                        let source = overlay.map_or(&profile.params, |preset| &preset.params);
+                        return Some((def.name.clone(), source[&def.name].clone()));
+                    }
+                    if overlay.is_some() {
+                        return None;
+                    }
+                }
+                params
+                    .get(&def.name)
+                    .map(|values| (def.name.clone(), values.clone()))
+            })
+            .collect()
     }
 
     /// [`Command::EditEqPreset`]: merge into the global preset; flush
@@ -343,30 +373,27 @@ pub enum Command {
         /// The profile to select.
         id: ProfileId,
     },
-    /// Writes a param map into one profile; flushes to the engine only
-    /// when that profile is selected.
+    /// The one sparse patch verb (ADR-0005): merges a param map into
+    /// one profile and/or patches its EQ preset selection; flushes to
+    /// the engine only when that profile is selected. Atomic — an
+    /// invalid part rejects the whole command.
     EditProfile {
         /// The profile to edit.
         id: ProfileId,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
+        /// Tri-state selection patch: `None` = untouched, `Some(None)`
+        /// = detach (the profile's own EQ params apply — "Off" is
+        /// `None`, not a preset), `Some(Some(id))` = select. EQ
+        /// selection is per-profile — the target is explicit, unlike
+        /// the global [`Command::SetProfile`].
+        selected_eq_preset: Option<Option<PresetId>>,
     },
     /// Drops a profile's own overrides, restoring its baseline (factory
     /// rows in `defaults.toml` stay untouched).
     ResetProfile {
         /// The profile to reset.
         id: ProfileId,
-    },
-    /// Selects one profile's EQ preset overlay — or detaches it.
-    /// Flushes to the engine only when that profile is selected.
-    SetEqPreset {
-        /// The profile whose selection changes (explicit target — EQ
-        /// selection is per-profile, unlike the global
-        /// [`Command::SetProfile`]).
-        profile_id: ProfileId,
-        /// The preset to select; `None` ⇒ the profile's own EQ params
-        /// apply ("Off" is `None`, not a preset).
-        id: Option<PresetId>,
     },
     /// Writes a param map into one EQ preset (preset-carried params only).
     ///
@@ -659,10 +686,13 @@ mod tests {
         PresetId("rich".into())
     }
 
+    /// A selection-only `edit_profile` patch — the tri-state's
+    /// `Some(None)` detaches, `Some(Some(id))` selects.
     fn select_preset(profile_id: &str, id: Option<PresetId>) -> Command {
-        Command::SetEqPreset {
-            profile_id: ProfileId(profile_id.into()),
-            id,
+        Command::EditProfile {
+            id: ProfileId(profile_id.into()),
+            params: HashMap::new(),
+            selected_eq_preset: Some(id),
         }
     }
 
@@ -776,6 +806,7 @@ mod tests {
                 .iter()
                 .map(|&(name, values)| (name.to_string(), values.to_vec()))
                 .collect(),
+            selected_eq_preset: None,
         }
     }
 
@@ -946,12 +977,12 @@ mod tests {
         );
     }
 
-    /// Behavior 2 (issue #23), state half: selecting a preset stores
-    /// the selection on that profile and batches the resolved
+    /// Behavior 1 (issue #57), state half: a `selected_eq_preset` patch
+    /// stores the selection on that profile and batches the resolved
     /// preset-carried set — the preset's params shadow the profile's
     /// own *entirely* (a diverging own `gebg` must not leak through).
     #[test]
-    fn set_eq_preset_selects_and_batches_the_presets_resolved_eq_set() {
+    fn a_selection_patch_selects_and_batches_the_presets_resolved_eq_set() {
         let mut state = State::new_from_defaults(&defaults());
         let _ = state
             .apply(edit("music", &[("gebg", &[5, -5])]), &defs())
@@ -978,10 +1009,10 @@ mod tests {
         );
     }
 
-    /// Behavior 3 (issue #23), state half: `id: None` detaches — the
-    /// batch carries the profile's own EQ params again.
+    /// Behavior 1 (issue #57), state half: a `null` selection patch
+    /// detaches — the batch carries the profile's own EQ params again.
     #[test]
-    fn set_eq_preset_none_detaches_and_batches_the_profiles_own_eq() {
+    fn a_null_selection_patch_detaches_and_batches_the_profiles_own_eq() {
         let mut state = State::new_from_defaults(&defaults());
         let _ = state
             .apply(edit("music", &[("gebg", &[5, -5])]), &defs())
@@ -1007,7 +1038,7 @@ mod tests {
     /// non-selected profile persists without a batch; re-selecting the
     /// current preset is a no-op; unknown ids are rejected unchanged.
     #[test]
-    fn set_eq_preset_flushes_iff_live_and_validates_ids() {
+    fn a_selection_patch_flushes_iff_live_and_validates_ids() {
         let mut state = State::new_from_defaults(&defaults());
         let diff = state
             .apply(select_preset("movie", Some(rich())), &defs())
@@ -1042,6 +1073,116 @@ mod tests {
             Err(ValidationError::UnknownEqPreset("ghost".into())),
         );
         assert_eq!(state, before, "rejected commands must not mutate");
+    }
+
+    /// Behavior 2 (issue #57), state half: a mixed patch (params +
+    /// selection) applies atomically — the selection lands, the params
+    /// merge (shadowed EQ params persist beneath), and one batch
+    /// carries the new effective EQ set alongside the non-EQ edits.
+    #[test]
+    fn a_mixed_patch_applies_atomically_and_batches_the_effective_set() {
+        let mut state = State::new_from_defaults(&defaults());
+        let diff = state
+            .apply(
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: [
+                        ("dvla".to_string(), vec![9_i16]),
+                        ("gebg".to_string(), vec![7_i16]),
+                    ]
+                    .into(),
+                    selected_eq_preset: Some(Some(rich())),
+                },
+                &defs(),
+            )
+            .unwrap();
+        let music = state.selected();
+        assert_eq!(music.selected_eq_preset, Some(rich()));
+        assert_eq!(music.params["dvla"], vec![9]);
+        assert_eq!(
+            music.params["gebg"],
+            vec![7, 0, 0, 0],
+            "the shadowed edit persists beneath the overlay"
+        );
+        assert_eq!(
+            diff.params.unwrap(),
+            vec![
+                ("dvla".to_string(), vec![9_i16]),
+                ("iebt".to_string(), vec![67, 95, -55, -235]),
+                ("ieon".to_string(), vec![1]),
+                ("genb".to_string(), vec![2]),
+                ("gebg".to_string(), vec![0; 4]), // rich's, not the edit's [7]
+            ],
+            "one atomic batch: the preset's EQ set + the non-EQ edit"
+        );
+
+        // Detach + edit in one patch: the batch carries the profile's
+        // own EQ params with the fresh edit already merged.
+        let diff = state
+            .apply(
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: [("gebg".to_string(), vec![5_i16, -5])].into(),
+                    selected_eq_preset: Some(None),
+                },
+                &defs(),
+            )
+            .unwrap();
+        assert_eq!(state.selected().selected_eq_preset, None);
+        assert_eq!(
+            diff.params.unwrap(),
+            vec![
+                ("iebt".to_string(), vec![0_i16; 4]),
+                ("ieon".to_string(), vec![0]),
+                ("genb".to_string(), vec![2]),
+                ("gebg".to_string(), vec![5, -5, 0, 0]),
+            ],
+        );
+    }
+
+    /// Behavior 2 (issue #57), rejection half: an invalid part rejects
+    /// the whole mixed patch — valid params must not land beside an
+    /// unknown preset, nor a valid selection beside a bad param.
+    #[test]
+    fn a_mixed_patch_with_any_invalid_part_rejects_whole() {
+        let mut state = State::new_from_defaults(&defaults());
+        let before = state.clone();
+        let rejected = [
+            (
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: [("dvla".to_string(), vec![9_i16])].into(),
+                    selected_eq_preset: Some(Some(PresetId("ghost".into()))),
+                },
+                ValidationError::UnknownEqPreset("ghost".into()),
+            ),
+            (
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: [("dvla".to_string(), vec![11_i16])].into(),
+                    selected_eq_preset: Some(Some(rich())),
+                },
+                ValidationError::OutOfRange {
+                    name: "dvla".into(),
+                    index: 0,
+                    value: 11,
+                    min: 0,
+                    max: 10,
+                },
+            ),
+            (
+                Command::EditProfile {
+                    id: ProfileId("ghost".into()),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(Some(rich())),
+                },
+                ValidationError::UnknownProfile("ghost".into()),
+            ),
+        ];
+        for (command, expected) in rejected {
+            assert_eq!(state.apply(command, &defs()), Err(expected));
+            assert_eq!(state, before, "a rejected patch must not mutate");
+        }
     }
 
     /// Behavior 4 (issue #23), state half: `edit_eq_preset` merges into

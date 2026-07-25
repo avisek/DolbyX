@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
-import { fixtureVis } from '../test/fixture'
+import { fixtureState, fixtureVis } from '../test/fixture'
 import { WsClient, type StateSnapshot, type VisParams } from './ws'
 
 vi.stubGlobal('WebSocket', MockWebSocket)
@@ -48,12 +48,47 @@ it('stamps a fresh request_id per command and resolves the acked one', async () 
   expect(b?.request_id).toBeTruthy()
   expect(a?.request_id).not.toBe(b?.request_id)
 
-  socket.serverMessage({ type: 'ack', request_id: b?.request_id, ok: true })
+  socket.serverMessage({ type: 'ack', request_id: b?.request_id })
   await second
   expect(firstSettled).toBe(false)
 
-  socket.serverMessage({ type: 'ack', request_id: a?.request_id, ok: true })
+  socket.serverMessage({ type: 'ack', request_id: a?.request_id })
   await first
+})
+
+// Behavior 4 (#57): `get_state` is answered by the `state` event
+// itself echoing the `request_id` — awaitable promise-style — while
+// id-less broadcast snapshots settle nothing.
+it('settles get_state on the request_id-echoing state event', async () => {
+  const socket = MockWebSocket.latest()
+  socket.open()
+  const [reconcile] = socket.sentCommands() // the on-open get_state
+
+  // A broadcast snapshot (no request_id) reconciles but settles nothing.
+  socket.serverMessage({ type: 'state', snapshot: fixtureState() })
+  expect(snapshots).toHaveLength(1)
+
+  let settled = false
+  const request = client.request({ cmd: 'get_state' }).then(() => {
+    settled = true
+  })
+  const sent = socket.sentCommands().at(-1)
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState(),
+    request_id: sent?.request_id,
+  })
+  await request
+  expect(settled).toBe(true)
+  expect(snapshots).toHaveLength(2)
+
+  // The on-open reconcile settles the same way.
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState(),
+    request_id: reconcile?.request_id,
+  })
+  expect(snapshots).toHaveLength(3)
 })
 
 it('rejects a command while the socket is not open', async () => {

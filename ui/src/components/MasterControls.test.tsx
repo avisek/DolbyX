@@ -97,7 +97,6 @@ it('toggling Volume Leveller writes dvle to the active profile', async () => {
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
-    ok: true,
   })
   await waitFor(() => {
     expect(toggle.getAttribute('aria-checked')).toBe('true')

@@ -58,17 +58,20 @@ export type Command =
   | { readonly cmd: 'set_power'; readonly on: boolean }
   | { readonly cmd: 'set_profile'; readonly id: string }
   | {
+      /**
+       * The one sparse patch verb (ADR-0005): params and/or the EQ
+       * preset selection, atomic — an invalid part rejects the whole.
+       */
       readonly cmd: 'edit_profile'
       readonly id: string
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
-      readonly params: Readonly<Record<string, readonly number[]>>
-    }
-  | {
-      readonly cmd: 'set_eq_preset'
-      /** EQ selection is per-profile — the target is explicit. */
-      readonly profile_id: string
-      /** `null` ⇒ the profile's own EQ params apply. */
-      readonly id: string | null
+      readonly params?: Readonly<Record<string, readonly number[]>>
+      /**
+       * Tri-state selection patch: absent = untouched, `null` = detach
+       * (the profile's own EQ params apply), id = select. EQ selection
+       * is per-profile — the target is explicit.
+       */
+      readonly selected_eq_preset?: string | null
     }
   | {
       readonly cmd: 'edit_eq_preset'
@@ -79,9 +82,17 @@ export type Command =
 
 /** A daemon → client event frame. */
 export type ServerEvent =
-  | { readonly type: 'state'; readonly snapshot: StateSnapshot }
+  | {
+      readonly type: 'state'
+      readonly snapshot: StateSnapshot
+      /**
+       * Present exactly when the snapshot answers a `get_state` — the
+       * total reply law (ADR-0005); broadcasts are id-less.
+       */
+      readonly request_id?: string
+    }
   | { readonly type: 'vis'; readonly params: VisParams }
-  | { readonly type: 'ack'; readonly request_id: string; readonly ok: true }
+  | { readonly type: 'ack'; readonly request_id: string }
   | {
       readonly type: 'error'
       /** `null` when the frame was too malformed to carry one. */
@@ -100,7 +111,7 @@ export interface WsClientHandlers {
   onConnected(connected: boolean): void
 }
 
-/** One command awaiting its `ack`/`error`. */
+/** One command awaiting its reply (`ack` | `error` | `state`). */
 interface Pending {
   readonly cmd: Command['cmd']
   readonly resolve: () => void
@@ -113,7 +124,8 @@ const RECONNECT_MAX_MS = 5000
 
 /**
  * The daemon WS client: one socket per UI tab, every command settled
- * promise-style by the `ack`/`error` echoing its `request_id`.
+ * promise-style by the one reply echoing its `request_id` — `ack`,
+ * `error`, or, for `get_state`, the `state` event itself (ADR-0005).
  * Auto-reconnects with backoff after a drop or daemon restart; every
  * open (first and re-) issues a `get_state` reconcile.
  */
@@ -171,8 +183,9 @@ export class WsClient {
 
   /**
    * Sends one command with a fresh `request_id`; the returned promise
-   * settles on the daemon's matching `ack` (resolve) or `error`
-   * (reject). Rejects immediately while the socket is not open.
+   * settles on the daemon's matching reply — `ack` or an id-echoing
+   * `state` (resolve), `error` (reject). Rejects immediately while
+   * the socket is not open.
    */
   request(command: Command): Promise<void> {
     if (this.#socket.readyState !== WebSocket.OPEN) {
@@ -200,6 +213,10 @@ export class WsClient {
     switch (parsed.type) {
       case 'state':
         this.#handlers.onSnapshot(parsed.snapshot)
+        // The state event itself answers get_state (ADR-0005).
+        if (parsed.request_id !== undefined) {
+          this.#settle(parsed.request_id)?.resolve()
+        }
         break
       case 'vis':
         this.#handlers.onVis(parsed.params)

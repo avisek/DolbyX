@@ -1,7 +1,8 @@
-//! Slice 15 behaviors (issue #23): factory EQ presets apply as
-//! overlays — selection, detach, global edits, reset, per-profile
-//! persistence, all over the wire. Stub backend (mock policy) —
-//! behavior 8 replays the flow in `e2e_qemu.rs`.
+//! Slice 15 behaviors (issue #23) on the Slice 18a content grammar
+//! (issue #57): factory EQ presets apply as overlays — selection is an
+//! `edit_profile` tri-state `selected_eq_preset` patch (ADR-0005) —
+//! detach, global edits, reset, per-profile persistence, all over the
+//! wire. Stub backend (mock policy) — `e2e_qemu.rs` replays the flow.
 
 mod common;
 
@@ -76,13 +77,13 @@ async fn the_snapshot_carries_the_three_complete_factory_eq_presets() {
     }
 }
 
-/// The slice's tracer bullet / behavior 2 (issue #23): WS
-/// `set_eq_preset { profile_id: "music", id: "rich" }` → the stub
-/// records **one** `set_params` carrying the resolved nine EQ params —
-/// Rich's curve with `ieon = 1` among them; the selection lands on the
-/// profile and reaches the other client via broadcast.
+/// Behavior 1 (issue #57) / behavior 2 (issue #23): a WS
+/// `edit_profile { id: "music", selected_eq_preset: "rich" }` patch →
+/// the stub records **one** `set_params` carrying the resolved nine EQ
+/// params — Rich's curve with `ieon = 1` among them; the selection
+/// lands on the profile and reaches the other client via broadcast.
 #[tokio::test]
-async fn tracer_bullet_set_eq_preset_pushes_the_resolved_nine_in_one_batch() {
+async fn tracer_bullet_a_selection_patch_pushes_the_resolved_nine_in_one_batch() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -94,7 +95,7 @@ async fn tracer_bullet_set_eq_preset_pushes_the_resolved_nine_in_one_batch() {
 
     send_json(
         &mut originator,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r1", "profile_id": "music", "id": "rich" }),
+        &json!({ "cmd": "edit_profile", "request_id": "r1", "id": "music", "selected_eq_preset": "rich" }),
     )
     .await;
     let ack = recv_json(&mut originator).await;
@@ -127,10 +128,11 @@ async fn tracer_bullet_set_eq_preset_pushes_the_resolved_nine_in_one_batch() {
     );
 }
 
-/// Behavior 3 (issue #23): `set_eq_preset { …, id: null }` detaches —
-/// one `set_params` with the profile's own EQ params again.
+/// Behavior 1 (issue #57) / behavior 3 (issue #23): a `null`
+/// `selected_eq_preset` patch detaches — one `set_params` with the
+/// profile's own EQ params again.
 #[tokio::test]
-async fn set_eq_preset_null_detaches_to_the_profiles_own_eq() {
+async fn a_null_selection_patch_detaches_to_the_profiles_own_eq() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -148,14 +150,14 @@ async fn set_eq_preset_null_detaches_to_the_profiles_own_eq() {
     assert_eq!(recv_json(&mut ws).await["type"], "ack");
     send_json(
         &mut ws,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r2", "profile_id": "music", "id": "rich" }),
+        &json!({ "cmd": "edit_profile", "request_id": "r2", "id": "music", "selected_eq_preset": "rich" }),
     )
     .await;
     assert_eq!(recv_json(&mut ws).await["type"], "ack");
 
     send_json(
         &mut ws,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r3", "profile_id": "music", "id": null }),
+        &json!({ "cmd": "edit_profile", "request_id": "r3", "id": "music", "selected_eq_preset": null }),
     )
     .await;
     assert_eq!(recv_json(&mut ws).await["type"], "ack");
@@ -192,7 +194,7 @@ async fn edit_eq_preset_flushes_for_the_active_profile_and_is_global() {
     for (request_id, profile_id) in [("r1", "movie"), ("r2", "music")] {
         send_json(
             &mut ws,
-            &json!({ "cmd": "set_eq_preset", "request_id": request_id, "profile_id": profile_id, "id": "rich" }),
+            &json!({ "cmd": "edit_profile", "request_id": request_id, "id": profile_id, "selected_eq_preset": "rich" }),
         )
         .await;
         assert_eq!(recv_json(&mut ws).await["type"], "ack");
@@ -233,10 +235,10 @@ async fn edit_eq_preset_flushes_for_the_active_profile_and_is_global() {
     }
 }
 
-/// Behavior 5 (issue #23): `set_eq_preset` targeting a non-selected
+/// Behavior 5 (issue #23): a selection patch targeting a non-selected
 /// profile persists (flush + broadcast) without an engine call.
 #[tokio::test]
-async fn set_eq_preset_on_a_non_selected_profile_skips_the_engine() {
+async fn a_selection_patch_on_a_non_selected_profile_skips_the_engine() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -247,7 +249,7 @@ async fn set_eq_preset_on_a_non_selected_profile_skips_the_engine() {
 
     send_json(
         &mut ws,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r1", "profile_id": "game", "id": "focused" }),
+        &json!({ "cmd": "edit_profile", "request_id": "r1", "id": "game", "selected_eq_preset": "focused" }),
     )
     .await;
     assert_eq!(recv_json(&mut ws).await["type"], "ack");
@@ -279,7 +281,7 @@ async fn selection_and_preset_edits_survive_a_restart() {
     ] {
         send_json(
             &mut ws,
-            &json!({ "cmd": "set_eq_preset", "request_id": request_id, "profile_id": profile_id, "id": id }),
+            &json!({ "cmd": "edit_profile", "request_id": request_id, "id": profile_id, "selected_eq_preset": id }),
         )
         .await;
         assert_eq!(recv_json(&mut ws).await["type"], "ack");
@@ -360,7 +362,9 @@ async fn reset_eq_preset_clears_overrides_and_broadcasts() {
 }
 
 /// Validation on the wire (epic validation section): unknown ids and
-/// non-preset-carried params are `INVALID_REQUEST`, engine untouched.
+/// non-preset-carried params are `INVALID_REQUEST`, engine untouched —
+/// and the folded `set_eq_preset` cmd is gone from the wire (behavior
+/// 1, issue #57): the old frame is an unknown cmd.
 #[tokio::test]
 async fn eq_preset_validation_failures_are_invalid_request() {
     let daemon = start_daemon().await;
@@ -368,11 +372,11 @@ async fn eq_preset_validation_failures_are_invalid_request() {
 
     for (request, needle) in [
         (
-            json!({ "cmd": "set_eq_preset", "request_id": "r1", "profile_id": "music", "id": "ghost" }),
+            json!({ "cmd": "edit_profile", "request_id": "r1", "id": "music", "selected_eq_preset": "ghost" }),
             "unknown EQ preset",
         ),
         (
-            json!({ "cmd": "set_eq_preset", "request_id": "r2", "profile_id": "ghost", "id": "rich" }),
+            json!({ "cmd": "edit_profile", "request_id": "r2", "id": "ghost", "selected_eq_preset": "rich" }),
             "unknown profile",
         ),
         (
@@ -387,6 +391,10 @@ async fn eq_preset_validation_failures_are_invalid_request() {
             json!({ "cmd": "reset_eq_preset", "request_id": "r5", "id": "ghost" }),
             "unknown EQ preset",
         ),
+        (
+            json!({ "cmd": "set_eq_preset", "request_id": "r6", "profile_id": "music", "id": "rich" }),
+            "unknown variant `set_eq_preset`",
+        ),
     ] {
         send_json(&mut ws, &request).await;
         let error = recv_json(&mut ws).await;
@@ -398,4 +406,67 @@ async fn eq_preset_validation_failures_are_invalid_request() {
         );
     }
     assert!(daemon.stub.calls().is_empty());
+}
+
+/// Behavior 2 (issue #57): a mixed `edit_profile` patch — params +
+/// selection — applies atomically: one engine batch carries the new
+/// effective EQ set alongside the non-EQ edit; an invalid part rejects
+/// the whole command, nothing lands.
+#[tokio::test]
+async fn a_mixed_patch_applies_atomically_and_rejects_whole() {
+    let daemon = start_daemon().await;
+    daemon
+        .handle
+        .supervisor()
+        .create_session(48000)
+        .expect("session");
+    let mut ws = connected(daemon.addr()).await;
+
+    send_json(
+        &mut ws,
+        &json!({
+            "cmd": "edit_profile",
+            "request_id": "r1",
+            "id": "music",
+            "params": { "dvla": [9] },
+            "selected_eq_preset": "rich",
+        }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+
+    let batches = set_params_batches(&daemon.stub);
+    assert_eq!(batches.len(), 2, "init + one atomic mixed batch");
+    let batch = by_name(&batches[1]);
+    assert_eq!(batch.len(), 10, "the nine EQ params + the non-EQ edit");
+    assert_eq!(batch["dvla"], [9], "the non-EQ edit rides along");
+    assert_eq!(batch["iebt"][..20], RICH_IEBT, "Rich's curve");
+    assert_eq!(batch["ieon"], [1]);
+
+    // An invalid selection rejects the valid param half too.
+    let calls_before = daemon.stub.calls().len();
+    send_json(
+        &mut ws,
+        &json!({
+            "cmd": "edit_profile",
+            "request_id": "r2",
+            "id": "music",
+            "params": { "dvla": [3] },
+            "selected_eq_preset": "ghost",
+        }),
+    )
+    .await;
+    let error = recv_json(&mut ws).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["code"], "INVALID_REQUEST");
+    assert_eq!(daemon.stub.calls().len(), calls_before, "engine untouched");
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r3" })).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    assert_eq!(
+        snapshot["profiles"][1]["params"]["dvla"],
+        json!([9]),
+        "the rejected patch left the earlier value"
+    );
+    assert_eq!(snapshot["profiles"][1]["selected_eq_preset"], "rich");
 }
