@@ -55,12 +55,8 @@ async fn add_profile_with_musics_content_mints_an_id_and_sounds_identical() {
     )
     .await;
     let minted = minted.as_str().expect("add_profile ack carries the id");
-    assert!(
-        minted.starts_with("user_")
-            && minted.len() == 9
-            && minted[5..].chars().all(|c| c.is_ascii_hexdigit()),
-        "server-minted `user_<hash>`, got {minted:?}"
-    );
+    // Opaque beyond the prefix (epic) — the format is unpinned.
+    assert!(minted.starts_with("user_"), "got {minted:?}");
     assert_eq!(
         set_params_batches(&daemon.stub).len(),
         1,
@@ -94,7 +90,9 @@ async fn add_profile_with_musics_content_mints_an_id_and_sounds_identical() {
 
 /// Behavior 2 (issue #26 A), partial half: unstated `add_profile`
 /// params resolve from the **custom baseline** (`ParameterDef.default`
-/// ⊕ shared layers) — not from any factory profile's own values.
+/// ⊕ shared layers) — not from any factory profile's own values — and
+/// a `null` birth selection reads as None (issue: absent or `null` ⇒
+/// None).
 #[tokio::test]
 async fn add_profile_partial_params_resolve_from_the_custom_baseline() {
     let daemon = start_daemon().await;
@@ -102,13 +100,18 @@ async fn add_profile_partial_params_resolve_from_the_custom_baseline() {
 
     let minted = ack_of(
         &mut ws,
-        &json!({ "cmd": "add_profile", "request_id": "r1", "name": "Bass", "params": { "dvla": [9] } }),
+        &json!({ "cmd": "add_profile", "request_id": "r1", "name": "Bass", "params": { "dvla": [9] }, "selected_eq_preset": null }),
     )
     .await;
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r2" })).await;
     let snapshot = recv_json(&mut ws).await["snapshot"].take();
     let custom = &snapshot["profiles"][4];
     assert_eq!(custom["id"], minted);
+    assert_eq!(
+        custom["selected_eq_preset"],
+        serde_json::Value::Null,
+        "an explicit `null` birth selection is None"
+    );
     assert_eq!(custom["params"]["dvla"], json!([9]), "the stated param");
     assert_eq!(
         custom["params"]["genb"],
@@ -345,7 +348,7 @@ async fn removing_the_selected_profile_falls_back_to_defaults_selection() {
 /// The selected profile among them, flush-iff-live pushes its **own**
 /// EQ.
 #[tokio::test]
-async fn removing_a_selected_preset_falls_every_selector_to_none() {
+async fn removing_a_selected_eq_preset_falls_every_selector_to_none() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -385,7 +388,7 @@ async fn removing_a_selected_preset_falls_every_selector_to_none() {
     assert_eq!(
         snapshot["eq_presets"].as_array().expect("array").len(),
         3,
-        "the custom preset is gone"
+        "the custom EQ preset is gone"
     );
     for index in [0, 1] {
         assert_eq!(
@@ -471,9 +474,9 @@ async fn factory_and_unknown_deletes_are_invalid_request() {
 }
 
 /// The slice's tracer bullet + behaviors 1 & 7 (issue #26 A): add a
-/// custom profile with Music's content, rename it, add a custom preset
-/// and select it, add-and-remove a second profile — restart — the
-/// customs survive in `config.toml` rows (`[profile.user_<hash>]`, id
+/// custom profile with Music's content, rename it, add a custom EQ
+/// preset and select it, add-and-remove a second profile — restart —
+/// the customs survive in `config.toml` rows (`[profile.user_<hash>]`, id
 /// as the table key, `name` in the row), the removed one stays gone,
 /// and `is_factory` is derived from `defaults.toml` presence — nothing
 /// stored on disk.

@@ -1628,7 +1628,8 @@ mod tests {
 
         let diff = state.apply(add(), &defs()).unwrap();
         let id = diff.minted.clone().expect("an add mints an id");
-        assert!(id.starts_with("user_") && id.len() == 9, "got {id:?}");
+        // Opaque beyond the prefix (epic) — the format is unpinned.
+        assert!(id.starts_with("user_"), "got {id:?}");
         assert!(!diff.is_empty());
         assert_eq!(diff.params, None, "an add never touches the engine");
 
@@ -1797,7 +1798,7 @@ mod tests {
     }
 
     /// Adds a bare custom EQ preset, returning the minted id.
-    fn add_preset(state: &mut State, name: &str) -> PresetId {
+    fn add_eq_preset(state: &mut State, name: &str) -> PresetId {
         state
             .apply(
                 Command::AddEqPreset {
@@ -1812,14 +1813,14 @@ mod tests {
             .unwrap()
     }
 
-    /// Behavior 5 (issue #26 A), state half: deleting a custom preset
-    /// falls every selector to a resolved `None` — never re-inherited,
-    /// so a selection beneath can't surface (ADR-0003) — and flushes
-    /// iff the selected profile selected it.
+    /// Behavior 5 (issue #26 A), state half: deleting a custom EQ
+    /// preset falls every selector to a resolved `None` — never
+    /// re-inherited, so a selection beneath can't surface (ADR-0003) —
+    /// and flushes iff the selected profile selected it.
     #[test]
-    fn removing_a_preset_falls_every_selector_to_none() {
+    fn removing_an_eq_preset_falls_every_selector_to_none() {
         let mut state = State::new_from_defaults(&defaults());
-        let preset_id = add_preset(&mut state, "Doomed");
+        let preset_id = add_eq_preset(&mut state, "Doomed");
         let _ = state
             .apply(select_preset("movie", Some(preset_id.clone())), &defs())
             .unwrap();
@@ -1853,8 +1854,8 @@ mod tests {
             "music's own"
         );
 
-        // No selectors ⇒ no pins, engine silent.
-        let idle = add_preset(&mut state, "Idle");
+        // No selectors ⇒ nothing falls, engine silent.
+        let idle = add_eq_preset(&mut state, "Idle");
         let diff = state
             .apply(Command::RemoveEqPreset { id: idle }, &defs())
             .unwrap();
