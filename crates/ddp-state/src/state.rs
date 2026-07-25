@@ -416,7 +416,9 @@ impl State {
             return Err(ValidationError::UnknownEqPreset(preset_id.0.clone()));
         }
         let id = mint_id(&name, |candidate| {
-            self.profiles.iter().any(|profile| profile.id.0 == candidate)
+            self.profiles
+                .iter()
+                .any(|profile| profile.id.0 == candidate)
         });
         let mut resolved = self.custom_profile_baseline.clone();
         for (param, values) in params {
@@ -454,7 +456,9 @@ impl State {
             validate_eq_preset_write(defs, param, values)?;
         }
         let id = mint_id(&name, |candidate| {
-            self.eq_presets.iter().any(|preset| preset.id.0 == candidate)
+            self.eq_presets
+                .iter()
+                .any(|preset| preset.id.0 == candidate)
         });
         let mut resolved = self.custom_eq_preset_baseline.clone();
         for (param, values) in params {
@@ -1350,7 +1354,10 @@ mod tests {
         );
         assert_eq!(diff.params, None, "…without flushing the unchanged EQ set");
         let diff = state.apply(select_preset("music", None), &defs()).unwrap();
-        assert!(diff.is_empty(), "re-detaching an explicitly detached profile");
+        assert!(
+            diff.is_empty(),
+            "re-detaching an explicitly detached profile"
+        );
 
         let before = state.clone();
         assert_eq!(
@@ -1793,9 +1800,7 @@ mod tests {
                 &defs(),
             )
             .unwrap();
-        let paired = state
-            .profile(&ProfileId(diff.minted.unwrap()))
-            .unwrap();
+        let paired = state.profile(&ProfileId(diff.minted.unwrap())).unwrap();
         assert_eq!(
             paired.selection_override,
             Some(Some(PresetId(id))),
@@ -1803,19 +1808,12 @@ mod tests {
         );
     }
 
-    /// Behaviors 4–6 (issue #26 A), state half: factory deletes
-    /// reject; deleting a custom preset pins every selector to the
-    /// **explicit** override `Some(None)` (never inherit — the pin is
-    /// what keeps a future baseline selection from surfacing) and
-    /// flushes iff the selected profile selected it; deleting the
-    /// selected profile falls back to `fallback_profile`.
-    #[test]
-    fn removes_pin_explicit_none_and_fall_back_the_selection() {
-        let mut state = State::new_from_defaults(&defaults());
-        let preset_id = state
+    /// Adds a bare custom EQ preset, returning the minted id.
+    fn add_preset(state: &mut State, name: &str) -> PresetId {
+        state
             .apply(
                 Command::AddEqPreset {
-                    name: "Doomed".into(),
+                    name: name.into(),
                     params: HashMap::new(),
                 },
                 &defs(),
@@ -1823,7 +1821,18 @@ mod tests {
             .unwrap()
             .minted
             .map(PresetId)
-            .unwrap();
+            .unwrap()
+    }
+
+    /// Behavior 5 (issue #26 A), state half: deleting a custom preset
+    /// pins every selector to the **explicit** override `Some(None)`
+    /// (never inherit — the pin is what keeps a future baseline
+    /// selection from surfacing) and flushes iff the selected profile
+    /// selected it.
+    #[test]
+    fn removing_a_preset_pins_every_selector_to_explicit_none() {
+        let mut state = State::new_from_defaults(&defaults());
+        let preset_id = add_preset(&mut state, "Doomed");
         let _ = state
             .apply(select_preset("movie", Some(preset_id.clone())), &defs())
             .unwrap();
@@ -1852,28 +1861,26 @@ mod tests {
         }
         let batch = diff.params.expect("music selected it — the delete flushes");
         assert_eq!(batch.len(), 4, "the fixture's preset-carried set");
-        assert!(batch.contains(&("ieon".to_string(), vec![0])), "music's own");
+        assert!(
+            batch.contains(&("ieon".to_string(), vec![0])),
+            "music's own"
+        );
 
         // No selectors ⇒ no pins, engine silent.
-        let idle = state
-            .apply(
-                Command::AddEqPreset {
-                    name: "Idle".into(),
-                    params: HashMap::new(),
-                },
-                &defs(),
-            )
-            .unwrap()
-            .minted
-            .map(PresetId)
-            .unwrap();
+        let idle = add_preset(&mut state, "Idle");
         let diff = state
             .apply(Command::RemoveEqPreset { id: idle }, &defs())
             .unwrap();
         assert!(!diff.is_empty());
         assert_eq!(diff.params, None);
+    }
 
-        // Deleting the selected profile falls back; factory deletes reject.
+    /// Behaviors 4 + 6 (issue #26 A), state half: deleting the
+    /// selected profile falls the selection back to `fallback_profile`
+    /// with its resolved set; factory deletes reject.
+    #[test]
+    fn removing_the_selected_profile_falls_back_and_factories_reject() {
+        let mut state = State::new_from_defaults(&defaults());
         let profile_id = state
             .apply(
                 Command::AddProfile {

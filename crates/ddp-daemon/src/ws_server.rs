@@ -95,6 +95,10 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
 /// Handles one command frame; returns the reply frames for the
 /// originator, in order. Mutations broadcast the resulting `state` to
 /// every *other* connection before the originator's ack is queued.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a flat match, one arm per wire command — length tracks the vocabulary"
+)]
 async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
     let command = match serde_json::from_str::<WsCommand>(text) {
         Ok(command) => command,

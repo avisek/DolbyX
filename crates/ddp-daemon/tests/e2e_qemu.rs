@@ -494,7 +494,11 @@ async fn custom_profile_crud_replays_on_the_real_engine() {
         .supervisor()
         .get_params(session, &["dvla"])
         .expect("get_params");
-    assert_eq!(values[0], [9], "the custom's set survived into a fresh init");
+    assert_eq!(
+        values[0],
+        [9],
+        "the custom's set survived into a fresh init"
+    );
 
     // Delete the selected custom: the registry falls back to Music.
     send_json(

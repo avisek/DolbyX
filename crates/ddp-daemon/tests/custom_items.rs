@@ -8,7 +8,7 @@ mod common;
 
 use common::{
     assert_config_becomes, connected, recv_json, send_json, set_params_batches, start_daemon,
-    start_over, try_recv_json, ws_connect,
+    start_over, ws_connect,
 };
 use serde_json::json;
 
@@ -86,7 +86,10 @@ async fn add_profile_with_musics_content_mints_an_id_and_sounds_identical() {
     .await;
     let batches = set_params_batches(&daemon.stub);
     assert_eq!(batches.len(), 2, "init + the switch");
-    assert_eq!(batches[1], batches[0], "the clone is Music, value for value");
+    assert_eq!(
+        batches[1], batches[0],
+        "the clone is Music, value for value"
+    );
 }
 
 /// Behavior 2 (issue #26 A), partial half: unstated `add_profile`
@@ -113,11 +116,13 @@ async fn add_profile_partial_params_resolve_from_the_custom_baseline() {
         "the defaults [profile] shared layer applies"
     );
     assert_eq!(
-        custom["params"]["deon"], json!([0]),
+        custom["params"]["deon"],
+        json!([0]),
         "ParameterDef.default — not Music's deon = 1"
     );
     assert_eq!(
-        custom["params"]["dvle"], json!([1]),
+        custom["params"]["dvle"],
+        json!([1]),
         "ParameterDef.default — not Music's dvle = 0"
     );
 }
@@ -160,7 +165,8 @@ async fn add_eq_preset_mints_an_id_and_is_selectable() {
         "the [eq_preset] shared band structure applies"
     );
     assert_eq!(
-        preset["params"]["iea"], json!([10]),
+        preset["params"]["iea"],
+        json!([10]),
         "ParameterDef.default — no factory preset row leaks in"
     );
 
@@ -397,7 +403,11 @@ async fn removing_a_selected_preset_pins_explicit_none_on_every_selector() {
         .collect();
     assert_eq!(batch.len(), 9, "the resolved EQ set");
     assert_eq!(batch["gebg"][..2], [16, -16], "music's own GEQ");
-    assert_eq!(batch["ieon"], [0], "music's own IEQ enable — not the preset's");
+    assert_eq!(
+        batch["ieon"],
+        [0],
+        "music's own IEQ enable — not the preset's"
+    );
 
     // Behavior 5's disk face: the explicit pin persists as the
     // reserved "none" sentinel on every selector's row.
@@ -519,7 +529,10 @@ async fn tracer_bullet_add_rename_restart_survives() {
         "factory-ness must not be stored: {config}"
     );
     let profile_key = format!("[profile.{}]", profile_id.as_str().unwrap());
-    assert!(config.contains(&profile_key), "id is the table key: {config}");
+    assert!(
+        config.contains(&profile_key),
+        "id is the table key: {config}"
+    );
     assert!(
         config.contains("name = \"Late Night\""),
         "the rename landed in the row: {config}"

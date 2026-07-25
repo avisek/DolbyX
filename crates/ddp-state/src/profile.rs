@@ -33,10 +33,6 @@ pub struct Profile {
     /// sentinel on disk, JSON `null` on the wire), `Some(Some(id))` =
     /// select. Deletion fallback pins `Some(None)` so a delete can
     /// never activate the selection beneath (ADR-0003).
-    #[expect(
-        clippy::option_option,
-        reason = "persisted tri-state: unstated ≠ explicit none ≠ id (ADR-0007)"
-    )]
     pub selection_override: Option<Option<PresetId>>,
     /// Whether the id appears in `defaults.toml` — derived at load,
     /// never stored; factory items reset instead of delete/rename.

@@ -60,6 +60,10 @@ pub(crate) struct ItemTable {
     /// `Some(None)` (explicit no-preset), an id = `Some(Some(id))`.
     /// Only meaningful on `config.toml` profile items; rejected
     /// everywhere else.
+    #[expect(
+        clippy::option_option,
+        reason = "persisted tri-state: key absent ≠ \"none\" ≠ id (ADR-0007)"
+    )]
     pub(crate) selected_eq_preset: Option<Option<PresetId>>,
     pub(crate) params: IndexMap<String, ParamValue>,
 }
@@ -332,8 +336,7 @@ pub fn parse_config(
         reject_selection(id, item).map_err(Error::Config)?;
     }
     // A selection may name a factory preset or any custom row above.
-    let known_preset =
-        |id: &PresetId| factory_preset(&id.0) || eq_preset.items.contains_key(&id.0);
+    let known_preset = |id: &PresetId| factory_preset(&id.0) || eq_preset.items.contains_key(&id.0);
     for (id, item) in &profile.items {
         validate_row_name("profile", id, item, factory_profile(id)).map_err(Error::Config)?;
         if let Some(Some(preset)) = &item.selected_eq_preset
@@ -445,7 +448,10 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
         overlay_params(&mut params, &item.params);
         state.profiles.push(Profile {
             id: ProfileId(id.clone()),
-            name: item.name.clone().expect("parse_config requires custom names"),
+            name: item
+                .name
+                .clone()
+                .expect("parse_config requires custom names"),
             selection_override: item.selected_eq_preset.clone(),
             is_factory: false,
             params,
@@ -460,7 +466,10 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
         overlay_params(&mut params, &item.params);
         state.eq_presets.push(EqPreset {
             id: PresetId(id.clone()),
-            name: item.name.clone().expect("parse_config requires custom names"),
+            name: item
+                .name
+                .clone()
+                .expect("parse_config requires custom names"),
             is_factory: false,
             params,
             baseline: state.custom_eq_preset_baseline.clone(),
@@ -506,7 +515,9 @@ pub fn serialize_overlay(
             emit_value(&mut item, "name", &toml_string(&profile.name));
         }
         if let Some(selection) = &profile.selection_override {
-            let stated = selection.as_ref().map_or("none", |preset| preset.0.as_str());
+            let stated = selection
+                .as_ref()
+                .map_or("none", |preset| preset.0.as_str());
             emit_value(&mut item, "selected_eq_preset", &toml_string(stated));
         }
         emit_param_divergences(&mut item, &profile.params, &profile.baseline, defs);
