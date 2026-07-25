@@ -51,9 +51,13 @@ function selectingState(
   }
 }
 
-/** The `set_eq_preset` frames the client sent. */
+/** The selection-patch `edit_profile` frames the client sent. */
 function sentSelections(socket: MockWebSocket) {
-  return socket.sentCommands().filter((frame) => frame.cmd === 'set_eq_preset')
+  return socket
+    .sentCommands()
+    .filter(
+      (frame) => frame.cmd === 'edit_profile' && 'selected_eq_preset' in frame,
+    )
 }
 
 // Behaviors 1 + 7 (#23), client half: the picker renders the None
@@ -76,20 +80,21 @@ it('renders None + the factory presets with None selected', () => {
   ])
 })
 
-// Behavior 2 (#23), client half: picking Rich targets the active
-// profile explicitly (EQ selection is per-profile) and applies
-// local-first on the daemon's ack.
-it('picking Rich sends set_eq_preset for the active profile', async () => {
+// Behavior 1 (#57) / behavior 2 (#23), client half: picking Rich sends
+// the tri-state `edit_profile` patch targeting the active profile
+// explicitly (EQ selection is per-profile) and applies local-first on
+// the daemon's ack.
+it('picking Rich sends an edit_profile selection patch', async () => {
   const socket = renderConnected()
 
   option('Rich').click()
   const sent = sentSelections(socket)
   expect(sent).toEqual([
     {
-      cmd: 'set_eq_preset',
+      cmd: 'edit_profile',
       request_id: expect.any(String) as string,
-      profile_id: 'music',
-      id: 'rich',
+      id: 'music',
+      selected_eq_preset: 'rich',
     },
   ])
 
@@ -98,7 +103,6 @@ it('picking Rich sends set_eq_preset for the active profile', async () => {
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
-    ok: true,
   })
   await waitFor(() => {
     expect(option('Rich').getAttribute('aria-checked')).toBe('true')
@@ -106,9 +110,10 @@ it('picking Rich sends set_eq_preset for the active profile', async () => {
   })
 })
 
-// Behavior 3 (#23), client half: the None affordance detaches with
-// `id: null` — "Off" is null, not a preset.
-it('picking None detaches with id null', () => {
+// Behavior 1 (#57) / behavior 3 (#23), client half: the None
+// affordance detaches with `selected_eq_preset: null` — "Off" is
+// null, not a preset (absent would mean untouched).
+it('picking None detaches with a null selection patch', () => {
   applySnapshot(selectingState('music', 'rich'))
   const socket = renderConnected()
   expect(option('Rich').getAttribute('aria-checked')).toBe('true')
@@ -116,10 +121,10 @@ it('picking None detaches with id null', () => {
   option('None').click()
   expect(sentSelections(socket)).toEqual([
     {
-      cmd: 'set_eq_preset',
+      cmd: 'edit_profile',
       request_id: expect.any(String) as string,
-      profile_id: 'music',
-      id: null,
+      id: 'music',
+      selected_eq_preset: null,
     },
   ])
 })

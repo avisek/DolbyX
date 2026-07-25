@@ -324,12 +324,13 @@ async fn master_control_edits_land_in_the_live_registry() {
     }
 }
 
-/// Behavior 8 (issue #23): the EQ preset overlay against the real
-/// engine — after WS `set_eq_preset { music, rich }`, the live clamped
-/// registry holds Rich's `iebt` curve with `ieon = 1`; a `null` detach
-/// restores the profile's own (`ieon = 0`, flat targets).
+/// Behavior 8 (issue #23) on the 18a grammar (behavior 5, issue #57):
+/// the EQ preset overlay against the real engine — after a WS
+/// `edit_profile { music, selected_eq_preset: rich }` patch, the live
+/// clamped registry holds Rich's `iebt` curve with `ieon = 1`; a
+/// `null` patch restores the profile's own (`ieon = 0`, flat targets).
 #[tokio::test]
-async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
+async fn a_selection_patch_lands_richs_curve_on_the_real_engine() {
     let daemon = start_qemu_daemon().await;
     let session = daemon
         .handle
@@ -340,7 +341,7 @@ async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
     let mut ws = connected(daemon.handle.addr()).await;
     send_json(
         &mut ws,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r1", "profile_id": "music", "id": "rich" }),
+        &json!({ "cmd": "edit_profile", "request_id": "r1", "id": "music", "selected_eq_preset": "rich" }),
     )
     .await;
     assert_eq!(recv_json(&mut ws).await["type"], "ack");
@@ -360,7 +361,7 @@ async fn set_eq_preset_lands_richs_curve_on_the_real_engine() {
     // Detach: the profile's own EQ params land again.
     send_json(
         &mut ws,
-        &json!({ "cmd": "set_eq_preset", "request_id": "r2", "profile_id": "music", "id": null }),
+        &json!({ "cmd": "edit_profile", "request_id": "r2", "id": "music", "selected_eq_preset": null }),
     )
     .await;
     assert_eq!(recv_json(&mut ws).await["type"], "ack");

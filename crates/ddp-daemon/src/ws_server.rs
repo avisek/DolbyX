@@ -55,7 +55,10 @@ pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<A
 async fn connection(mut socket: WebSocket, app: Arc<App>) {
     let conn_id = app.fresh_conn_id();
     let mut updates = app.updates.subscribe();
-    if send(&mut socket, &state_event(&app).await).await.is_err() {
+    if send(&mut socket, &state_event(&app, None).await)
+        .await
+        .is_err()
+    {
         return;
     }
     loop {
@@ -77,7 +80,7 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
                     Ok((_, text)) => text,
                     // Lagged: resync with a fresh snapshot.
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        state_event(&app).await.into()
+                        state_event(&app, None).await.into()
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
                 };
@@ -107,8 +110,10 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         }
     };
     match command {
+        // The `state` event itself is the reply, echoing the id — the
+        // total reply law (ADR-0005): one reply per command, no ack.
         WsCommand::GetState { request_id } => {
-            vec![state_event(app).await, ack(&request_id).to_text()]
+            vec![state_event(app, Some(&request_id)).await]
         }
         WsCommand::SetPower { request_id, on } => {
             mutate(app, conn_id, &request_id, Command::SetPower { on }).await
@@ -120,30 +125,22 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             request_id,
             id,
             params,
+            selected_eq_preset,
         } => {
             mutate(
                 app,
                 conn_id,
                 &request_id,
-                Command::EditProfile { id, params },
+                Command::EditProfile {
+                    id,
+                    params,
+                    selected_eq_preset,
+                },
             )
             .await
         }
         WsCommand::ResetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::ResetProfile { id }).await
-        }
-        WsCommand::SetEqPreset {
-            request_id,
-            profile_id,
-            id,
-        } => {
-            mutate(
-                app,
-                conn_id,
-                &request_id,
-                Command::SetEqPreset { profile_id, id },
-            )
-            .await
         }
         WsCommand::EditEqPreset {
             request_id,
@@ -200,6 +197,7 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     // matches state order.
     let event = WsEvent::State {
         snapshot: app.snapshot_json_of(&state),
+        request_id: None,
     }
     .to_text();
     let _ = app.updates.send((conn_id, event.into()));
@@ -210,10 +208,12 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     }]
 }
 
-/// The full-snapshot `state` event as wire text.
-async fn state_event(app: &App) -> String {
+/// The full-snapshot `state` event as wire text — `request_id` only
+/// when the snapshot answers a `get_state` (broadcasts are id-less).
+async fn state_event(app: &App, request_id: Option<&str>) -> String {
     WsEvent::State {
         snapshot: app.snapshot_json().await,
+        request_id,
     }
     .to_text()
 }

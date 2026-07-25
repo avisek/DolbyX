@@ -454,7 +454,7 @@ it('flat batches never write geon; an enabled filterbank is never touched', () =
 
 // Behavior 14 (#25): a preset switch mid-session rehydrates — the
 // next stroke continues the new curve with no jump. The broadcast
-// (another tab's switch; our own acked `set_eq_preset` applies the
+// (another tab's switch; our own acked selection patch applies the
 // same store change) moves the resolved active `gebg` from flat 0 to
 // the preset's flat +6 dB; without the rehydrate the Brush buffer
 // would still hold the old flat-zero curve, and the first tick would

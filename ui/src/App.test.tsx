@@ -69,7 +69,6 @@ it('sends set_power on click and applies the flip on the ack', async () => {
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
-    ok: true,
   })
   await waitFor(() => {
     expect(powerToggle().getAttribute('aria-checked')).toBe('false')
@@ -152,7 +151,6 @@ it('sends set_profile on click and applies the switch on the ack', async () => {
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
-    ok: true,
   })
   await waitFor(() => {
     expect(isSelected('Movie')).toBe('true')

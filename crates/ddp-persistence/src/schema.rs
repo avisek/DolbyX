@@ -916,6 +916,7 @@ iebt = [67, 95]
                 Command::EditProfile {
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![5_i16])].into(),
+                    selected_eq_preset: None,
                 },
                 &defs,
             )
@@ -925,6 +926,7 @@ iebt = [67, 95]
                 Command::EditProfile {
                     id: ProfileId("movie".into()),
                     params: [("gebf".to_string(), vec![99_i16, 64])].into(),
+                    selected_eq_preset: None,
                 },
                 &defs,
             )
@@ -969,6 +971,7 @@ iebt = [44, 55]
                 Command::EditProfile {
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![9_i16])].into(),
+                    selected_eq_preset: None,
                 },
                 &defs,
             )
@@ -1037,9 +1040,10 @@ iebt = [44, 55, 0, 0]
 
         let _ = state
             .apply(
-                Command::SetEqPreset {
-                    profile_id: ProfileId("music".into()),
-                    id: Some(PresetId("rich".into())),
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(Some(PresetId("rich".into()))),
                 },
                 &defs,
             )
@@ -1068,9 +1072,10 @@ iebt = [44, 55, 0, 0]
         // Detach + reset ⇒ no divergence left ⇒ an empty file again.
         let _ = state
             .apply(
-                Command::SetEqPreset {
-                    profile_id: ProfileId("music".into()),
-                    id: None,
+                Command::EditProfile {
+                    id: ProfileId("music".into()),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(None),
                 },
                 &defs,
             )

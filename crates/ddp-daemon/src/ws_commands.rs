@@ -1,6 +1,7 @@
 //! `WsCommands` — the serde-typed wire vocabulary (ADR-0005). Every
 //! command carries a client-generated `request_id`, echoed on exactly
-//! one `ack`/`error`; `state` events are pub/sub.
+//! one reply — `ack`, `error`, or, for `get_state`, the `state` event
+//! itself; broadcast `state`/`vis` events are pub/sub, id-less.
 
 use ddp_engine::VisFrame;
 use serde::{Deserialize, Serialize};
@@ -32,14 +33,24 @@ pub(crate) enum WsCommand {
         /// The profile to select.
         id: ddp_state::ProfileId,
     },
-    /// Write a param map into one profile.
+    /// The one sparse patch verb (ADR-0005): params and/or the EQ
+    /// preset selection, atomic — an invalid part rejects the whole.
     EditProfile {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The profile to edit.
         id: ddp_state::ProfileId,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
+        #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
+        /// Tri-state selection patch: absent = untouched, `null` =
+        /// detach (the profile's own EQ params apply), id = select.
+        #[serde(default, deserialize_with = "tri_state")]
+        #[expect(
+            clippy::option_option,
+            reason = "tri-state: absent ≠ null ≠ id (ADR-0005)"
+        )]
+        selected_eq_preset: Option<Option<ddp_state::PresetId>>,
     },
     /// Drop a profile's own overrides, restoring its baseline.
     ResetProfile {
@@ -47,16 +58,6 @@ pub(crate) enum WsCommand {
         request_id: String,
         /// The profile to reset.
         id: ddp_state::ProfileId,
-    },
-    /// Select — or with `id: null` detach — one profile's EQ preset
-    /// overlay (EQ selection is per-profile: the target is explicit).
-    SetEqPreset {
-        /// Correlation id echoed on the reply.
-        request_id: String,
-        /// The profile whose selection changes.
-        profile_id: ddp_state::ProfileId,
-        /// The preset to select; `null` ⇒ the profile's own EQ params.
-        id: Option<ddp_state::PresetId>,
     },
     /// Write a param map into one EQ preset (preset-carried params only).
     EditEqPreset {
@@ -76,6 +77,20 @@ pub(crate) enum WsCommand {
     },
 }
 
+/// Deserializes the tri-state `selected_eq_preset` patch: a present
+/// key — `null` or an id — lands as `Some(…)`; `#[serde(default)]`
+/// covers the absent (untouched) arm.
+#[expect(
+    clippy::option_option,
+    reason = "tri-state: absent ≠ null ≠ id (ADR-0005)"
+)]
+fn tri_state<'de, D>(deserializer: D) -> Result<Option<Option<ddp_state::PresetId>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
+}
+
 /// A daemon → client event frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -85,6 +100,11 @@ pub(crate) enum WsEvent<'a> {
     State {
         /// The snapshot JSON.
         snapshot: serde_json::Value,
+        /// The echoed correlation id when this snapshot is the
+        /// `get_state` reply (the total reply law, ADR-0005); absent
+        /// on connect and broadcast — those are pub/sub.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<&'a str>,
     },
     /// The per-block visualizer broadcast — the main session's vis
     /// tail; pub/sub to every client, no originator rule (ADR-0005).
@@ -92,12 +112,12 @@ pub(crate) enum WsEvent<'a> {
         /// The tail's four arrays keyed by 4-CC, raw i16 1/16-dB.
         params: VisParams,
     },
-    /// The one success reply per command.
+    /// The one success reply per command — failures use
+    /// [`WsEvent::Error`] (the minted-id field for `add_*` arrives
+    /// with [#26](https://github.com/avisek/DolbyX/issues/26)).
     Ack {
         /// The echoed correlation id.
         request_id: &'a str,
-        /// Always `true` — failures use [`WsEvent::Error`].
-        ok: bool,
     },
     /// The one failure reply per command; `request_id` is `null` when
     /// the frame was too malformed to carry one.
@@ -161,10 +181,7 @@ impl WsEvent<'_> {
 
 /// Builds the standard success reply.
 pub(crate) fn ack(request_id: &str) -> WsEvent<'_> {
-    WsEvent::Ack {
-        request_id,
-        ok: true,
-    }
+    WsEvent::Ack { request_id }
 }
 
 /// Builds an `INVALID_REQUEST` error reply.

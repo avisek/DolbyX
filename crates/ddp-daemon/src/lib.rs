@@ -132,6 +132,7 @@ impl App {
     pub(crate) async fn broadcast_snapshot(&self) {
         let event = ws_commands::WsEvent::State {
             snapshot: self.snapshot_json().await,
+            request_id: None,
         }
         .to_text();
         let _ = self.updates.send((self.fresh_conn_id(), event.into()));

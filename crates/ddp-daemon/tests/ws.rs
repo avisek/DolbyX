@@ -1,5 +1,8 @@
 //! Behaviors 2–3 (issue #12): WS `/ws` snapshot-on-connect; `set_power`
-//! flips `State` and acks echoing `request_id`.
+//! flips `State` and acks echoing `request_id`. Slice 18a (issue #57)
+//! renovations: `ack` carries no `ok`; the total reply law — one
+//! `request_id`-echoing reply per command, `get_state` answered by the
+//! `state` event itself, broadcasts id-less.
 
 mod common;
 
@@ -18,6 +21,10 @@ async fn the_first_ws_frame_is_a_state_event_matching_current_state() {
     assert_eq!(event["type"], "state");
     assert_eq!(event["snapshot"]["power"], true);
     assert_eq!(event["snapshot"]["selected_profile"], "music");
+    assert!(
+        event.get("request_id").is_none(),
+        "the connect snapshot is pub/sub — no request_id: {event}"
+    );
 }
 
 #[tokio::test]
@@ -34,17 +41,22 @@ async fn set_power_flips_state_and_acks_the_request_id() {
     let ack = recv_json(&mut ws).await;
     assert_eq!(ack["type"], "ack");
     assert_eq!(ack["request_id"], "r2");
-    assert_eq!(ack["ok"], true);
+    // Behavior 3 (issue #57): `ok` is gone — it was never `false`,
+    // `error` is the other arm.
+    assert!(ack.get("ok").is_none(), "no ok field on an ack: {ack}");
 
-    // get_state answers with a full snapshot (plus its own ack) —
-    // proving the flip through the public interface only.
+    // Behavior 4 (issue #57): the `state` event itself answers
+    // `get_state`, echoing the id — awaitable promise-style, no ack.
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r3" })).await;
     let snapshot = recv_json(&mut ws).await;
     assert_eq!(snapshot["type"], "state");
+    assert_eq!(snapshot["request_id"], "r3");
     assert_eq!(snapshot["snapshot"]["power"], false);
-    let ack = recv_json(&mut ws).await;
-    assert_eq!(ack["type"], "ack");
-    assert_eq!(ack["request_id"], "r3");
+    assert_eq!(
+        try_recv_json(&mut ws, 300).await,
+        None,
+        "exactly one reply per command — no trailing ack"
+    );
 }
 
 /// The slice's tracer bullet (issue #12): WS → state → engine, with one
@@ -84,6 +96,10 @@ async fn broadcast_reaches_the_other_client_but_not_the_originator() {
     let broadcast = recv_json(&mut other).await;
     assert_eq!(broadcast["type"], "state");
     assert_eq!(broadcast["snapshot"]["power"], false);
+    assert!(
+        broadcast.get("request_id").is_none(),
+        "broadcasts are pub/sub — no request_id: {broadcast}"
+    );
 
     assert_eq!(
         try_recv_json(&mut originator, 300).await,
@@ -168,8 +184,9 @@ async fn malformed_json_yields_invalid_request_without_dropping_the_connection()
 
     // The connection survives and still serves commands.
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r10" })).await;
-    assert_eq!(recv_json(&mut ws).await["type"], "state");
-    assert_eq!(recv_json(&mut ws).await["request_id"], "r10");
+    let snapshot = recv_json(&mut ws).await;
+    assert_eq!(snapshot["type"], "state");
+    assert_eq!(snapshot["request_id"], "r10");
 }
 
 /// Slice 08 (issue #16): an unrecoverable engine failure surfaces as an

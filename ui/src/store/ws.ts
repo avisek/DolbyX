@@ -76,13 +76,14 @@ export function setProfile(id: string): void {
 }
 
 /**
- * Local-first `set_eq_preset`: selects (or with `null` detaches) one
- * profile's EQ preset overlay, applied on the daemon's ack — the daemon
- * has already pushed the resolved nine EQ params in one atomic batch.
+ * Local-first EQ preset selection — an `edit_profile` tri-state
+ * `selected_eq_preset` patch (ADR-0005): id selects, `null` detaches
+ * one profile's overlay; applied on the daemon's ack — the daemon has
+ * already pushed the resolved nine EQ params in one atomic batch.
  */
 export function setEqPreset(profileId: string, id: string | null): void {
   void client
-    ?.request({ cmd: 'set_eq_preset', profile_id: profileId, id })
+    ?.request({ cmd: 'edit_profile', id: profileId, selected_eq_preset: id })
     .then(() => {
       applyEqPreset(profileId, id)
     })
