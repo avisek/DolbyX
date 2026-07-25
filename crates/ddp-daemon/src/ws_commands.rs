@@ -109,6 +109,21 @@ pub(crate) enum WsCommand {
         /// The preset to reset.
         id: ddp_state::PresetId,
     },
+    /// Delete a custom profile (factory ids reject).
+    RemoveProfile {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The profile to delete.
+        id: ddp_state::ProfileId,
+    },
+    /// Delete a custom EQ preset (factory ids reject); selecting
+    /// profiles fall to explicit `None`.
+    RemoveEqPreset {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The preset to delete.
+        id: ddp_state::PresetId,
+    },
 }
 
 /// Deserializes the tri-state `selected_eq_preset` patch: a present

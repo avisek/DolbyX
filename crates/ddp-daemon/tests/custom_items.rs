@@ -260,6 +260,120 @@ async fn edit_name_patches_rename_customs_and_reject_factory() {
     }
 }
 
+/// Behavior 6 (issue #26 A): deleting the **selected** profile falls
+/// the selection back to `defaults.toml`'s `selected_profile` and
+/// hands the engine that profile's full resolved set; deleting a
+/// non-selected custom never touches the engine.
+#[tokio::test]
+async fn removing_the_selected_profile_falls_back_to_defaults_selection() {
+    let daemon = start_daemon().await;
+    daemon
+        .handle
+        .supervisor()
+        .create_session(48000)
+        .expect("session");
+    let mut originator = connected(daemon.addr()).await;
+    let mut other = connected(daemon.addr()).await;
+
+    let minted = ack_of(
+        &mut originator,
+        &json!({ "cmd": "add_profile", "request_id": "r1", "name": "Bass", "params": { "dvla": [9] } }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut other).await["type"], "state");
+    let _ = ack_of(
+        &mut originator,
+        &json!({ "cmd": "set_profile", "request_id": "r2", "id": minted }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut other).await["type"], "state");
+
+    let _ = ack_of(
+        &mut originator,
+        &json!({ "cmd": "remove_profile", "request_id": "r3", "id": minted }),
+    )
+    .await;
+    let broadcast = recv_json(&mut other).await;
+    assert_eq!(broadcast["type"], "state");
+    assert_eq!(
+        broadcast["snapshot"]["selected_profile"], "music",
+        "defaults.toml's selected_profile"
+    );
+    assert_eq!(
+        broadcast["snapshot"]["profiles"]
+            .as_array()
+            .expect("array")
+            .len(),
+        4,
+        "the custom is gone"
+    );
+    let batches = set_params_batches(&daemon.stub);
+    assert_eq!(batches.len(), 3, "init + switch + fallback");
+    assert_eq!(
+        batches[2], batches[0],
+        "the engine gets Music's resolved set again"
+    );
+
+    // A non-selected custom delete: persists, engine silent.
+    let minted = ack_of(
+        &mut originator,
+        &json!({ "cmd": "add_profile", "request_id": "r4", "name": "Idle" }),
+    )
+    .await;
+    let _ = ack_of(
+        &mut originator,
+        &json!({ "cmd": "remove_profile", "request_id": "r5", "id": minted }),
+    )
+    .await;
+    assert_eq!(
+        set_params_batches(&daemon.stub).len(),
+        3,
+        "no engine call for a non-selected delete"
+    );
+}
+
+/// Behavior 4 (issue #26 A): factory items never delete — and unknown
+/// ids reject — as `INVALID_REQUEST`, state untouched.
+#[tokio::test]
+async fn factory_and_unknown_deletes_are_invalid_request() {
+    let daemon = start_daemon().await;
+    let mut ws = connected(daemon.addr()).await;
+
+    for (request, needle) in [
+        (
+            json!({ "cmd": "remove_profile", "request_id": "r1", "id": "music" }),
+            "factory item `music` cannot be deleted",
+        ),
+        (
+            json!({ "cmd": "remove_eq_preset", "request_id": "r2", "id": "rich" }),
+            "factory item `rich` cannot be deleted",
+        ),
+        (
+            json!({ "cmd": "remove_profile", "request_id": "r3", "id": "ghost" }),
+            "unknown profile",
+        ),
+        (
+            json!({ "cmd": "remove_eq_preset", "request_id": "r4", "id": "ghost" }),
+            "unknown EQ preset",
+        ),
+    ] {
+        send_json(&mut ws, &request).await;
+        let error = recv_json(&mut ws).await;
+        assert_eq!(error["type"], "error", "{request}");
+        assert_eq!(error["code"], "INVALID_REQUEST");
+        assert!(
+            error["message"].as_str().expect("message").contains(needle),
+            "wanted {needle:?} in {error}"
+        );
+    }
+    assert!(daemon.stub.calls().is_empty());
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r5" })).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    assert_eq!(snapshot["profiles"].as_array().expect("array").len(), 4);
+    assert_eq!(snapshot["eq_presets"].as_array().expect("array").len(), 3);
+}
+
 /// `add_*` validation (epic validation section): empty-after-trim
 /// names, undeclared/read-only/out-of-range params, non-preset-carried
 /// preset params, and an unknown `selected_eq_preset` are

@@ -239,6 +239,52 @@ impl State {
             Command::EditEqPreset { id, name, params } => {
                 self.edit_eq_preset(id, name, &params, defs)
             }
+            Command::RemoveProfile { id } => {
+                let profile = self
+                    .profile(&id)
+                    .ok_or_else(|| ValidationError::UnknownProfile(id.0.clone()))?;
+                if profile.is_factory {
+                    return Err(ValidationError::FactoryDelete(id.0));
+                }
+                let was_selected = self.selected_profile == id;
+                self.profiles.retain(|profile| profile.id != id);
+                if was_selected {
+                    self.selected_profile = self.fallback_profile.clone();
+                }
+                Ok(StateDiff {
+                    power: None,
+                    params: was_selected.then(|| self.resolved_batch(defs)),
+                    changed: true,
+                    minted: None,
+                })
+            }
+            Command::RemoveEqPreset { id } => {
+                let preset = self
+                    .eq_preset(&id)
+                    .ok_or_else(|| ValidationError::UnknownEqPreset(id.0.clone()))?;
+                if preset.is_factory {
+                    return Err(ValidationError::FactoryDelete(id.0));
+                }
+                // Deleting the selected profile's overlay ⇒ its own EQ
+                // params apply again — computed before the pin below
+                // rewrites the selections.
+                let live = self.selected().selected_eq_preset() == Some(&id);
+                // Every selecting profile falls to an **explicit**
+                // `None` — never the selection beneath, so a delete can
+                // never activate a different preset (ADR-0003).
+                for profile in &mut self.profiles {
+                    if profile.selected_eq_preset() == Some(&id) {
+                        profile.selection_override = Some(None);
+                    }
+                }
+                self.eq_presets.retain(|preset| preset.id != id);
+                Ok(StateDiff {
+                    power: None,
+                    params: live.then(|| self.eq_batch(defs)),
+                    changed: true,
+                    minted: None,
+                })
+            }
             Command::ResetEqPreset { id } => self.reset_eq_preset(id, defs),
         }
     }
@@ -582,6 +628,21 @@ pub enum Command {
         /// The preset to reset.
         id: PresetId,
     },
+    /// Deletes a custom profile (factory ids reject). Deleting the
+    /// selected profile falls the selection back to `defaults.toml`'s
+    /// `selected_profile`, batching its full resolved set.
+    RemoveProfile {
+        /// The profile to delete.
+        id: ProfileId,
+    },
+    /// Deletes a custom EQ preset (factory ids reject). Every profile
+    /// selecting it falls to an **explicit** `None` — never the
+    /// selection beneath (ADR-0003); flush-iff-live pushes the selected
+    /// profile's own EQ.
+    RemoveEqPreset {
+        /// The preset to delete.
+        id: PresetId,
+    },
 }
 
 /// What one [`State::apply`] changed — drives the engine fan-out, the
@@ -639,6 +700,10 @@ pub enum ValidationError {
     /// rejects (a Reset restores content, never names).
     #[error("factory item `{0}` cannot be renamed")]
     FactoryRename(String),
+    /// Factory items never delete — a Reset falls them back to their
+    /// bundled defaults instead.
+    #[error("factory item `{0}` cannot be deleted")]
+    FactoryDelete(String),
     /// The 4-CC names no declared parameter.
     #[error("unknown parameter `{0}`")]
     UnknownParam(String),
