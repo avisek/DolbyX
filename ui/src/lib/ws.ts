@@ -87,7 +87,7 @@ export type Command =
   | {
       /**
        * The one sparse patch verb (ADR-0005): params, a rename, and/or
-       * the EQ preset selection, atomic — an invalid part rejects the
+       * the EQ selection, atomic — an invalid part rejects the
        * whole.
        */
       readonly cmd: 'edit_profile'

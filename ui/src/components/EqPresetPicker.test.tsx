@@ -407,7 +407,7 @@ it('inline EQ preset rename commits on Enter, cancels on Esc', async () => {
 
 // Delete sends `remove_eq_preset` and reconciles off the ack — the
 // daemon falls every selecting profile to explicit None at delete
-// time (a delete never activates the selection beneath, ADR-0003).
+// time (a delete never activates the EQ selection beneath, ADR-0003).
 it('Delete sends remove_eq_preset and the reconcile falls to None', async () => {
   applySnapshot(customPresetState('music'))
   const socket = renderConnected()

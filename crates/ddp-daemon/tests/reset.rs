@@ -54,8 +54,8 @@ fn diverging(item: &serde_json::Value) -> Vec<String> {
         .map(|(name, _)| name.clone())
         .collect();
     keys.sort_unstable();
-    if let Some(selection) = baseline.get("selected_eq_preset")
-        && item["selected_eq_preset"] != *selection
+    if let Some(eq_selection) = baseline.get("selected_eq_preset")
+        && item["selected_eq_preset"] != *eq_selection
     {
         keys.push("selected_eq_preset".into());
     }

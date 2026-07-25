@@ -3,7 +3,8 @@ import './ActionRow.css'
 
 /**
  * The four CRUD affordances of one action row (issue #26), acting on
- * the caller's current selection: Add · Rename · Delete · Reset. All
+ * the caller's current target — the selected profile or the picked EQ
+ * preset: Add · Rename · Delete · Reset. All
  * four render always — state flips `disabled`, never presence, so the
  * layout never shifts; Add is never disabled. `kind` qualifies the
  * accessible names ("Add profile" vs "Add EQ preset").

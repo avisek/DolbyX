@@ -238,7 +238,7 @@ async fn edit_eq_preset_flushes_for_the_active_profile_and_is_global() {
 /// Behavior 5 (issue #23): an EQ selection patch targeting a non-selected
 /// profile persists (flush + broadcast) without an engine call.
 #[tokio::test]
-async fn a_selection_patch_on_a_non_selected_profile_skips_the_engine() {
+async fn an_eq_selection_patch_on_a_non_selected_profile_skips_the_engine() {
     let daemon = start_daemon().await;
     daemon
         .handle

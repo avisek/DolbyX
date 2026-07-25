@@ -154,10 +154,10 @@ it('Reset sends a whole-item reset_profile and reconciles on the ack', async () 
   })
 })
 
-// Behavior 3 (#26) + the tracer bullet: Add sends the selection's
-// resolved content under the minted `«base» n` name — never a source
-// reference (ADR-0005) — and the ack's id auto-selects the clone
-// (the daemon never moves selection on add).
+// Behavior 3 (#26) + the tracer bullet: Add sends the selected
+// profile's resolved content under the minted `«base» n` name — never
+// a source reference (ADR-0005) — and the ack's id auto-selects the
+// clone (the daemon never moves the active profile on add).
 it('Add clones the selected profile and the acked minted id selects it', async () => {
   const socket = renderConnected()
   const music = fixtureState().profiles.find((p) => p.id === 'music')
@@ -250,8 +250,8 @@ it('inline rename commits on Enter and blur, cancels on Esc', async () => {
 })
 
 // Delete sends `remove_profile` and reconciles off the ack — where
-// the selection lands (the Fallback profile) is daemon knowledge, so
-// the originator waits for the snapshot rather than guessing.
+// the active profile lands (the Fallback profile) is daemon knowledge,
+// so the originator waits for the snapshot rather than guessing.
 it('Delete sends remove_profile and the reconcile lands the fallback', async () => {
   const socket = renderConnected()
   applySnapshot(customSelectedState())

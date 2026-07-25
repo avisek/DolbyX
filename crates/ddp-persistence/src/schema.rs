@@ -359,8 +359,8 @@ fn reject_reserved_id(namespace: &str, id: &str) -> Result<(), String> {
 ///
 /// [`Error::Config`] when the document is malformed, a param fails
 /// validation, a factory row carries a rename, a custom row lacks its
-/// `name` or claims the reserved id `none`, or a stated selection
-/// (`selected_profile` / a profile's `selected_eq_preset`) dangles —
+/// `name` or claims the reserved id `none`, or a stated
+/// `selected_profile` / profile-row `selected_eq_preset` dangles —
 /// refuse to start rather than silently discard user state.
 pub fn parse_config(
     document: &str,
