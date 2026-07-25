@@ -512,7 +512,7 @@ impl State {
     /// [`Command::ResetProfile`]: the un-edit (ADR-0007) — drop the
     /// profile's divergences so what resolves beneath applies again: a
     /// whole-item reset copies the baseline over the content (the EQ
-    /// selection override included), a scoped one exactly the
+    /// selection included), a scoped one exactly the
     /// `only`-named content keys; `name` never resets. Flush-iff-live:
     /// the full resolved set on a whole-item reset (a switch-sized
     /// batch), the restored entries — shadow-aware, via the edit batch
