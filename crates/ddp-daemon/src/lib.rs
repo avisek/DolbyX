@@ -164,6 +164,10 @@ impl App {
                     "is_factory": profile.is_factory,
                     "selected_eq_preset": profile.selected_eq_preset,
                     "params": profile.params,
+                    // The diverging content keys (ADR-0005) — reset's
+                    // dual; the UI derives every Reset-disabled state
+                    // from it.
+                    "overridden": profile.overridden(&self.params),
                 })
             })
             .collect();
@@ -176,6 +180,7 @@ impl App {
                     "name": preset.name,
                     "is_factory": preset.is_factory,
                     "params": preset.params,
+                    "overridden": preset.overridden(&self.params),
                 })
             })
             .collect();

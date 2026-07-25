@@ -220,22 +220,7 @@ impl State {
                 selected_eq_preset,
             } => self.add_profile(name, &params, selected_eq_preset, defs),
             Command::AddEqPreset { name, params } => self.add_eq_preset(name, &params, defs),
-            Command::ResetProfile { id } => {
-                let live = self.selected_profile == id;
-                let profile = self
-                    .profile_mut(&id)
-                    .ok_or(ValidationError::UnknownProfile(id.0))?;
-                if profile.params == profile.baseline {
-                    return Ok(StateDiff::default());
-                }
-                profile.params = profile.baseline.clone();
-                Ok(StateDiff {
-                    power: None,
-                    params: live.then(|| self.resolved_batch(defs)),
-                    changed: true,
-                    minted: None,
-                })
-            }
+            Command::ResetProfile { id, only } => self.reset_profile(id, only.as_deref(), defs),
             Command::EditEqPreset { id, name, params } => {
                 self.edit_eq_preset(id, name, &params, defs)
             }
@@ -287,7 +272,7 @@ impl State {
                     minted: None,
                 })
             }
-            Command::ResetEqPreset { id } => self.reset_eq_preset(id, defs),
+            Command::ResetEqPreset { id, only } => self.reset_eq_preset(id, only.as_deref(), defs),
         }
     }
 
@@ -523,24 +508,115 @@ impl State {
         })
     }
 
-    /// [`Command::ResetEqPreset`]: restore the baseline; flush iff the
-    /// selected profile selects the preset.
+    /// [`Command::ResetProfile`]: the un-edit (ADR-0007) — drop the
+    /// profile's divergences, whole-item or the `only`-named content
+    /// keys, so what resolves beneath applies again; a whole-item reset
+    /// drops the selection override too, `name` never resets.
+    /// Flush-iff-live: the full resolved set on a whole-item reset (a
+    /// switch-sized batch), the restored entries — shadow-aware, via
+    /// the edit batch rules — on a scoped one.
+    fn reset_profile(
+        &mut self,
+        id: ProfileId,
+        only: Option<&[String]>,
+        defs: &[ParameterDef],
+    ) -> Result<StateDiff, ValidationError> {
+        let live = self.selected_profile == id;
+        let profile = self
+            .profile_mut(&id)
+            .ok_or_else(|| ValidationError::UnknownProfile(id.0.clone()))?;
+        // A profile's content keys: its writable params plus the
+        // selection (ADR-0007); `name` is a label, never one.
+        if let Some(keys) = only
+            && let Some(key) = keys
+                .iter()
+                .find(|key| *key != "selected_eq_preset" && !profile.params.contains_key(*key))
+        {
+            return Err(ValidationError::NotAContentKey {
+                id: id.0,
+                key: key.clone(),
+            });
+        }
+        let in_scope = |key: &str| only.is_none_or(|keys| keys.iter().any(|k| k == key));
+        let restored: HashMap<String, Vec<i16>> = profile
+            .params
+            .iter()
+            .filter(|(name, values)| in_scope(name) && profile.baseline.get(*name) != Some(values))
+            .map(|(name, _)| (name.clone(), profile.baseline[name].clone()))
+            .collect();
+        let selection_changed = in_scope("selected_eq_preset")
+            && profile.selected_eq_preset != profile.selection_baseline;
+        if restored.is_empty() && !selection_changed {
+            return Ok(StateDiff::default());
+        }
+        for (name, values) in &restored {
+            profile.params.insert(name.clone(), values.clone());
+        }
+        if selection_changed {
+            profile.selected_eq_preset = profile.selection_baseline.clone();
+        }
+        let batch = live.then(|| match only {
+            None => self.resolved_batch(defs),
+            Some(_) => self.edit_batch(&restored, selection_changed, defs),
+        });
+        Ok(StateDiff {
+            power: None,
+            params: batch.filter(|batch| !batch.is_empty()),
+            changed: true,
+            minted: None,
+        })
+    }
+
+    /// [`Command::ResetEqPreset`]: as [`State::reset_profile`], over
+    /// the preset-carried params; flush iff the selected profile
+    /// selects the preset — the resolved preset-carried set whole-item,
+    /// exactly the restored entries scoped (the preset is the live
+    /// overlay, so they are effective).
     fn reset_eq_preset(
         &mut self,
         id: PresetId,
+        only: Option<&[String]>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
         let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
-            .ok_or(ValidationError::UnknownEqPreset(id.0))?;
-        if preset.params == preset.baseline {
+            .ok_or_else(|| ValidationError::UnknownEqPreset(id.0.clone()))?;
+        if let Some(keys) = only
+            && let Some(key) = keys.iter().find(|key| !preset.params.contains_key(*key))
+        {
+            return Err(ValidationError::NotAContentKey {
+                id: id.0,
+                key: key.clone(),
+            });
+        }
+        let in_scope = |key: &str| only.is_none_or(|keys| keys.iter().any(|k| k == key));
+        let restored: HashMap<String, Vec<i16>> = preset
+            .params
+            .iter()
+            .filter(|(name, values)| in_scope(name) && preset.baseline.get(*name) != Some(values))
+            .map(|(name, _)| (name.clone(), preset.baseline[name].clone()))
+            .collect();
+        if restored.is_empty() {
             return Ok(StateDiff::default());
         }
-        preset.params = preset.baseline.clone();
+        for (name, values) in &restored {
+            preset.params.insert(name.clone(), values.clone());
+        }
+        let batch = live.then(|| match only {
+            None => self.eq_batch(defs),
+            Some(_) => defs
+                .iter()
+                .filter_map(|def| {
+                    restored
+                        .get(&def.name)
+                        .map(|values| (def.name.clone(), values.clone()))
+                })
+                .collect(),
+        });
         Ok(StateDiff {
             power: None,
-            params: live.then(|| self.eq_batch(defs)),
+            params: batch,
             changed: true,
             minted: None,
         })
@@ -604,11 +680,19 @@ pub enum Command {
         /// The stated content params, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
     },
-    /// Drops a profile's own overrides, restoring its baseline (factory
-    /// rows in `defaults.toml` stay untouched).
+    /// The un-edit (ADR-0007): drops the profile's `config.toml`
+    /// divergences — whole-item, or scoped to the `only`-named content
+    /// keys — so the cascade beneath resolves. Valid on **every** item:
+    /// factory ids fall to their bundled defaults, customs to the
+    /// shared layers (never their birth clone). A whole-item reset
+    /// drops the selection override too; `name` never resets.
     ResetProfile {
         /// The profile to reset.
         id: ProfileId,
+        /// The scope: `None` ⇒ the whole item; `Some` ⇒ exactly these
+        /// content keys (param 4-CCs and/or `"selected_eq_preset"`).
+        /// A key the profile doesn't carry rejects the whole command.
+        only: Option<Vec<String>>,
     },
     /// Writes a param map into one EQ preset (preset-carried params only).
     ///
@@ -623,10 +707,14 @@ pub enum Command {
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
     },
-    /// Drops an EQ preset's own overrides, restoring its baseline.
+    /// Drops an EQ preset's `config.toml` divergences — as
+    /// [`Command::ResetProfile`], over the preset-carried params.
     ResetEqPreset {
         /// The preset to reset.
         id: PresetId,
+        /// The scope, over the params the preset carries — as
+        /// [`Command::ResetProfile`]'s.
+        only: Option<Vec<String>>,
     },
     /// Deletes a custom profile (factory ids reject). Deleting the
     /// selected profile falls the selection back to `defaults.toml`'s
@@ -704,6 +792,17 @@ pub enum ValidationError {
     /// bundled defaults instead.
     #[error("factory item `{0}` cannot be deleted")]
     FactoryDelete(String),
+    /// A `reset_*.only` key the target item doesn't carry — content
+    /// keys are an item's own resettable row keys: its writable params,
+    /// plus `selected_eq_preset` for profiles; `name` is a label, never
+    /// reset (ADR-0007).
+    #[error("`{key}` is not a content key of `{id}`")]
+    NotAContentKey {
+        /// The reset target.
+        id: String,
+        /// The offending scope key.
+        key: String,
+    },
     /// The 4-CC names no declared parameter.
     #[error("unknown parameter `{0}`")]
     UnknownParam(String),
@@ -1219,6 +1318,7 @@ mod tests {
             .apply(
                 Command::ResetProfile {
                     id: ProfileId("music".into()),
+                    only: None,
                 },
                 &defs(),
             )
@@ -1235,6 +1335,7 @@ mod tests {
             .apply(
                 Command::ResetProfile {
                     id: ProfileId("movie".into()),
+                    only: None,
                 },
                 &defs(),
             )
@@ -1247,6 +1348,7 @@ mod tests {
             .apply(
                 Command::ResetProfile {
                     id: ProfileId("music".into()),
+                    only: None,
                 },
                 &defs(),
             )
@@ -1257,6 +1359,7 @@ mod tests {
             state.apply(
                 Command::ResetProfile {
                     id: ProfileId("ghost".into()),
+                    only: None,
                 },
                 &defs(),
             ),
@@ -1920,6 +2023,309 @@ mod tests {
         );
     }
 
+    /// Behavior 1 (issue #26 B), state half: a whole-item profile
+    /// reset drops every divergence — params AND the selection
+    /// override — while `name` survives; a custom falls to the shared
+    /// layers (its custom baseline), never its birth clone.
+    #[test]
+    fn whole_item_reset_drops_params_and_the_selection_override() {
+        let table = defs();
+        let mut state = State::new_from_defaults(&defaults());
+        let _ = state
+            .apply(edit("music", &[("dvla", &[9])]), &table)
+            .unwrap();
+        let _ = state
+            .apply(select_preset("music", Some(rich())), &table)
+            .unwrap();
+
+        let diff = state
+            .apply(
+                Command::ResetProfile {
+                    id: ProfileId("music".into()),
+                    only: None,
+                },
+                &table,
+            )
+            .unwrap();
+        assert_eq!(state.selected().params["dvla"], vec![4], "factory value");
+        assert_eq!(
+            state.selected().selected_eq_preset,
+            None,
+            "the selection override drops with the whole item"
+        );
+        let batch = diff.params.expect("live reset flushes the full set");
+        assert!(batch.contains(&("dvla".to_string(), vec![4])));
+        assert!(
+            batch.contains(&("ieon".to_string(), vec![0])),
+            "the profile's own EQ applies again"
+        );
+
+        // The custom half: born diverging with a selection, renamed.
+        let minted = state
+            .apply(
+                Command::AddProfile {
+                    name: "Music 2".into(),
+                    params: [("dvla".to_string(), vec![2_i16])].into(),
+                    selected_eq_preset: Some(rich()),
+                },
+                &table,
+            )
+            .unwrap()
+            .minted
+            .map(ProfileId)
+            .unwrap();
+        let _ = state
+            .apply(
+                Command::EditProfile {
+                    id: minted.clone(),
+                    name: Some("Late Night".into()),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                &table,
+            )
+            .unwrap();
+        let diff = state
+            .apply(
+                Command::ResetProfile {
+                    id: minted.clone(),
+                    only: None,
+                },
+                &table,
+            )
+            .unwrap();
+        assert_eq!(diff.params, None, "not selected — the engine is silent");
+        let custom = state.profile(&minted).unwrap();
+        assert_eq!(
+            custom.params["dvla"],
+            vec![7],
+            "the shared layers — never the birth clone's 2"
+        );
+        assert_eq!(custom.selected_eq_preset, None, "selection dropped");
+        assert_eq!(custom.name, "Late Night", "`name` never resets");
+        assert_eq!(custom.overridden(&table), Vec::<String>::new());
+    }
+
+    /// Behavior 2 (issue #26 B), state half: `only` clears exactly the
+    /// named content keys — the rest keep their divergences — batching
+    /// the restored entries shadow-aware; `only: ["selected_eq_preset"]`
+    /// drops just the selection; an empty or divergence-free scope is a
+    /// no-op.
+    #[test]
+    fn scoped_reset_clears_exactly_the_named_keys() {
+        let table = defs();
+        let mut state = State::new_from_defaults(&defaults());
+        let reset_music = |only: &[&str]| Command::ResetProfile {
+            id: ProfileId("music".into()),
+            only: Some(only.iter().map(ToString::to_string).collect()),
+        };
+        let _ = state
+            .apply(edit("music", &[("gebg", &[5, -5]), ("dvla", &[9])]), &table)
+            .unwrap();
+
+        let diff = state.apply(reset_music(&["gebg"]), &table).unwrap();
+        assert_eq!(
+            diff.params.unwrap(),
+            vec![("gebg".to_string(), vec![0; 4])],
+            "exactly the restored entry"
+        );
+        assert_eq!(state.selected().params["dvla"], vec![9], "dvla untouched");
+        assert_eq!(state.selected().overridden(&table), ["dvla"]);
+
+        // A selection-only scope: the effective EQ set flushes.
+        let _ = state
+            .apply(select_preset("music", Some(rich())), &table)
+            .unwrap();
+        let diff = state
+            .apply(reset_music(&["selected_eq_preset"]), &table)
+            .unwrap();
+        assert_eq!(state.selected().selected_eq_preset, None);
+        assert_eq!(state.selected().params["dvla"], vec![9], "params untouched");
+        assert_eq!(
+            diff.params.unwrap(),
+            vec![
+                ("iebt".to_string(), vec![0_i16; 4]),
+                ("ieon".to_string(), vec![0]),
+                ("genb".to_string(), vec![2]),
+                ("gebg".to_string(), vec![0; 4]),
+            ],
+            "the profile's own EQ set — never a half-apply"
+        );
+
+        // Scoped under an overlay: a shadowed restore persists with the
+        // engine silent.
+        let _ = state
+            .apply(select_preset("music", Some(rich())), &table)
+            .unwrap();
+        let _ = state
+            .apply(edit("music", &[("gebg", &[7])]), &table)
+            .unwrap();
+        let diff = state.apply(reset_music(&["gebg"]), &table).unwrap();
+        assert!(!diff.is_empty());
+        assert_eq!(diff.params, None, "shadowed ⇒ no engine batch");
+        assert_eq!(state.selected().params["gebg"], vec![0; 4]);
+
+        // Empty scope / nothing diverging in scope ⇒ no-op.
+        assert!(state.apply(reset_music(&[]), &table).unwrap().is_empty());
+        assert!(
+            state
+                .apply(reset_music(&["gebg"]), &table)
+                .unwrap()
+                .is_empty()
+        );
+
+        // The preset counterpart: scoped to one of its carried params.
+        let edit_rich = Command::EditEqPreset {
+            name: None,
+            id: rich(),
+            params: [
+                ("iebt".to_string(), vec![100_i16]),
+                ("gebg".to_string(), vec![9_i16]),
+            ]
+            .into(),
+        };
+        let _ = state.apply(edit_rich, &table).unwrap();
+        let diff = state
+            .apply(
+                Command::ResetEqPreset {
+                    id: rich(),
+                    only: Some(vec!["iebt".into()]),
+                },
+                &table,
+            )
+            .unwrap();
+        assert_eq!(
+            diff.params.unwrap(),
+            vec![("iebt".to_string(), vec![67, 95, -55, -235])],
+            "live (music selects rich): exactly the restored entry"
+        );
+        let preset = state.eq_preset(&rich()).unwrap();
+        assert_eq!(preset.params["gebg"], vec![9, 0, 0, 0], "gebg untouched");
+    }
+
+    /// Behavior 2 (issue #26 B), rejection half: an `only` key the item
+    /// doesn't carry — unknown or read-only 4-CCs, `name`, a preset's
+    /// `selected_eq_preset`, a non-preset-carried param on a preset —
+    /// rejects the whole command as `NotAContentKey`, state untouched.
+    #[test]
+    fn reset_only_keys_the_item_does_not_carry_reject() {
+        let table = defs();
+        let mut state = State::new_from_defaults(&defaults());
+        let _ = state
+            .apply(edit("music", &[("dvla", &[9])]), &table)
+            .unwrap();
+        let before = state.clone();
+
+        let profile_cases = [["vnnb"], ["xxxx"], ["name"]];
+        for keys in profile_cases {
+            let error = state
+                .apply(
+                    Command::ResetProfile {
+                        id: ProfileId("music".into()),
+                        only: Some(vec![keys[0].into()]),
+                    },
+                    &table,
+                )
+                .unwrap_err();
+            assert_eq!(
+                error,
+                ValidationError::NotAContentKey {
+                    id: "music".into(),
+                    key: keys[0].into(),
+                },
+            );
+            assert_eq!(state, before, "a rejected reset must not mutate");
+        }
+        // A valid key beside a bad one rejects whole — dvla stays
+        // diverging.
+        let _ = state
+            .apply(
+                Command::ResetProfile {
+                    id: ProfileId("music".into()),
+                    only: Some(vec!["dvla".into(), "vnnb".into()]),
+                },
+                &table,
+            )
+            .unwrap_err();
+        assert_eq!(state, before);
+
+        for key in ["dvla", "selected_eq_preset"] {
+            assert_eq!(
+                state.apply(
+                    Command::ResetEqPreset {
+                        id: rich(),
+                        only: Some(vec![key.into()]),
+                    },
+                    &table,
+                ),
+                Err(ValidationError::NotAContentKey {
+                    id: "rich".into(),
+                    key: key.into(),
+                }),
+            );
+        }
+        assert_eq!(
+            ValidationError::NotAContentKey {
+                id: "rich".into(),
+                key: "dvla".into(),
+            }
+            .to_string(),
+            "`dvla` is not a content key of `rich`"
+        );
+    }
+
+    /// Behavior 3 (issue #26 B), state half: `overridden` lists exactly
+    /// the content keys diverging from what resolves beneath the config
+    /// row — params in table order, `"selected_eq_preset"` appended when
+    /// the selection diverges, never `name` — appearing on edit and
+    /// disappearing on an edit back to the baseline value.
+    #[test]
+    fn overridden_tracks_divergences_against_the_baseline() {
+        let table = defs();
+        let mut state = State::new_from_defaults(&defaults());
+        assert_eq!(state.selected().overridden(&table), Vec::<String>::new());
+
+        // Edits appear in table order, not edit order.
+        let _ = state
+            .apply(edit("music", &[("gebg", &[5, -5]), ("dvla", &[9])]), &table)
+            .unwrap();
+        assert_eq!(state.selected().overridden(&table), ["dvla", "gebg"]);
+
+        // A selection over the None beneath diverges; a rename never shows.
+        let _ = state
+            .apply(select_preset("music", Some(rich())), &table)
+            .unwrap();
+        assert_eq!(
+            state.selected().overridden(&table),
+            ["dvla", "gebg", "selected_eq_preset"]
+        );
+
+        // Editing back to the baseline values clears the keys live.
+        let _ = state
+            .apply(edit("music", &[("dvla", &[4])]), &table)
+            .unwrap();
+        let _ = state.apply(select_preset("music", None), &table).unwrap();
+        assert_eq!(state.selected().overridden(&table), ["gebg"]);
+
+        // The preset counterpart, over the preset-carried params.
+        let rich_preset = state.eq_preset(&rich()).unwrap();
+        assert_eq!(rich_preset.overridden(&table), Vec::<String>::new());
+        let _ = state
+            .apply(
+                Command::EditEqPreset {
+                    id: rich(),
+                    name: None,
+                    params: [("iebt".to_string(), vec![9_i16])].into(),
+                },
+                &table,
+            )
+            .unwrap();
+        assert_eq!(
+            state.eq_preset(&rich()).unwrap().overridden(&table),
+            ["iebt"]
+        );
+    }
+
     /// `reset_eq_preset` restores the baseline and batches iff the
     /// selected profile selects the preset.
     #[test]
@@ -1933,6 +2339,7 @@ mod tests {
         };
         let reset_rich = Command::ResetEqPreset {
             id: rich_id.clone(),
+            only: None,
         };
 
         // Not selected anywhere: reset persists, engine silent.
@@ -1971,6 +2378,7 @@ mod tests {
             state.apply(
                 Command::ResetEqPreset {
                     id: PresetId("ghost".into()),
+                    only: None,
                 },
                 &defs(),
             ),

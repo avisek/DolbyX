@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::param_def::ParameterDef;
+
 /// Stable string id of an EQ preset (`"rich"`, `"user_91c2"`) —
 /// reorder-safe, TOML-clean.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,5 +47,15 @@ impl EqPreset {
     /// its allocation — callers validate against `ParameterDef` first.
     pub fn splice(&mut self, name: &str, values: &[i16]) {
         crate::param_def::splice_head(&mut self.params, name, values);
+    }
+
+    /// The snapshot's per-item `overridden` list (ADR-0005): the
+    /// preset-carried params diverging from what resolves beneath the
+    /// preset's `config.toml` row, in `defs` table order; never `name`.
+    /// Reset's dual: exactly what a whole-item `reset_eq_preset` would
+    /// clear.
+    #[must_use]
+    pub fn overridden(&self, defs: &[ParameterDef]) -> Vec<String> {
+        crate::param_def::diverging(&self.params, &self.baseline, defs)
     }
 }

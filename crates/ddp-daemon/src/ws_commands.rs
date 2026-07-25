@@ -81,12 +81,18 @@ pub(crate) enum WsCommand {
         #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
     },
-    /// Drop a profile's own overrides, restoring its baseline.
+    /// Drop the profile's `config.toml` divergences — whole-item, or
+    /// `only` the named content keys (ADR-0007). Valid on every item.
     ResetProfile {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The profile to reset.
         id: ddp_state::ProfileId,
+        /// The scope: absent ⇒ the whole item; present ⇒ exactly these
+        /// content keys (param 4-CCs / `"selected_eq_preset"`). A key
+        /// the profile doesn't carry rejects.
+        #[serde(default)]
+        only: Option<Vec<String>>,
     },
     /// Patch one EQ preset: a param map (preset-carried params only)
     /// and/or a rename.
@@ -102,12 +108,16 @@ pub(crate) enum WsCommand {
         #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
     },
-    /// Drop an EQ preset's own overrides, restoring its baseline.
+    /// Drop an EQ preset's `config.toml` divergences — as
+    /// `reset_profile`, over the preset-carried params.
     ResetEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The preset to reset.
         id: ddp_state::PresetId,
+        /// The scope, over the params the preset carries.
+        #[serde(default)]
+        only: Option<Vec<String>>,
     },
     /// Delete a custom profile (factory ids reject).
     RemoveProfile {
