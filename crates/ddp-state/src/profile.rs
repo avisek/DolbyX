@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::param_def::ParameterDef;
 use crate::preset::PresetId;
 
 /// Stable string id of a profile (`"music"`, `"user_a3f1"`) —
@@ -61,20 +60,5 @@ impl Profile {
     /// allocation — callers validate against `ParameterDef` first.
     pub fn splice(&mut self, name: &str, values: &[i16]) {
         crate::param_def::splice_head(&mut self.params, name, values);
-    }
-
-    /// The snapshot's per-item `overridden` list (ADR-0005): every
-    /// content key diverging from what resolves beneath the profile's
-    /// `config.toml` row — params in `defs` table order, then
-    /// `"selected_eq_preset"` when the selection diverges; never `name`
-    /// (a label, not content). Reset's dual: exactly what a whole-item
-    /// `reset_profile` would clear.
-    #[must_use]
-    pub fn overridden(&self, defs: &[ParameterDef]) -> Vec<String> {
-        let mut keys = crate::param_def::diverging(&self.params, &self.baseline, defs);
-        if self.selected_eq_preset != self.selection_baseline {
-            keys.push("selected_eq_preset".into());
-        }
-        keys
     }
 }

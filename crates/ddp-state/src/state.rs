@@ -2024,11 +2024,11 @@ mod tests {
     }
 
     /// Behavior 1 (issue #26 B), state half: a whole-item profile
-    /// reset drops every divergence — params AND the selection
+    /// reset drops every divergence — params AND the EQ selection
     /// override — while `name` survives; a custom falls to the shared
     /// layers (its custom baseline), never its birth clone.
     #[test]
-    fn whole_item_reset_drops_params_and_the_selection_override() {
+    fn whole_item_reset_drops_params_and_the_eq_selection_override() {
         let table = defs();
         let mut state = State::new_from_defaults(&defaults());
         let _ = state
@@ -2101,9 +2101,9 @@ mod tests {
             vec![7],
             "the shared layers — never the birth clone's 2"
         );
-        assert_eq!(custom.selected_eq_preset, None, "selection dropped");
+        assert_eq!(custom.selected_eq_preset, None, "EQ selection dropped");
         assert_eq!(custom.name, "Late Night", "`name` never resets");
-        assert_eq!(custom.overridden(&table), Vec::<String>::new());
+        assert_eq!(custom.params, custom.baseline, "nothing left diverging");
     }
 
     /// Behavior 2 (issue #26 B), state half: `only` clears exactly the
@@ -2130,7 +2130,7 @@ mod tests {
             "exactly the restored entry"
         );
         assert_eq!(state.selected().params["dvla"], vec![9], "dvla untouched");
-        assert_eq!(state.selected().overridden(&table), ["dvla"]);
+        assert_eq!(state.selected().baseline["dvla"], vec![4], "…and diverging");
 
         // A selection-only scope: the effective EQ set flushes.
         let _ = state
@@ -2274,42 +2274,43 @@ mod tests {
         );
     }
 
-    /// Behavior 3 (issue #26 B), state half: `overridden` lists exactly
-    /// the content keys diverging from what resolves beneath the config
-    /// row — params in table order, `"selected_eq_preset"` appended when
-    /// the selection diverges, never `name` — appearing on edit and
-    /// disappearing on an edit back to the baseline value.
+    /// Behavior 3 (issue #26 B), state half: every item carries its
+    /// baseline — divergence's input, client-derived on the wire
+    /// (ADR-0005) — and edits move the resolved side only: the
+    /// baselines hold still, so resolved ≠ baseline appears on edit
+    /// and disappears on an edit back to the baseline value.
     #[test]
-    fn overridden_tracks_divergences_against_the_baseline() {
+    fn baselines_hold_still_beneath_edits_as_divergence_inputs() {
         let table = defs();
         let mut state = State::new_from_defaults(&defaults());
-        assert_eq!(state.selected().overridden(&table), Vec::<String>::new());
+        let music = state.selected();
+        assert_eq!(music.params, music.baseline, "fresh ⇒ nothing diverges");
+        assert_eq!(music.selection_baseline, None);
 
-        // Edits appear in table order, not edit order.
         let _ = state
             .apply(edit("music", &[("gebg", &[5, -5]), ("dvla", &[9])]), &table)
             .unwrap();
-        assert_eq!(state.selected().overridden(&table), ["dvla", "gebg"]);
-
-        // A selection over the None beneath diverges; a rename never shows.
         let _ = state
             .apply(select_preset("music", Some(rich())), &table)
             .unwrap();
-        assert_eq!(
-            state.selected().overridden(&table),
-            ["dvla", "gebg", "selected_eq_preset"]
-        );
+        let music = state.selected();
+        assert_eq!(music.params["dvla"], vec![9]);
+        assert_eq!(music.baseline["dvla"], vec![4], "the baseline holds");
+        assert_eq!(music.baseline["gebg"], vec![0; 4]);
+        assert_eq!(music.selected_eq_preset, Some(rich()));
+        assert_eq!(music.selection_baseline, None, "the EQ selection's too");
 
-        // Editing back to the baseline values clears the keys live.
+        // Editing back to the baseline values erases the divergence —
+        // resolved == baseline again, no bookkeeping in between.
         let _ = state
-            .apply(edit("music", &[("dvla", &[4])]), &table)
+            .apply(edit("music", &[("dvla", &[4]), ("gebg", &[0, 0])]), &table)
             .unwrap();
         let _ = state.apply(select_preset("music", None), &table).unwrap();
-        assert_eq!(state.selected().overridden(&table), ["gebg"]);
+        let music = state.selected();
+        assert_eq!(music.params, music.baseline);
+        assert_eq!(music.selected_eq_preset, music.selection_baseline);
 
         // The preset counterpart, over the preset-carried params.
-        let rich_preset = state.eq_preset(&rich()).unwrap();
-        assert_eq!(rich_preset.overridden(&table), Vec::<String>::new());
         let _ = state
             .apply(
                 Command::EditEqPreset {
@@ -2320,9 +2321,12 @@ mod tests {
                 &table,
             )
             .unwrap();
+        let rich_preset = state.eq_preset(&rich()).unwrap();
+        assert_eq!(rich_preset.params["iebt"], vec![9, 95, -55, -235]);
         assert_eq!(
-            state.eq_preset(&rich()).unwrap().overridden(&table),
-            ["iebt"]
+            rich_preset.baseline["iebt"],
+            vec![67, 95, -55, -235],
+            "the preset baseline holds beneath the edit"
         );
     }
 
