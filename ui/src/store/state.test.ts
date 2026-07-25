@@ -17,6 +17,8 @@ const {
   applyProfileEdit,
   applyProfileRename,
   applySnapshot,
+  presetDiverges,
+  profileDiverges,
   resolvedEqParam,
 } = await import('./state')
 
@@ -25,6 +27,13 @@ it('hydrates the store from window.__BOOTSTRAP__ at module init', () => {
   expect(state.selected_profile).toBe('movie')
   expect(state.readouts['vnnb']).toEqual([20])
 })
+
+/** The store's Music profile — the fixture always carries one. */
+function music() {
+  const profile = state.profiles.find((entry) => entry.id === 'music')
+  if (!profile) throw new Error('fixture lost Music')
+  return profile
+}
 
 // The daemon merges short writes onto the head of the full allocation
 // (`Profile::splice`) — the local-first apply must agree.
@@ -63,36 +72,45 @@ it('applies an EQ preset edit by overlaying the head of the allocation', () => {
   expect(open?.params['geon']).toEqual([0])
 })
 
-// Behavior 2 (#26), the originator half: `overridden` is daemon-derived
-// (baselines live in the cascade), but the originator's own snapshots
-// are suppressed (ADR-0005) — so a local edit unions its keys in, and
-// Reset-disabled flips live as edits land. Approximate on purpose: an
-// edit back to the baseline value keeps the key until the next
-// snapshot corrects it.
-it('a local edit unions its keys into the item overridden list', () => {
+// Behavior 2 (#26), the originating-tab half: divergence is derived —
+// resolved ≠ baseline per content key, never a kept list — so with the
+// originator's own snapshots suppressed (ADR-0005) it still flips both
+// ways live: a local edit appears, an edit back to the baseline value
+// disappears.
+it('derives divergence from the baseline, disappearing on revert', () => {
   applySnapshot(fixtureState())
+  expect(profileDiverges(music())).toBe(false)
 
   applyProfileEdit('music', { dvla: [9] })
-  const music = () => state.profiles.find((profile) => profile.id === 'music')
-  expect(music()?.overridden).toEqual(['dvla'])
+  expect(profileDiverges(music())).toBe(true)
 
-  // Re-edits stay deduped; fresh keys append.
-  applyProfileEdit('music', { dvla: [3], gebg: [96] })
-  expect(music()?.overridden).toEqual(['dvla', 'gebg'])
+  // Reverted to Music's shipped value — no bookkeeping in between.
+  applyProfileEdit('music', { dvla: [4] })
+  expect(profileDiverges(music())).toBe(false)
 
+  const rich = () => {
+    const preset = state.eq_presets.find((entry) => entry.id === 'rich')
+    if (!preset) throw new Error('fixture lost Rich')
+    return preset
+  }
   applyEqPresetEdit('rich', { gebg: [96] })
-  const rich = state.eq_presets.find((preset) => preset.id === 'rich')
-  expect(rich?.overridden).toEqual(['gebg'])
+  expect(presetDiverges(rich())).toBe(true)
+  applyEqPresetEdit('rich', { gebg: [0] })
+  expect(presetDiverges(rich())).toBe(false)
 })
 
-// The selection is a content key like any param (ADR-0007) — an acked
-// selection patch unions `"selected_eq_preset"` the same way.
-it('a local selection patch unions selected_eq_preset into overridden', () => {
+// The EQ selection is a content key like any param (ADR-0007) — an
+// acked EQ selection patch diverges against
+// `baseline.selected_eq_preset`, and re-detaching reverts it.
+it('an EQ selection patch diverges against the baseline, revertibly', () => {
   applySnapshot(fixtureState())
+
   applyEqPreset('music', 'rich')
-  const music = state.profiles.find((profile) => profile.id === 'music')
-  expect(music?.selected_eq_preset).toBe('rich')
-  expect(music?.overridden).toEqual(['selected_eq_preset'])
+  expect(music().selected_eq_preset).toBe('rich')
+  expect(profileDiverges(music())).toBe(true)
+
+  applyEqPreset('music', null)
+  expect(profileDiverges(music())).toBe(false)
 })
 
 // Behavior 3 (#26), the store half: the add ack's minted id lets the
@@ -114,14 +132,15 @@ it('inserts acked clones locally and applies renames in place', () => {
   applyProfileRename('user_a3f1', 'Late Night')
   const clone = state.profiles.find((profile) => profile.id === 'user_a3f1')
   expect(clone?.name).toBe('Late Night')
-  expect(clone?.overridden).not.toContain('name') // a label, never reset
+  // A label, never content: the rename creates no divergence.
+  expect(clone && profileDiverges(clone)).toBe(false)
 
   applyEqPresetAdded({
     id: 'user_91c2',
     name: 'Preset 1',
     is_factory: false,
     params: { gebg: [96] },
-    overridden: [],
+    baseline: { params: { gebg: [96] } },
   })
   applyEqPresetRename('user_91c2', 'Warm')
   expect(state.eq_presets.at(-1)?.name).toBe('Warm')

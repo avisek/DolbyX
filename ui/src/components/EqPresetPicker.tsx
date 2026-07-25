@@ -1,7 +1,13 @@
-import { createSignal, For, Show, type Component } from 'solid-js'
+import { createMemo, createSignal, For, Show, type Component } from 'solid-js'
 import { captureName, cloneName } from '../lib/naming'
 import { presetCarried } from '../lib/parameters'
-import { selectedEqPreset, selectedProfile, state } from '../store/state'
+import {
+  paramsDiverge,
+  presetDiverges,
+  selectedEqPreset,
+  selectedProfile,
+  state,
+} from '../store/state'
 import {
   addEqPreset,
   removeEqPreset,
@@ -17,23 +23,24 @@ import './EqPresetPicker.css'
 /**
  * The EQ preset picker: None (the profile's own EQ params — "Off" is
  * `null`, not a preset) plus the global presets from the snapshot,
- * with the action row acting on the current selection, None included
- * (issue #26). Selection is per-profile and applies local-first on
- * ack; the daemon has already overlaid the resolved nine EQ params
- * (ADR-0003).
+ * with the action row acting on the currently picked item, None
+ * included (issue #26). The EQ selection is per-profile and applies
+ * local-first on ack; the daemon has already overlaid the resolved
+ * nine EQ params (ADR-0003).
  */
 const EqPresetPicker: Component = () => {
-  const selected = () => selectedProfile()?.selected_eq_preset ?? null
+  const picked = () => selectedProfile()?.selected_eq_preset ?? null
   const preset = () => selectedEqPreset()
-  // Nothing to clear ⇒ disabled: a preset when its own `overridden`
-  // is empty; the None row when the profile's `overridden` misses the
-  // nine entirely (its reset is scoped to them).
-  const resetDisabled = () => {
+  // Nothing to clear ⇒ disabled, a memo over the snapshot's baseline
+  // (ADR-0005): a picked preset when none of its params diverge; the
+  // None row when none of the profile's own 9 do (its reset is scoped
+  // to them) — flipping both ways live as edits land and revert.
+  const resetDisabled = createMemo(() => {
     const target = preset()
-    if (target) return target.overridden.length === 0
-    const overridden = selectedProfile()?.overridden ?? []
-    return !presetCarried().some((name) => overridden.includes(name))
-  }
+    if (target) return !presetDiverges(target)
+    const profile = selectedProfile()
+    return profile === undefined || !paramsDiverge(profile, presetCarried())
+  })
   const [renaming, setRenaming] = createSignal(false)
   return (
     <div class="eq-preset-picker">
@@ -45,7 +52,7 @@ const EqPresetPicker: Component = () => {
         <For each={[null, ...state.eq_presets]}>
           {(entry) => (
             <Show
-              when={!(renaming() && entry !== null && entry.id === selected())}
+              when={!(renaming() && entry !== null && entry.id === picked())}
               fallback={
                 <RenameInput
                   label="EQ preset name"
@@ -63,13 +70,13 @@ const EqPresetPicker: Component = () => {
                 type="button"
                 class="eq-preset-picker__option"
                 role="radio"
-                aria-checked={selected() === (entry?.id ?? null)}
+                aria-checked={picked() === (entry?.id ?? null)}
                 onClick={() => {
                   // Re-picking the checked option is a no-op gesture —
-                  // no patch, so the local `overridden` union can't
-                  // falsely mark a pristine profile diverging.
+                  // wire hygiene: nothing changed, so no patch goes
+                  // out.
                   const id = entry?.id ?? null
-                  if (id !== selected()) setEqPreset(state.selected_profile, id)
+                  if (id !== picked()) setEqPreset(state.selected_profile, id)
                 }}
               >
                 {entry?.name ?? 'None'}

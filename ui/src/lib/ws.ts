@@ -4,6 +4,23 @@
  * engine-native i16 1/16-dB throughout; params travel by 4-CC name.
  */
 
+/**
+ * A profile's content shape — the EQ selection plus every writable
+ * param: what a profile resolves and what its `baseline` mirrors
+ * (ADR-0005).
+ */
+export interface ProfileContent {
+  /** `null` ⇒ the profile's own EQ params apply. */
+  readonly selected_eq_preset: string | null
+  /** Every writable param, keyed by 4-CC, in engine-native i16. */
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
+/** An EQ preset's content shape — the nine preset-carried params. */
+export interface PresetContent {
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
 /** One profile as the snapshot carries it — complete, cascade-resolved. */
 export interface Profile {
   readonly id: string
@@ -15,11 +32,13 @@ export interface Profile {
   /** Every writable param, keyed by 4-CC, in engine-native i16. */
   readonly params: Readonly<Record<string, readonly number[]>>
   /**
-   * The content keys diverging from what resolves beneath the item's
-   * `config.toml` row — exactly what a whole-item reset would clear
-   * (ADR-0005); the UI derives every Reset-disabled state from it.
+   * What resolves beneath the item's `config.toml` row, content-shaped
+   * (ADR-0005). Divergence — resolved ≠ baseline per content key,
+   * exactly what a whole-item reset would clear — is derived from it,
+   * never shipped: the snapshot ships inputs, and every
+   * Reset-disabled state follows.
    */
-  readonly overridden: readonly string[]
+  readonly baseline: ProfileContent
 }
 
 /**
@@ -34,8 +53,8 @@ export interface EqPreset {
   readonly is_factory: boolean
   /** The nine preset-carried params, keyed by 4-CC, in engine-native i16. */
   readonly params: Readonly<Record<string, readonly number[]>>
-  /** As [`Profile.overridden`], over the preset-carried params. */
-  readonly overridden: readonly string[]
+  /** As [`Profile.baseline`], over the preset-carried params. */
+  readonly baseline: PresetContent
 }
 
 /** Mirror of the WS `state` event's snapshot. */
@@ -78,9 +97,9 @@ export type Command =
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
       readonly params?: Readonly<Record<string, readonly number[]>>
       /**
-       * Tri-state selection patch: absent = untouched, `null` = detach
-       * (the profile's own EQ params apply), id = select. EQ selection
-       * is per-profile — the target is explicit.
+       * Tri-state EQ selection patch: absent = untouched, `null` =
+       * detach (the profile's own EQ params apply), id = select. The
+       * EQ selection is per-profile — the target is explicit.
        */
       readonly selected_eq_preset?: string | null
     }
@@ -121,7 +140,7 @@ export type Command =
       readonly cmd: 'reset_profile'
       readonly id: string
       /**
-       * The scope: absent ⇒ the whole item (selection override
+       * The scope: absent ⇒ the whole item (the EQ selection override
        * included); present ⇒ exactly these content keys. A key the
        * item doesn't carry rejects.
        */
@@ -136,7 +155,8 @@ export type Command =
   | {
       /**
        * Delete a custom profile (factory ids reject). Deleting the
-       * selected profile falls the selection to the Fallback profile.
+       * selected profile falls the active profile to the Fallback
+       * profile.
        */
       readonly cmd: 'remove_profile'
       readonly id: string

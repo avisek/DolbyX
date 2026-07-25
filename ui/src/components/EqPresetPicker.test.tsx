@@ -7,8 +7,8 @@ import {
 } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
-import { fixtureBootstrap, fixtureState } from '../test/fixture'
-import type { EqPreset, StateSnapshot } from '../lib/ws'
+import { fixtureBootstrap, fixtureRamp, fixtureState } from '../test/fixture'
+import type { StateSnapshot } from '../lib/ws'
 
 // The store reads window.__BOOTSTRAP__ at module init (ADR-0006) —
 // install the fixture before the dynamic imports evaluate.
@@ -16,7 +16,7 @@ window.__BOOTSTRAP__ = fixtureBootstrap()
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 const { default: EqPresetPicker } = await import('./EqPresetPicker')
-const { applySnapshot } = await import('../store/state')
+const { applyProfileEdit, applySnapshot } = await import('../store/state')
 const { startWs, stopWs } = await import('../store/ws')
 
 beforeEach(() => {
@@ -60,8 +60,8 @@ function selectingState(
   }
 }
 
-/** The selection-patch `edit_profile` frames the client sent. */
-function sentSelections(socket: MockWebSocket) {
+/** The EQ-selection-patch `edit_profile` frames the client sent. */
+function sentEqSelections(socket: MockWebSocket) {
   return socket
     .sentCommands()
     .filter(
@@ -69,10 +69,14 @@ function sentSelections(socket: MockWebSocket) {
     )
 }
 
-/** The fixture state plus a custom preset, selected by `profileId`. */
+/**
+ * The fixture state plus a custom preset, picked by `profileId`.
+ * `edits` overlay the custom's params off its (copied) baseline — the
+ * way a snapshot seeds divergence now that none is ever shipped.
+ */
 function customPresetState(
   profileId: string,
-  overrides: Partial<EqPreset> = {},
+  edits: Record<string, readonly number[]> = {},
 ): StateSnapshot {
   const seeded = selectingState(profileId, 'user_91c2')
   const rich = seeded.eq_presets.find((preset) => preset.id === 'rich')
@@ -86,7 +90,7 @@ function customPresetState(
         id: 'user_91c2',
         name: 'Rich 2',
         is_factory: false,
-        ...overrides,
+        params: { ...rich.params, ...edits },
       },
     ],
   }
@@ -116,11 +120,11 @@ it('renders None + the factory presets with None selected', () => {
 // the tri-state `edit_profile` patch targeting the active profile
 // explicitly (EQ selection is per-profile) and applies local-first on
 // the daemon's ack.
-it('picking Rich sends an edit_profile selection patch', async () => {
+it('picking Rich sends an edit_profile EQ selection patch', async () => {
   const socket = renderConnected()
 
   option('Rich').click()
-  const sent = sentSelections(socket)
+  const sent = sentEqSelections(socket)
   expect(sent).toEqual([
     {
       cmd: 'edit_profile',
@@ -145,13 +149,13 @@ it('picking Rich sends an edit_profile selection patch', async () => {
 // Behavior 1 (#57) / behavior 3 (#23), client half: the None
 // affordance detaches with `selected_eq_preset: null` — "Off" is
 // null, not a preset (absent would mean untouched).
-it('picking None detaches with a null selection patch', () => {
+it('picking None detaches with a null EQ selection patch', () => {
   applySnapshot(selectingState('music', 'rich'))
   const socket = renderConnected()
   expect(option('Rich').getAttribute('aria-checked')).toBe('true')
 
   option('None').click()
-  expect(sentSelections(socket)).toEqual([
+  expect(sentEqSelections(socket)).toEqual([
     {
       cmd: 'edit_profile',
       request_id: expect.any(String) as string,
@@ -161,24 +165,23 @@ it('picking None detaches with a null selection patch', () => {
   ])
 })
 
-// Re-picking the checked option is a no-op gesture: no patch goes
-// out, so the local `overridden` union can't falsely enable Reset on
-// a pristine profile (behavior 2's disabled-iff rule).
+// Re-picking the checked option is a no-op gesture: nothing changed,
+// so no patch goes out — wire hygiene.
 it('re-picking the checked option sends nothing', () => {
   const socket = renderConnected() // Music with None selected
 
   option('None').click()
-  expect(sentSelections(socket)).toEqual([])
+  expect(sentEqSelections(socket)).toEqual([])
   expect(action('Reset EQ preset').disabled).toBe(true)
 
   applySnapshot(selectingState('music', 'rich'))
   option('Rich').click()
-  expect(sentSelections(socket)).toEqual([])
+  expect(sentEqSelections(socket)).toEqual([])
 })
 
-// Behavior 6 (#23), client half: selection is per-profile — switching
-// the active profile shows that profile's own selection.
-it("shows each profile's own selection", () => {
+// Behavior 6 (#23), client half: the EQ selection is per-profile —
+// switching the active profile shows that profile's own EQ selection.
+it("shows each profile's own EQ selection", () => {
   render(() => <EqPresetPicker />)
   applySnapshot(selectingState('game', 'open'))
   expect(option('None').getAttribute('aria-checked')).toBe('true') // music
@@ -189,8 +192,8 @@ it("shows each profile's own selection", () => {
 })
 
 // Behavior 1 (#26), preset half: the action row renders all four
-// actions always, acting on the current selection — None included;
-// None and factory selections disable Rename/Delete, a custom enables
+// actions always, acting on the picked item — None included;
+// None and factory picks disable Rename/Delete, a custom enables
 // them, presence never changes (zero layout shift).
 it('renders all four actions always; None/factory/custom flip disabled only', () => {
   render(() => <EqPresetPicker />) // Music with None selected
@@ -209,32 +212,34 @@ it('renders all four actions always; None/factory/custom flip disabled only', ()
   expect(screen.getAllByRole('button')).toHaveLength(4)
 })
 
-/** The fixture state with the active profile's `overridden` set. */
-function overriddenState(overridden: readonly string[]): StateSnapshot {
+/** The fixture state with the active profile's params edited. */
+function editedMusicState(
+  edits: Record<string, readonly number[]>,
+): StateSnapshot {
   const seeded = fixtureState()
   return {
     ...seeded,
     profiles: seeded.profiles.map((profile) =>
       profile.id === seeded.selected_profile
-        ? { ...profile, overridden }
+        ? { ...profile, params: { ...profile.params, ...edits } }
         : profile,
     ),
   }
 }
 
 // Behavior 2 (#26), preset half: the None row resets the profile's
-// own EQ scoped to the nine preset-carried keys — disabled iff
-// `overridden ∩ the-9` is empty, flipping live as edits land.
+// own EQ scoped to the nine preset-carried keys — disabled iff none
+// of the 9 diverge from the baseline, flipping live as edits land.
 it('the None row sends a reset_profile scoped to the 9', () => {
   const socket = renderConnected()
 
   // Fresh Music: nothing diverges → nothing to clear.
   expect(action('Reset EQ preset').disabled).toBe(true)
-  // A non-EQ divergence doesn't intersect the 9 → still disabled.
-  applySnapshot(overriddenState(['dvla']))
+  // A non-EQ divergence is outside the scope → still disabled.
+  applySnapshot(editedMusicState({ dvla: [9] }))
   expect(action('Reset EQ preset').disabled).toBe(true)
   // An EQ divergence lands → enabled.
-  applySnapshot(overriddenState(['dvla', 'gebg']))
+  applySnapshot(editedMusicState({ dvla: [9], gebg: fixtureRamp(6) }))
   expect(action('Reset EQ preset').disabled).toBe(false)
 
   action('Reset EQ preset').click()
@@ -256,14 +261,30 @@ it('the None row sends a reset_profile scoped to the 9', () => {
   })
 })
 
-// Behavior 2 (#26), preset half: a selected preset resets whole-item
-// via `reset_eq_preset`, disabled iff its own `overridden` is empty.
-it('a selected EQ preset resets whole-item via reset_eq_preset', () => {
+// Behavior 2 (#26), the None row's originating-tab regression: its
+// Reset watches the 9 against the baseline as a memo, so a local
+// edit enables it and reverting to the baseline value disables it —
+// no snapshot round-trip involved.
+it('the None row Reset flips live both ways as edits land and revert', () => {
+  render(() => <EqPresetPicker />) // Music with None picked
+  expect(action('Reset EQ preset').disabled).toBe(true)
+
+  applyProfileEdit('music', { gebg: fixtureRamp(6) })
+  expect(action('Reset EQ preset').disabled).toBe(false)
+
+  // Back to the flat baseline curve — reverted, not reset.
+  applyProfileEdit('music', { gebg: fixtureRamp(0) })
+  expect(action('Reset EQ preset').disabled).toBe(true)
+})
+
+// Behavior 2 (#26), preset half: a picked preset resets whole-item
+// via `reset_eq_preset`, disabled iff none of its params diverge.
+it('a picked EQ preset resets whole-item via reset_eq_preset', () => {
   const socket = renderConnected()
 
   applySnapshot(customPresetState('music'))
   expect(action('Reset EQ preset').disabled).toBe(true)
-  applySnapshot(customPresetState('music', { overridden: ['iebt'] }))
+  applySnapshot(customPresetState('music', { iebt: fixtureRamp(6) }))
   expect(action('Reset EQ preset').disabled).toBe(false)
 
   action('Reset EQ preset').click()
@@ -279,7 +300,7 @@ it('a selected EQ preset resets whole-item via reset_eq_preset', () => {
 // Behavior 3 (#26), preset half: Add clones the selected preset —
 // its resolved params under the minted `«base» n` name — and the
 // ack's minted id auto-selects the clone for this profile (the
-// daemon never moves selection on add).
+// daemon never moves the EQ selection on add).
 it('Add clones the selected preset and the acked minted id selects it', async () => {
   applySnapshot(selectingState('music', 'rich'))
   const socket = renderConnected()
@@ -300,9 +321,9 @@ it('Add clones the selected preset and the acked minted id selects it', async ()
     id: 'user_91c2',
   })
   // The originator applies the clone off its ack, then selects it —
-  // an `edit_profile` selection patch, per-profile.
+  // an `edit_profile` EQ selection patch, per-profile.
   const follow = await waitFor(() => {
-    const frame = sentSelections(socket).at(-1)
+    const frame = sentEqSelections(socket).at(-1)
     expect(frame).toMatchObject({
       id: 'music',
       selected_eq_preset: 'user_91c2',
@@ -414,9 +435,9 @@ it('Delete sends remove_eq_preset and the reconcile falls to None', async () => 
   })
 })
 
-// Another client's selection arrives as a broadcast state event and
+// Another client's EQ selection arrives as a broadcast state event and
 // moves this tab's picker.
-it('updates the selection on a broadcast state event', () => {
+it('updates the picked option on a broadcast state event', () => {
   const socket = renderConnected()
   socket.serverMessage({
     type: 'state',

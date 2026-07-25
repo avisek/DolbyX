@@ -48,14 +48,28 @@ export function stopWs(): void {
 /**
  * Pulls the daemon's full truth after an acked op whose result the
  * originator cannot compute locally (reset values, remove fallbacks,
- * a fresh clone's `overridden` — the baselines live in the cascade,
- * daemon-side). Safe where the in-flight-edit hazard (ADR-0005) isn't:
- * structural clicks never race a drag.
+ * a fresh clone's `baseline` — the cascade lives daemon-side). Safe
+ * where the in-flight-edit hazard (ADR-0005) isn't: structural clicks
+ * never race a drag.
  */
 function reconcile(): void {
   void client?.request({ cmd: 'get_state' }).catch(() => {
     // Handled as any other error event; never unhandled-rejection noise.
   })
+}
+
+/**
+ * A plain deep copy of a params map. Insert paths need one copy per
+ * destination: handing the store one object for both `params` and
+ * `baseline.params` would let a reconcile move the two sides at once
+ * (real snapshots never alias — they arrive JSON-parsed).
+ */
+function copyParams(
+  params: Readonly<Record<string, readonly number[]>>,
+): Record<string, readonly number[]> {
+  return Object.fromEntries(
+    Object.entries(params).map(([name, values]) => [name, [...values]]),
+  )
 }
 
 /**
@@ -106,7 +120,7 @@ export function setProfile(id: string): void {
 }
 
 /**
- * Local-first EQ preset selection — an `edit_profile` tri-state
+ * Local-first EQ selection — an `edit_profile` tri-state
  * `selected_eq_preset` patch (ADR-0005): id selects, `null` detaches
  * one profile's overlay; applied on the daemon's ack — the daemon has
  * already pushed the resolved nine EQ params in one atomic batch.
@@ -162,8 +176,10 @@ export function editProfileLive(
  * `add_profile` from the content the UI already holds — clone is a UI
  * gesture, never a source reference (ADR-0005). On the ack the
  * originator inserts the clone under the minted id and auto-selects
- * it (the daemon never moves selection on add); the reconcile trues
- * up the clone's daemon-derived `overridden`.
+ * it (the daemon never moves the active profile on add); the
+ * reconcile fetches the clone's true `baseline` — only the daemon's
+ * cascade knows what resolves beneath a custom row, and a Music clone
+ * genuinely diverges from it, so Reset enables as the snapshot lands.
  */
 export function addProfile(
   name: string,
@@ -184,8 +200,13 @@ export function addProfile(
         name,
         is_factory: false,
         selected_eq_preset: selectedEqPreset,
-        params,
-        overridden: [],
+        params: copyParams(params),
+        // Baseline unknown until the reconcile: content-as-sent means
+        // "diverges nowhere yet" — never a false Reset.
+        baseline: {
+          selected_eq_preset: selectedEqPreset,
+          params: copyParams(params),
+        },
       })
       setProfile(minted)
       reconcile()
@@ -198,7 +219,7 @@ export function addProfile(
 /**
  * Local-first rename — an `edit_profile` name patch (ADR-0005: there
  * is no `rename_*`), applied on the ack; ids and persistence keys
- * stay stable, `overridden` untouched (`name` is a label, never a
+ * stay stable, divergence untouched (`name` is a label, never a
  * content key).
  */
 export function renameProfile(id: string, name: string): void {
@@ -216,8 +237,8 @@ export function renameProfile(id: string, name: string): void {
  * `add_eq_preset` from content the UI already holds — the clone and
  * None-capture gestures share it (ADR-0005). On the ack the
  * originator inserts the preset under the minted id and selects it
- * for `profileId` via the usual `edit_profile` selection patch; the
- * reconcile trues up the daemon-derived `overridden`.
+ * for `profileId` via the usual `edit_profile` EQ selection patch;
+ * the reconcile fetches the true `baseline`, as [`addProfile`]'s.
  */
 export function addEqPreset(
   profileId: string,
@@ -232,8 +253,8 @@ export function addEqPreset(
         id: minted,
         name,
         is_factory: false,
-        params,
-        overridden: [],
+        params: copyParams(params),
+        baseline: { params: copyParams(params) },
       })
       setEqPreset(profileId, minted)
       reconcile()
@@ -276,9 +297,9 @@ export function resetEqPreset(id: string): void {
 }
 
 /**
- * `remove_profile` — deleting the selected profile falls the
- * selection to the Fallback profile, which only `defaults.toml`
- * knows: reconcile off the ack rather than guess.
+ * `remove_profile` — deleting the selected profile falls the active
+ * profile to the Fallback profile, which only `defaults.toml` knows:
+ * reconcile off the ack rather than guess.
  */
 export function removeProfile(id: string): void {
   requestThenReconcile({ cmd: 'remove_profile', id })

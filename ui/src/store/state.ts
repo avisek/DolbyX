@@ -76,22 +76,16 @@ export function applyProfile(id: string): void {
 }
 
 /**
- * Applies this tab's own acked EQ preset selection (local-first) —
+ * Applies this tab's own acked EQ selection patch (local-first) —
  * per-profile, `null` detaching to the profile's own EQ params. The
- * selection is a content key (ADR-0007), so it unions into
- * `overridden` like any edit.
+ * EQ selection is a content key (ADR-0007): moving it off
+ * `baseline.selected_eq_preset` is divergence like any edit.
  */
 export function applyEqPreset(profileId: string, id: string | null): void {
   setState('profiles', (profiles) =>
     profiles.map((profile) =>
       profile.id === profileId
-        ? {
-            ...profile,
-            selected_eq_preset: id,
-            overridden: unionOverridden(profile.overridden, [
-              'selected_eq_preset',
-            ]),
-          }
+        ? { ...profile, selected_eq_preset: id }
         : profile,
     ),
   )
@@ -109,20 +103,53 @@ function mergeParams(
   return merged
 }
 
+/** Element-wise equality of two param value arrays. */
+function sameValues(
+  a: readonly number[] | undefined,
+  b: readonly number[] | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.length === b.length && a.every((value, slot) => value === b[slot])
+}
+
 /**
- * Unions freshly edited content keys into an item's `overridden`.
- * `overridden` is daemon-derived (the baselines live in the cascade),
- * but the originator's own snapshots are suppressed (ADR-0005) — this
- * keeps its Reset affordances flipping live as edits land. Approximate
- * on purpose: an edit back to the baseline value keeps the key until
- * the next snapshot corrects it; a wrongly enabled Reset is a no-op
- * whose reconcile then disables it.
+ * Whether any of an item's params diverge from its snapshot `baseline`
+ * — optionally scoped to `keys` (the None row scopes to the 9). Purely
+ * derived (ADR-0005): the snapshot ships the baseline, never a
+ * precomputed list, so the originating tab sees a divergence disappear
+ * the moment an edit lands back on the baseline value.
  */
-function unionOverridden(
-  overridden: readonly string[],
-  edited: readonly string[],
-): readonly string[] {
-  return [...overridden, ...edited.filter((key) => !overridden.includes(key))]
+export function paramsDiverge(
+  item: {
+    readonly params: Readonly<Record<string, readonly number[]>>
+    readonly baseline: {
+      readonly params: Readonly<Record<string, readonly number[]>>
+    }
+  },
+  keys?: readonly string[],
+): boolean {
+  const named = keys ?? Object.keys(item.params)
+  return named.some(
+    (name) => !sameValues(item.params[name], item.baseline.params[name]),
+  )
+}
+
+/**
+ * Whole-item divergence of a profile — any content key off its
+ * baseline: a param, or the EQ selection. Exactly what a whole-item
+ * `reset_profile` would clear; the profile Reset affordance disables
+ * on its negation.
+ */
+export function profileDiverges(profile: Profile): boolean {
+  return (
+    profile.selected_eq_preset !== profile.baseline.selected_eq_preset ||
+    paramsDiverge(profile)
+  )
+}
+
+/** As [`profileDiverges`], for an EQ preset (params only). */
+export function presetDiverges(preset: EqPreset): boolean {
+  return paramsDiverge(preset)
 }
 
 /**
@@ -137,14 +164,7 @@ export function applyProfileEdit(
   setState('profiles', (profiles) =>
     profiles.map((profile) =>
       profile.id === id
-        ? {
-            ...profile,
-            params: mergeParams(profile.params, params),
-            overridden: unionOverridden(
-              profile.overridden,
-              Object.keys(params),
-            ),
-          }
+        ? { ...profile, params: mergeParams(profile.params, params) }
         : profile,
     ),
   )
@@ -153,8 +173,9 @@ export function applyProfileEdit(
 /**
  * Inserts this tab's own acked clone — content as sent, id as minted
  * (ADR-0005: the ack id exists so the originator applies locally
- * without waiting for a snapshot). `overridden` starts as the caller's
- * guess; the add's `get_state` chaser trues it up.
+ * without waiting for a snapshot). `baseline` starts as the caller's
+ * guess; the add's `get_state` chaser fetches the true one (it lives
+ * in the cascade, daemon-side).
  */
 export function applyProfileAdded(profile: Profile): void {
   setState('profiles', (profiles) => [...profiles, profile])
@@ -192,11 +213,7 @@ export function applyEqPresetEdit(
   setState('eq_presets', (presets) =>
     presets.map((preset) =>
       preset.id === id
-        ? {
-            ...preset,
-            params: mergeParams(preset.params, params),
-            overridden: unionOverridden(preset.overridden, Object.keys(params)),
-          }
+        ? { ...preset, params: mergeParams(preset.params, params) }
         : preset,
     ),
   )

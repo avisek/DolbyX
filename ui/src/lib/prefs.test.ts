@@ -34,7 +34,7 @@ it('degrades the count to genb when genb sits below the 2-slider floor', () => {
 })
 
 // The smoother kernel pref — default Mobile; only declared kernel
-// names pass (part C consumes the selection).
+// names pass (part C consumes the chosen kernel).
 it('defaults the smoother kernel to Mobile and rejects unknown names', () => {
   expect(smootherKernel()).toBe('Mobile')
 

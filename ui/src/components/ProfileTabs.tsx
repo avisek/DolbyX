@@ -1,6 +1,6 @@
-import { createSignal, For, Show, type Component } from 'solid-js'
+import { createMemo, createSignal, For, Show, type Component } from 'solid-js'
 import { cloneName } from '../lib/naming'
-import { selectedProfile, state } from '../store/state'
+import { profileDiverges, selectedProfile, state } from '../store/state'
 import {
   addProfile,
   removeProfile,
@@ -14,13 +14,20 @@ import './ProfileTabs.css'
 
 /**
  * The profile tabs plus their action row (issue #26): tabs from the
- * snapshot's profiles, selection local-first on ack; the four CRUD
+ * snapshot's profiles, switching local-first on ack; the four CRUD
  * affordances act on the selected profile — Rename/Delete disabled on
- * factory items, Reset disabled iff nothing diverges (`overridden`
- * empty), all derived, never hidden.
+ * factory items, Reset disabled iff nothing diverges (a memo over the
+ * snapshot's baseline), all derived, never hidden.
  */
 const ProfileTabs: Component = () => {
   const selected = () => selectedProfile()
+  // Divergence is derived, never shipped (ADR-0005) — so it flips
+  // both ways live on this tab, an edit back to the baseline value
+  // included.
+  const diverges = createMemo(() => {
+    const profile = selected()
+    return profile !== undefined && profileDiverges(profile)
+  })
   const [renaming, setRenaming] = createSignal(false)
   return (
     <div class="profile-tabs">
@@ -77,7 +84,7 @@ const ProfileTabs: Component = () => {
         onDelete={() => {
           removeProfile(state.selected_profile)
         }}
-        resetDisabled={(selected()?.overridden.length ?? 0) === 0}
+        resetDisabled={!diverges()}
         onReset={() => {
           resetProfile(state.selected_profile)
         }}

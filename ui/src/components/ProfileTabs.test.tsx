@@ -7,8 +7,8 @@ import {
 } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
-import { fixtureBootstrap, fixtureState } from '../test/fixture'
-import type { Profile, StateSnapshot } from '../lib/ws'
+import { fixtureBootstrap, fixtureRamp, fixtureState } from '../test/fixture'
+import type { StateSnapshot } from '../lib/ws'
 
 // The store reads window.__BOOTSTRAP__ at module init (ADR-0006) —
 // install the fixture before the dynamic imports evaluate.
@@ -16,7 +16,7 @@ window.__BOOTSTRAP__ = fixtureBootstrap()
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 const { default: ProfileTabs } = await import('./ProfileTabs')
-const { applySnapshot } = await import('../store/state')
+const { applyProfileEdit, applySnapshot } = await import('../store/state')
 const { startWs, stopWs } = await import('../store/ws')
 
 beforeEach(() => {
@@ -61,8 +61,14 @@ async function ackThenReconcile(
   })
 }
 
-/** The fixture state plus one custom clone of Music, selected. */
-function customSelectedState(overrides: Partial<Profile> = {}): StateSnapshot {
+/**
+ * The fixture state plus one custom clone of Music, selected. `edits`
+ * overlay the clone's params off its (copied) baseline — the way a
+ * snapshot seeds divergence now that none is ever shipped.
+ */
+function customSelectedState(
+  edits: Record<string, readonly number[]> = {},
+): StateSnapshot {
   const seeded = fixtureState()
   const music = seeded.profiles.find((profile) => profile.id === 'music')
   if (!music) throw new Error('fixture lost Music')
@@ -76,7 +82,7 @@ function customSelectedState(overrides: Partial<Profile> = {}): StateSnapshot {
         id: 'user_a3f1',
         name: 'Music 2',
         is_factory: false,
-        ...overrides,
+        params: { ...music.params, ...edits },
       },
     ],
   }
@@ -89,15 +95,15 @@ it('renders all four actions always; factory vs custom flips disabled only', () 
   render(() => <ProfileTabs />)
 
   // Factory (Music) selected: Add always live, the rest disabled —
-  // Reset because nothing diverges (`overridden` empty).
+  // Reset because nothing diverges (content == baseline).
   expect(action('Add profile').disabled).toBe(false)
   expect(action('Rename profile').disabled).toBe(true)
   expect(action('Delete profile').disabled).toBe(true)
   expect(action('Reset profile').disabled).toBe(true)
 
-  // A custom selection flips Rename/Delete live; every action stays
-  // in the DOM (disable, never hide).
-  applySnapshot(customSelectedState({ overridden: ['dvla'] }))
+  // Selecting a diverging custom flips the rest live; every action
+  // stays in the DOM (disable, never hide).
+  applySnapshot(customSelectedState({ dvla: [9] }))
   expect(action('Add profile').disabled).toBe(false)
   expect(action('Rename profile').disabled).toBe(false)
   expect(action('Delete profile').disabled).toBe(false)
@@ -105,12 +111,31 @@ it('renders all four actions always; factory vs custom flips disabled only', () 
   expect(screen.getAllByRole('button')).toHaveLength(4)
 })
 
+// Behavior 2 (#26), the regression the spec correction exists for:
+// divergence is a memo over the snapshot's baseline, so Reset flips
+// live BOTH ways on the originating tab — an edit enables it,
+// reverting to the baseline value disables it again — with no
+// snapshot round-trip (the daemon suppresses the originator's).
+it('an edit enables Reset and reverting to baseline disables it, locally', () => {
+  render(() => <ProfileTabs />)
+  // A divergence-free custom: content sits exactly at its baseline.
+  applySnapshot(customSelectedState())
+  expect(action('Reset profile').disabled).toBe(true)
+
+  applyProfileEdit('user_a3f1', { dvla: [9] })
+  expect(action('Reset profile').disabled).toBe(false)
+
+  // Back to the baseline value — no reset, just the edit reverted.
+  applyProfileEdit('user_a3f1', { dvla: [4] })
+  expect(action('Reset profile').disabled).toBe(true)
+})
+
 // Behavior 2 (#26), profile half: Reset sends the whole-item
 // `reset_profile` (no `only`), reconciles off its ack, and the
-// disabled state tracks `overridden` end to end.
+// disabled state tracks the derived divergence end to end.
 it('Reset sends a whole-item reset_profile and reconciles on the ack', async () => {
   const socket = renderConnected()
-  applySnapshot(customSelectedState({ overridden: ['dvla', 'gebg'] }))
+  applySnapshot(customSelectedState({ dvla: [9], gebg: fixtureRamp(6) }))
 
   action('Reset profile').click()
   const sent = socket.sentCommands().at(-1)
@@ -121,8 +146,9 @@ it('Reset sends a whole-item reset_profile and reconciles on the ack', async () 
   })
   expect(sent && 'only' in sent).toBe(false) // whole item, not scoped
 
-  // The reconcile's snapshot — divergences gone — disables Reset.
-  await ackThenReconcile(socket, customSelectedState({ overridden: [] }))
+  // The reconcile's snapshot — content back at baseline — disables
+  // Reset.
+  await ackThenReconcile(socket, customSelectedState())
   await waitFor(() => {
     expect(action('Reset profile').disabled).toBe(true)
   })

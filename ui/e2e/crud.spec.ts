@@ -1,12 +1,12 @@
 /**
  * Slice 18 part C (#26), behavior 6: full CRUD journeys — real
- * browser, real daemon, real engine. Disabled states derive from the
- * live `overridden` and the factory/None matrix; affordances disable,
- * never hide.
+ * browser, real daemon, real engine. Disabled states derive live from
+ * divergence (resolved ≠ the snapshot's baseline) and the factory/None
+ * matrix; affordances disable, never hide.
  */
 import { expect, test } from './fixtures'
 
-test('profile journey: clone Music → rename → edit → reset → delete', async ({
+test('profile journey: clone Music → rename → edit → reset → revert-tracked Reset → delete', async ({
   page,
 }) => {
   await page.goto('/')
@@ -30,8 +30,9 @@ test('profile journey: clone Music → rename → edit → reset → delete', as
   await expect(clone).toHaveAttribute('aria-selected', 'true')
   await expect(rename).toBeEnabled()
   await expect(remove).toBeEnabled()
-  // A Music clone diverges from the custom baseline (dvla 4 vs 7, …),
-  // so the reconciled `overridden` enables Reset.
+  // A Music clone diverges from the custom baseline (dvla 4 vs 7, …):
+  // the add's reconcile fetches the clone's true baseline, and the
+  // derived divergence enables Reset.
   await expect(reset).toBeEnabled()
 
   // Inline rename: Enter commits `edit_profile { id, name }`.
@@ -59,21 +60,29 @@ test('profile journey: clone Music → rename → edit → reset → delete', as
   await expect(renamed).toHaveAttribute('aria-selected', 'true')
   await expect(reset).toBeDisabled()
 
-  // A pure edit re-enables Reset live — the originator's own union,
-  // no snapshot round-trip involved (behavior 2's "flipping live as
-  // edits land").
+  // Behavior 2, live both ways on the originating tab: an edit off
+  // the just-reset baseline enables Reset…
   await dialog.click()
   await expect(dialog).toHaveAttribute('aria-checked', 'true')
   await expect(reset).toBeEnabled()
 
-  // Delete: the tab goes; the selection falls to the Fallback profile.
+  // …and reverting it — divergence is derived, never a kept list —
+  // disables Reset again with no snapshot round-trip (the regression
+  // the spec correction exists for: the daemon suppresses the
+  // originator's broadcasts, so only a derived memo can flip back).
+  await dialog.click()
+  await expect(dialog).toHaveAttribute('aria-checked', 'false')
+  await expect(reset).toBeDisabled()
+
+  // Delete: the tab goes; the active profile falls to the Fallback
+  // profile.
   await remove.click()
   await expect(renamed).toHaveCount(0)
   await expect(music).toHaveAttribute('aria-selected', 'true')
   await expect(rename).toBeDisabled()
 })
 
-test('EQ preset journey: capture from None → rename → delete, matrix tracking the selection', async ({
+test('EQ preset journey: capture from None → rename → delete, matrix tracking the picked item', async ({
   page,
 }) => {
   await page.goto('/')
@@ -90,8 +99,8 @@ test('EQ preset journey: capture from None → rename → delete, matrix trackin
   await expect(remove).toBeDisabled()
   await expect(reset).toBeDisabled()
 
-  // A factory selection keeps Rename/Delete disabled — the matrix
-  // follows the picker's selection live.
+  // Picking a factory preset keeps Rename/Delete disabled — the
+  // matrix follows the picked item live.
   const rich = page.getByRole('radio', { name: 'Rich' })
   await rich.click()
   await expect(rich).toHaveAttribute('aria-checked', 'true')

@@ -171,37 +171,42 @@ function factoryProfile(
   name: string,
   params: Profile['params'],
 ): Profile {
+  // The `defaults.toml [profile]` shared visualizer + GEQ pins
+  // (issues #24, #25) — every resolved profile carries them.
+  const resolved = {
+    ven: [1],
+    vcnb: [20],
+    vcbf: [...GEQ_GRID],
+    ...eqStructure(),
+    ...params,
+  }
   return {
     id,
     name,
     is_factory: true,
     selected_eq_preset: null,
-    // The `defaults.toml [profile]` shared visualizer + GEQ pins
-    // (issues #24, #25) — every resolved profile carries them.
-    params: {
-      ven: [1],
-      vcnb: [20],
-      vcbf: [...GEQ_GRID],
-      ...eqStructure(),
-      ...params,
-    },
-    // A freshly resolved factory item diverges nowhere.
-    overridden: [],
+    params: resolved,
+    // A freshly resolved factory item diverges nowhere: the
+    // content-shaped baseline (ADR-0005) equals the resolved content.
+    // Deep-copied — the wire never aliases (JSON), and a shared object
+    // would let the store's reconcile move both sides at once.
+    baseline: { selected_eq_preset: null, params: structuredClone(resolved) },
   }
 }
 
 /**
  * One factory EQ preset as the snapshot carries it (issue #23) —
  * complete: the `[eq_preset]` shared block resolves the 20-band
- * structure into every preset, so a selection shadows standalone.
+ * structure into every preset, so a picked preset shadows standalone.
  */
 function factoryPreset(id: string, name: string): EqPreset {
+  const resolved = { ...eqStructure(), ieon: [1] }
   return {
     id,
     name,
     is_factory: true,
-    params: { ...eqStructure(), ieon: [1] },
-    overridden: [],
+    params: resolved,
+    baseline: { params: structuredClone(resolved) },
   }
 }
 
@@ -285,7 +290,7 @@ export function fixtureBootstrap(
   return { params: fixtureParams(), state: fixtureState(overrides) }
 }
 
-/** The fixture state with the active profile's params overridden. */
+/** The fixture state with the active profile's params edited. */
 export function fixtureStateWithParams(
   params: Record<string, readonly number[]>,
 ): StateSnapshot {
