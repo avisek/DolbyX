@@ -16,8 +16,8 @@ untouched. DolbyX drops that per-profile preset memory — an edit to
 mental model that "Rich" is one preset, not four. Acceptable because the
 original UI never exposed the matrix as a discoverable feature. The
 original's "Off" preset dies too: no-preset is `None`, and deleting a
-selected preset falls back to an **explicit** `None` override — never to
-whatever selection resolves beneath, so a delete can never activate a
-different preset
+selected preset falls the profile to `None` at delete time — stored as
+a `"none"` override iff a selection resolves beneath — so a delete
+never activates a different preset
 ([ADR-0007](0007-toml-overlay-persistence-with-file-watcher.md) has the
 encoding).
