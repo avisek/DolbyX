@@ -53,7 +53,7 @@ fn ships_the_four_factory_profiles() {
         defaults
             .profiles
             .iter()
-            .all(|profile| profile.selected_eq_preset.is_none()),
+            .all(|profile| profile.selected_eq_preset().is_none()),
         "behavior 7 (issue #23): factory selection ships None — the \
          original ships ieon = 0 on every profile"
     );

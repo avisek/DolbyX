@@ -26,6 +26,12 @@ pub struct Defaults {
     /// Factory EQ presets in declaration order, resolved the same way
     /// over the preset-carried params.
     pub eq_presets: Vec<EqPreset>,
+    /// What a custom profile resolves to beneath any `config.toml`
+    /// layer: `ParameterDef.default` ⊕ the `[profile]` shared layer —
+    /// the factory half of the custom baseline (ADR-0007).
+    pub custom_profile_baseline: HashMap<String, Vec<i16>>,
+    /// The EQ-preset counterpart, over the preset-carried params.
+    pub custom_eq_preset_baseline: HashMap<String, Vec<i16>>,
 }
 
 /// The daemon's user-facing state.
@@ -37,16 +43,25 @@ pub struct State {
     /// The one active profile, applied to all sessions. Invariant: it
     /// always names an entry of `profiles`.
     pub selected_profile: ProfileId,
-    /// Every profile, factory first (custom profiles join in Slice 18,
-    /// [#26](https://github.com/avisek/DolbyX/issues/26)). Invariant:
-    /// every `Some` `selected_eq_preset` names an entry of `eq_presets`
-    /// (load rejects a dangling selection; the `EditProfile` selection
-    /// patch validates).
+    /// Every profile, factory first, customs in creation order.
+    /// Invariant: every selected `selected_eq_preset()` names an entry
+    /// of `eq_presets` (load rejects a dangling selection; the
+    /// `EditProfile` selection patch validates; `RemoveEqPreset` pins
+    /// selecting profiles to explicit `None`).
     pub profiles: Vec<Profile>,
-    /// Every EQ preset, factory first — global across profiles
-    /// (custom presets join in Slice 18,
-    /// [#26](https://github.com/avisek/DolbyX/issues/26)).
+    /// Every EQ preset, factory first — global across profiles.
     pub eq_presets: Vec<EqPreset>,
+    /// `defaults.toml`'s `selected_profile` — where the selection falls
+    /// when the selected profile is deleted (a factory id, so the
+    /// fallback itself can never be deleted).
+    pub fallback_profile: ProfileId,
+    /// What resolves beneath a custom profile's `config.toml` row
+    /// ([`Defaults::custom_profile_baseline`] ⊕ the config `[profile]`
+    /// shared layer): [`Command::AddProfile`]'s fill for unstated
+    /// params and every custom profile's `baseline`.
+    pub custom_profile_baseline: HashMap<String, Vec<i16>>,
+    /// The EQ-preset counterpart, over the preset-carried params.
+    pub custom_eq_preset_baseline: HashMap<String, Vec<i16>>,
 }
 
 impl State {
@@ -58,6 +73,9 @@ impl State {
             selected_profile: defaults.selected_profile.clone(),
             profiles: defaults.profiles.clone(),
             eq_presets: defaults.eq_presets.clone(),
+            fallback_profile: defaults.selected_profile.clone(),
+            custom_profile_baseline: defaults.custom_profile_baseline.clone(),
+            custom_eq_preset_baseline: defaults.custom_eq_preset_baseline.clone(),
         }
     }
 
@@ -89,7 +107,7 @@ impl State {
     /// preset (load rejects a dangling selection; the `EditProfile`
     /// selection patch validates).
     fn overlay_of(&self, profile: &Profile) -> Option<&EqPreset> {
-        profile.selected_eq_preset.as_ref().map(|id| {
+        profile.selected_eq_preset().map(|id| {
             self.eq_preset(id)
                 .expect("selected_eq_preset names an existing preset")
         })
@@ -240,9 +258,16 @@ impl State {
         let profile = self
             .profile_mut(&id)
             .ok_or(ValidationError::UnknownProfile(id.0))?;
-        let selection_changed = selection
+        // The tri-state splits "changed": a patch restating the resolved
+        // selection as an explicit override (`null` on a profile that
+        // never stated one) must persist — the `"none"` sentinel lands
+        // on disk — without flushing an unchanged effective EQ set.
+        let override_changed = selection
             .as_ref()
-            .is_some_and(|new| profile.selected_eq_preset != *new);
+            .is_some_and(|new| profile.selection_override.as_ref() != Some(new));
+        let resolved_changed = selection
+            .as_ref()
+            .is_some_and(|new| profile.selected_eq_preset() != new.as_ref());
         let mut params_changed = false;
         for def in defs {
             let Some(values) = params.get(&def.name) else {
@@ -254,13 +279,13 @@ impl State {
             }
         }
         if let Some(new) = selection {
-            profile.selected_eq_preset = new;
+            profile.selection_override = Some(new);
         }
-        if !params_changed && !selection_changed {
+        if !params_changed && !override_changed {
             return Ok(StateDiff::default());
         }
         // Live ⇒ the targeted profile is the selected one.
-        let batch = live.then(|| self.edit_batch(params, selection_changed, defs));
+        let batch = live.then(|| self.edit_batch(params, resolved_changed, defs));
         Ok(StateDiff {
             power: None,
             params: batch.filter(|batch| !batch.is_empty()),
@@ -313,7 +338,7 @@ impl State {
         for (name, values) in params {
             validate_eq_preset_write(defs, name, values)?;
         }
-        let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
+        let live = self.selected().selected_eq_preset() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
             .ok_or(ValidationError::UnknownEqPreset(id.0))?;
@@ -343,7 +368,7 @@ impl State {
         id: PresetId,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
-        let live = self.selected().selected_eq_preset.as_ref() == Some(&id);
+        let live = self.selected().selected_eq_preset() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
             .ok_or(ValidationError::UnknownEqPreset(id.0))?;
@@ -646,7 +671,7 @@ mod tests {
         Profile {
             id: ProfileId(id.into()),
             name: name.into(),
-            selected_eq_preset: None,
+            selection_override: None,
             is_factory: true,
             params: params.clone(),
             baseline: params,
@@ -679,6 +704,8 @@ mod tests {
                 preset("open", "Open", &[117, 133, -27, -240], &table),
                 preset("rich", "Rich", &[67, 95, -55, -235], &table),
             ],
+            custom_profile_baseline: base_params(&table),
+            custom_eq_preset_baseline: base_eq_params(&table),
         }
     }
 
@@ -708,7 +735,7 @@ mod tests {
         assert_eq!(state.selected().name, "Music");
         assert_eq!(state.selected().params["dvla"], vec![4]);
         assert!(state.selected().is_factory);
-        assert_eq!(state.selected().selected_eq_preset, None);
+        assert_eq!(state.selected().selected_eq_preset(), None);
         assert_eq!(state.eq_presets.len(), 2);
         let rich = state.eq_preset(&PresetId("rich".into())).expect("rich");
         assert_eq!(rich.name, "Rich");
@@ -991,7 +1018,7 @@ mod tests {
         let diff = state
             .apply(select_preset("music", Some(rich())), &defs())
             .unwrap();
-        assert_eq!(state.selected().selected_eq_preset, Some(rich()));
+        assert_eq!(state.selected().selected_eq_preset(), Some(&rich()));
         assert_eq!(
             diff.params.unwrap(),
             vec![
@@ -1022,7 +1049,7 @@ mod tests {
             .unwrap();
 
         let diff = state.apply(select_preset("music", None), &defs()).unwrap();
-        assert_eq!(state.selected().selected_eq_preset, None);
+        assert_eq!(state.selected().selected_eq_preset(), None);
         assert_eq!(
             diff.params.unwrap(),
             vec![
@@ -1049,8 +1076,8 @@ mod tests {
             state
                 .profile(&ProfileId("movie".into()))
                 .unwrap()
-                .selected_eq_preset,
-            Some(rich())
+                .selected_eq_preset(),
+            Some(&rich())
         );
 
         let diff = state
@@ -1058,7 +1085,13 @@ mod tests {
             .unwrap();
         assert!(diff.is_empty(), "re-selecting the current preset");
         let diff = state.apply(select_preset("music", None), &defs()).unwrap();
-        assert!(diff.is_empty(), "detaching an already-detached profile");
+        assert!(
+            !diff.is_empty(),
+            "a first `null` patch states the explicit no-preset override — persisted"
+        );
+        assert_eq!(diff.params, None, "…without flushing the unchanged EQ set");
+        let diff = state.apply(select_preset("music", None), &defs()).unwrap();
+        assert!(diff.is_empty(), "re-detaching an explicitly detached profile");
 
         let before = state.clone();
         assert_eq!(
@@ -1097,7 +1130,7 @@ mod tests {
             )
             .unwrap();
         let music = state.selected();
-        assert_eq!(music.selected_eq_preset, Some(rich()));
+        assert_eq!(music.selected_eq_preset(), Some(&rich()));
         assert_eq!(music.params["dvla"], vec![9]);
         assert_eq!(
             music.params["gebg"],
@@ -1128,7 +1161,7 @@ mod tests {
                 &defs(),
             )
             .unwrap();
-        assert_eq!(state.selected().selected_eq_preset, None);
+        assert_eq!(state.selected().selected_eq_preset(), None);
         assert_eq!(
             diff.params.unwrap(),
             vec![
