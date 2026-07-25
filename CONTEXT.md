@@ -181,6 +181,13 @@ and `None` means the profile's own apply
 _Avoid_: IEQ preset (legacy DDP term); preset without "EQ" (ambiguous
 with Profile); "Off" preset (replaced by `None`).
 
+**EQ selection**:
+A profile's `selected_eq_preset` content key — which EQ preset shadows
+the profile's own nine (`None` — JSON `null`, TOML `"none"` — ⇒ its
+own apply). Cascaded like any content key.
+_Avoid_: bare "selection" (ambiguous with the active profile and with
+picker UI state), preset selection.
+
 **Factory item** (`is_factory`):
 A profile or EQ preset whose id appears in `defaults.toml` — derived at
 load, never stored; never deleted or renamed (a Reset falls it back to
@@ -189,20 +196,23 @@ factory EQ presets: Open, Rich, Focused.
 _Avoid_: built-in, default item, preset flag.
 
 **Fallback profile**:
-Where the selection lands when the selected profile is deleted —
+Where the active profile falls when the selected profile is deleted —
 `defaults.toml`'s `selected_profile`, a factory id, so the fallback
 itself can never be deleted.
 _Avoid_: default profile (ambiguous with the factory defaults).
 
-**Custom baseline**:
-What resolves beneath a custom item's `config.toml` row —
-`ParameterDef.default` ⊕ the shared layers (customs have no
-`defaults.toml` row) — filling an `add_*`'s unstated params and serving
-as the custom item's Reset floor. Covers the selection too: nothing
-ships a `selected_eq_preset` beneath a custom, so its row states one
-iff `Some` (the write law,
-[ADR-0007](docs/adr/0007-toml-overlay-persistence-with-file-watcher.md)).
-_Avoid_: birth clone (a custom never resets to it).
+**Baseline**:
+What resolves beneath an item's `config.toml` row — every Cascade
+layer under it: through the `defaults.toml` item row + `config.toml`
+shared for factory items; `ParameterDef.default` ⊕ the shared layers
+for customs (no `defaults.toml` row). Covers params and, for profiles,
+the EQ selection. Ships in every snapshot beside the resolved content;
+divergence (resolved ≠ baseline, per content key) is derived from it —
+never stored, never sent — and it is Reset's floor, the write law's
+base, and the filler of an `add_*`'s unstated params
+([ADR-0007](docs/adr/0007-toml-overlay-persistence-with-file-watcher.md)).
+_Avoid_: overridden (the dead precomputed list), birth clone (a custom
+never resets to it).
 
 **Content key**:
 One resettable key of an item's own config row — any writable param
