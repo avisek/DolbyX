@@ -1803,6 +1803,128 @@ mod tests {
         );
     }
 
+    /// Behaviors 4–6 (issue #26 A), state half: factory deletes
+    /// reject; deleting a custom preset pins every selector to the
+    /// **explicit** override `Some(None)` (never inherit — the pin is
+    /// what keeps a future baseline selection from surfacing) and
+    /// flushes iff the selected profile selected it; deleting the
+    /// selected profile falls back to `fallback_profile`.
+    #[test]
+    fn removes_pin_explicit_none_and_fall_back_the_selection() {
+        let mut state = State::new_from_defaults(&defaults());
+        let preset_id = state
+            .apply(
+                Command::AddEqPreset {
+                    name: "Doomed".into(),
+                    params: HashMap::new(),
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .map(PresetId)
+            .unwrap();
+        let _ = state
+            .apply(select_preset("movie", Some(preset_id.clone())), &defs())
+            .unwrap();
+        let _ = state
+            .apply(select_preset("music", Some(preset_id.clone())), &defs())
+            .unwrap();
+
+        let diff = state
+            .apply(
+                Command::RemoveEqPreset {
+                    id: preset_id.clone(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        assert!(state.eq_preset(&preset_id).is_none(), "the preset is gone");
+        for id in ["movie", "music"] {
+            assert_eq!(
+                state
+                    .profile(&ProfileId(id.into()))
+                    .unwrap()
+                    .selection_override,
+                Some(None),
+                "{id}: pinned to the explicit override, not inherit"
+            );
+        }
+        let batch = diff.params.expect("music selected it — the delete flushes");
+        assert_eq!(batch.len(), 4, "the fixture's preset-carried set");
+        assert!(batch.contains(&("ieon".to_string(), vec![0])), "music's own");
+
+        // No selectors ⇒ no pins, engine silent.
+        let idle = state
+            .apply(
+                Command::AddEqPreset {
+                    name: "Idle".into(),
+                    params: HashMap::new(),
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .map(PresetId)
+            .unwrap();
+        let diff = state
+            .apply(Command::RemoveEqPreset { id: idle }, &defs())
+            .unwrap();
+        assert!(!diff.is_empty());
+        assert_eq!(diff.params, None);
+
+        // Deleting the selected profile falls back; factory deletes reject.
+        let profile_id = state
+            .apply(
+                Command::AddProfile {
+                    name: "Bass".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .map(ProfileId)
+            .unwrap();
+        let _ = state
+            .apply(
+                Command::SetProfile {
+                    id: profile_id.clone(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        let diff = state
+            .apply(Command::RemoveProfile { id: profile_id }, &defs())
+            .unwrap();
+        assert_eq!(state.selected_profile, ProfileId("music".into()));
+        assert!(diff.params.is_some(), "the fallback's resolved set flushes");
+
+        assert_eq!(
+            state.apply(
+                Command::RemoveProfile {
+                    id: ProfileId("music".into()),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryDelete("music".into())),
+        );
+        assert_eq!(
+            state.apply(
+                Command::RemoveEqPreset {
+                    id: PresetId("rich".into()),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryDelete("rich".into())),
+        );
+        assert_eq!(
+            ValidationError::FactoryDelete("music".into()).to_string(),
+            "factory item `music` cannot be deleted"
+        );
+    }
+
     /// `reset_eq_preset` restores the baseline and batches iff the
     /// selected profile selects the preset.
     #[test]

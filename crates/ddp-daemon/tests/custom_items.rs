@@ -332,6 +332,91 @@ async fn removing_the_selected_profile_falls_back_to_defaults_selection() {
     );
 }
 
+/// Behavior 5 (issue #26 A): deleting a custom EQ preset selected by N
+/// profiles falls **all N** to an explicit `None` — the reserved
+/// `"none"` sentinel on disk, never the selection beneath — and, the
+/// selected profile among them, flush-iff-live pushes its **own** EQ.
+#[tokio::test]
+async fn removing_a_selected_preset_pins_explicit_none_on_every_selector() {
+    let daemon = start_daemon().await;
+    daemon
+        .handle
+        .supervisor()
+        .create_session(48000)
+        .expect("session");
+    let mut ws = connected(daemon.addr()).await;
+
+    let minted = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_eq_preset", "request_id": "r1", "name": "Doomed", "params": { "iebt": [67, 95], "ieon": [1] } }),
+    )
+    .await;
+    // N = 2 selectors: movie (offline) and music (the selected profile);
+    // music's own GEQ diverges so the post-delete flush is observable.
+    for (request_id, profile_id) in [("r2", "movie"), ("r3", "music")] {
+        let _ = ack_of(
+            &mut ws,
+            &json!({ "cmd": "edit_profile", "request_id": request_id, "id": profile_id, "selected_eq_preset": minted }),
+        )
+        .await;
+    }
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r4", "id": "music", "params": { "gebg": [16, -16] } }),
+    )
+    .await;
+
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "remove_eq_preset", "request_id": "r5", "id": minted }),
+    )
+    .await;
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r6" })).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    assert_eq!(
+        snapshot["eq_presets"].as_array().expect("array").len(),
+        3,
+        "the custom preset is gone"
+    );
+    for index in [0, 1] {
+        assert_eq!(
+            snapshot["profiles"][index]["selected_eq_preset"],
+            serde_json::Value::Null,
+            "every selector falls to None"
+        );
+    }
+
+    // The live flush carries the selected profile's own EQ.
+    let batches = set_params_batches(&daemon.stub);
+    let batch: std::collections::HashMap<&str, &[i16]> = batches
+        .last()
+        .expect("the delete flushes")
+        .iter()
+        .map(|(name, values)| (name.as_str(), values.as_slice()))
+        .collect();
+    assert_eq!(batch.len(), 9, "the resolved EQ set");
+    assert_eq!(batch["gebg"][..2], [16, -16], "music's own GEQ");
+    assert_eq!(batch["ieon"], [0], "music's own IEQ enable — not the preset's");
+
+    // Behavior 5's disk face: the explicit pin persists as the
+    // reserved "none" sentinel on every selector's row.
+    let mut gebg = vec![16_i16, -16];
+    gebg.extend([0; 38]);
+    let gebg = gebg
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_config_becomes(
+        &daemon.dir.path().join("data").join("config.toml"),
+        &format!(
+            "[profile.movie]\nselected_eq_preset = \"none\"\n\n[profile.music]\nselected_eq_preset = \"none\"\ngebg = [{gebg}]\n"
+        ),
+    )
+    .await;
+}
+
 /// Behavior 4 (issue #26 A): factory items never delete — and unknown
 /// ids reject — as `INVALID_REQUEST`, state untouched.
 #[tokio::test]
