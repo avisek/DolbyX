@@ -9,6 +9,8 @@
 //! Slice 15 (#23) adds its behavior 8: the EQ preset overlay lands
 //! Rich's curve in the registry. Slice 16 (#24) adds its behavior 6:
 //! `vis` events mirror the real reply tails, custom grid live.
+//! Slice 18 part A (#26) adds its behavior 8: the custom-item CRUD
+//! flow replayed — clone, switch, rename, restart, delete.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -417,6 +419,96 @@ async fn a_plugin_round_trips_audio_through_the_real_engine() {
     }
     assert_eq!(echoed, tone, "power off ⇒ OUT == IN");
     plugin.goodbye().await;
+}
+
+/// Behavior 8 (issue #26 A): the custom-item CRUD flow against the
+/// real engine. A custom profile born from Music's content (one
+/// diverging `dvla`) lands its values in the live clamped registry on
+/// switch; the rename and the custom row survive a full daemon +
+/// engine restart — session init pushes the custom's resolved set —
+/// and deleting it falls the registry back to Music's.
+#[tokio::test]
+async fn custom_profile_crud_replays_on_the_real_engine() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    let mut ws = connected(daemon.handle.addr()).await;
+
+    // The UI clone gesture: Music's resolved content, one value apart.
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r1" })).await;
+    let mut content = recv_json(&mut ws).await["snapshot"]["profiles"][1]["params"].take();
+    content["dvla"] = json!([9]);
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "add_profile", "request_id": "r2", "name": "Music 2", "params": content }),
+    )
+    .await;
+    let ack = recv_json(&mut ws).await;
+    assert_eq!(ack["type"], "ack");
+    let minted = ack["id"].as_str().expect("minted id").to_string();
+
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "set_profile", "request_id": "r3", "id": minted }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla", "dea", "genb"])
+        .expect("get_params");
+    assert_eq!(values[0], [9], "the clone's own divergence");
+    assert_eq!(values[1], [2], "Music's dialog enhancer amount rode along");
+    assert_eq!(values[2], [20], "still the 20-band config");
+
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r4", "id": minted, "name": "Late Night" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+
+    // Restart — fresh daemon, fresh engine process; the custom is the
+    // boot selection, so session init pushes its resolved set.
+    drop(ws);
+    let dir = daemon.dir;
+    daemon.handle.shutdown().await;
+    drop(daemon.backend);
+    let restarted = start_qemu_daemon_over(dir).await;
+    let session = restarted
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    let mut ws = ws_connect(restarted.handle.addr()).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    assert_eq!(snapshot["selected_profile"], minted.as_str());
+    assert_eq!(snapshot["profiles"][4]["name"], "Late Night");
+    assert_eq!(snapshot["profiles"][4]["is_factory"], false);
+    let values = restarted
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla"])
+        .expect("get_params");
+    assert_eq!(values[0], [9], "the custom's set survived into a fresh init");
+
+    // Delete the selected custom: the registry falls back to Music.
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "remove_profile", "request_id": "r5", "id": minted }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = restarted
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla"])
+        .expect("get_params");
+    assert_eq!(values[0], [4], "Music's leveler amount again");
 }
 
 /// Behavior 9 (issue #19), plugin behavior 2's pitch-preservation
