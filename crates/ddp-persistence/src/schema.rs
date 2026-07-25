@@ -58,8 +58,9 @@ pub(crate) struct ItemTable {
     /// The profile row's stated selection (ADR-0007): key absent =
     /// outer `None` (inherit what resolves beneath), the reserved
     /// `"none"` sentinel = `Some(None)` (a diverging no-preset), an
-    /// id = `Some(Some(id))`. Only meaningful on `config.toml` profile
-    /// items; rejected everywhere else.
+    /// id = `Some(Some(id))`. Profile items only — `defaults.toml`
+    /// rows must name a defaults preset (never the sentinel); preset
+    /// rows reject it everywhere.
     #[expect(
         clippy::option_option,
         reason = "the row's statement: key absent ≠ \"none\" ≠ id (ADR-0007)"
@@ -219,10 +220,11 @@ fn overlay_params(params: &mut HashMap<String, Vec<i16>>, layer: &IndexMap<Strin
 /// # Errors
 ///
 /// [`Error::Defaults`] when the document is malformed, a param fails
-/// validation against `defs`, an item lacks a `name`, a profile
-/// carries a `selected_eq_preset` (factory selection ships `None`, key
-/// absent), or `selected_profile` names no profile — the daemon
-/// refuses to start.
+/// validation against `defs`, an item lacks a `name` or claims the
+/// reserved id `none`, a profile row's `selected_eq_preset` names no
+/// `defaults.toml` preset (the `"none"` sentinel included — it encodes
+/// a *diverging* no-preset, meaningless here), or `selected_profile`
+/// names no profile — the daemon refuses to start.
 pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults, Error> {
     let file: DefaultsFile =
         toml::from_str(document).map_err(|e| Error::Defaults(e.to_string()))?;
@@ -233,6 +235,7 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
 
     let mut eq_presets = Vec::with_capacity(eq_preset.items.len());
     for (id, item) in &eq_preset.items {
+        reject_reserved_id("eq_preset", id).map_err(Error::Defaults)?;
         let name = item.name.clone().ok_or_else(|| {
             Error::Defaults(format!("[eq_preset.{id}]: missing `name` (display name)"))
         })?;
@@ -251,22 +254,39 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
 
     let mut profiles = Vec::with_capacity(profile.items.len());
     for (id, item) in &profile.items {
+        reject_reserved_id("profile", id).map_err(Error::Defaults)?;
         let name = item.name.clone().ok_or_else(|| {
             Error::Defaults(format!("[profile.{id}]: missing `name` (display name)"))
         })?;
-        if item.selected_eq_preset.is_some() {
-            return Err(Error::Defaults(format!(
-                "[profile.{id}]: factory profiles ship no `selected_eq_preset` (key absent ⇒ None)"
-            )));
-        }
+        // A row MAY ship a factory selection (ADR-0007) — it must name
+        // a defaults.toml preset; the sentinel encodes a *diverging*
+        // no-preset, meaningless where nothing resolves beneath.
+        let selection = match &item.selected_eq_preset {
+            None => None,
+            Some(None) => {
+                return Err(Error::Defaults(format!(
+                    "[profile.{id}]: `selected_eq_preset` must name a defaults.toml preset \
+                     (`\"none\"` is config.toml's diverging no-preset sentinel)"
+                )));
+            }
+            Some(Some(preset)) => {
+                if !eq_preset.items.contains_key(&preset.0) {
+                    return Err(Error::Defaults(format!(
+                        "[profile.{id}]: selected_eq_preset `{}` names no EQ preset",
+                        preset.0
+                    )));
+                }
+                Some(preset.clone())
+            }
+        };
         let mut params = base_params(defs);
         overlay_params(&mut params, &profile.shared);
         overlay_params(&mut params, &item.params);
         profiles.push(Profile {
             id: ProfileId(id.clone()),
             name,
-            selected_eq_preset: None,
-            selection_baseline: None,
+            selected_eq_preset: selection.clone(),
+            selection_baseline: selection,
             is_factory: true,
             params: params.clone(),
             baseline: params,
@@ -297,11 +317,23 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
     Ok(defaults)
 }
 
-/// `selected_eq_preset` belongs on `config.toml` profile items only.
+/// `selected_eq_preset` belongs on profile items only.
 fn reject_selection(id: &str, item: &ItemTable) -> Result<(), String> {
     if item.selected_eq_preset.is_some() {
         return Err(format!(
-            "[eq_preset.{id}]: `selected_eq_preset` applies to profiles in config.toml only"
+            "[eq_preset.{id}]: `selected_eq_preset` applies to profiles only"
+        ));
+    }
+    Ok(())
+}
+
+/// No item — either file, either namespace — may claim the reserved id
+/// `none`: a row under it would make every `selected_eq_preset =
+/// "none"` ambiguous (ADR-0007).
+fn reject_reserved_id(namespace: &str, id: &str) -> Result<(), String> {
+    if id == "none" {
+        return Err(format!(
+            "[{namespace}.none]: the id `none` is reserved (the explicit no-preset sentinel)"
         ));
     }
     Ok(())
@@ -383,11 +415,7 @@ fn validate_row_identity(
             ));
         }
     } else {
-        if id == "none" {
-            return Err(format!(
-                "[{namespace}.none]: the id `none` is reserved (the explicit no-preset sentinel)"
-            ));
-        }
+        reject_reserved_id(namespace, id)?;
         if item.name.is_none() {
             return Err(format!(
                 "[{namespace}.{id}]: missing `name` (custom rows carry their display name)"
@@ -520,9 +548,9 @@ pub fn serialize_overlay(
             emit_value(&mut item, "name", &toml_string(&profile.name));
         }
         if profile.selected_eq_preset != profile.selection_baseline {
-            // TOML has no null: a diverging no-preset is the reserved
-            // `"none"` sentinel — unreachable while nothing ships
-            // beneath (part A), so A never writes it.
+            // TOML has no null: a diverging no-preset — `None` over a
+            // selection resolving beneath — is the reserved `"none"`
+            // sentinel (ADR-0007).
             let stated = profile
                 .selected_eq_preset
                 .as_ref()
@@ -825,6 +853,98 @@ iebt = [67, 95]
         );
     }
 
+    /// Behavior 4 (issue #26 B), schema half: a `defaults.toml`
+    /// profile row MAY ship a `selected_eq_preset` naming a
+    /// `defaults.toml` preset — loading as both the resolved selection
+    /// and the selection baseline (reset's floor); rows without one
+    /// keep shipping `None`.
+    #[test]
+    fn defaults_rows_may_ship_a_factory_selection() {
+        let document = DEFAULTS.replace("dvla = 4", "dvla = 4\nselected_eq_preset = \"open\"");
+        let defaults = parse_defaults(&document, &defs()).unwrap();
+        let open = Some(PresetId("open".into()));
+        let music = &defaults.profiles[1];
+        assert_eq!(music.selected_eq_preset, open, "the shipped selection");
+        assert_eq!(music.selection_baseline, open, "…is the reset floor");
+        assert_eq!(defaults.profiles[0].selected_eq_preset, None);
+        assert_eq!(defaults.profiles[0].selection_baseline, None);
+    }
+
+    /// Behavior 4 (issue #26 B), sentinel half: over a factory
+    /// selection a detach diverges — persisting as the reserved
+    /// `"none"` sentinel, reloading as an explicit no-preset — a
+    /// whole-item reset falls the selection back to the shipped
+    /// preset (row gone, the write law), and a config row may shadow
+    /// with another id.
+    #[test]
+    fn a_diverging_no_preset_round_trips_as_the_none_sentinel() {
+        let defs = defs();
+        let document = DEFAULTS.replace("dvla = 4", "dvla = 4\nselected_eq_preset = \"open\"");
+        let defaults = parse_defaults(&document, &defs).unwrap();
+        let loaded = ConfigOverlay::default();
+        let mut state = resolve(&defaults, &loaded);
+        let music = ProfileId("music".into());
+
+        let _ = state
+            .apply(
+                Command::EditProfile {
+                    name: None,
+                    id: music.clone(),
+                    params: HashMap::new(),
+                    selected_eq_preset: Some(None),
+                },
+                &defs,
+            )
+            .unwrap();
+        let written = serialize_overlay(&state, &defaults, &loaded, &defs);
+        assert_eq!(
+            written, "[profile.music]\nselected_eq_preset = \"none\"\n",
+            "None over a selection beneath diverges ⇒ the sentinel"
+        );
+        let reloaded = resolve(
+            &defaults,
+            &parse_config(&written, &defs, &defaults).unwrap(),
+        );
+        assert_eq!(
+            reloaded, state,
+            "the sentinel reloads as an explicit no-preset, not re-inheriting open"
+        );
+
+        let _ = state
+            .apply(
+                Command::ResetProfile {
+                    id: music,
+                    only: None,
+                },
+                &defs,
+            )
+            .unwrap();
+        assert_eq!(
+            state.selected().selected_eq_preset,
+            Some(PresetId("open".into())),
+            "reset falls the selection back to the shipped factory preset"
+        );
+        assert_eq!(serialize_overlay(&state, &defaults, &loaded, &defs), "");
+
+        // A config row shadows the factory selection like any layer.
+        let overlay = parse_config(
+            "[profile.music]\nselected_eq_preset = \"rich\"\n",
+            &defs,
+            &defaults,
+        )
+        .unwrap();
+        let state = resolve(&defaults, &overlay);
+        assert_eq!(
+            state.selected().selected_eq_preset,
+            Some(PresetId("rich".into()))
+        );
+        assert_eq!(
+            state.selected().selection_baseline,
+            Some(PresetId("open".into())),
+            "the baseline stays the defaults row's"
+        );
+    }
+
     #[test]
     fn rejects_malformed_or_invalid_defaults() {
         let cases = [
@@ -852,12 +972,27 @@ iebt = [67, 95]
                 "not preset-carried",
             ),
             (
-                DEFAULTS.replace("dvla = 4", "selected_eq_preset = \"rich\""),
-                "ship no `selected_eq_preset`",
+                DEFAULTS.replace("dvla = 4", "selected_eq_preset = \"ghost\""),
+                "names no EQ preset",
+            ),
+            // Behavior 4 (issue #26 B): the sentinel encodes a
+            // *diverging* no-preset — meaningless in defaults.toml,
+            // where nothing resolves beneath.
+            (
+                DEFAULTS.replace("dvla = 4", "selected_eq_preset = \"none\""),
+                "must name a defaults.toml preset",
+            ),
+            (
+                format!("{DEFAULTS}\n[profile.none]\nname = \"X\"\n"),
+                "reserved",
+            ),
+            (
+                format!("{DEFAULTS}\n[eq_preset.none]\nname = \"X\"\n"),
+                "reserved",
             ),
             (
                 DEFAULTS.replace("iebt = [67, 95]", "selected_eq_preset = \"open\""),
-                "applies to profiles in config.toml",
+                "applies to profiles",
             ),
             (
                 DEFAULTS.replace("dvla = 4", "selected_eq_preset = 5"),
@@ -986,6 +1121,7 @@ iebt = [67, 95]
             .apply(
                 Command::ResetProfile {
                     id: ProfileId("music".into()),
+                    only: None,
                 },
                 &defs,
             )
@@ -1272,6 +1408,7 @@ iebt = [44, 55, 0, 0]
             .apply(
                 Command::ResetEqPreset {
                     id: PresetId("rich".into()),
+                    only: None,
                 },
                 &defs,
             )

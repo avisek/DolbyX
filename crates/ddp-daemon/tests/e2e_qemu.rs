@@ -10,7 +10,9 @@
 //! Rich's curve in the registry. Slice 16 (#24) adds its behavior 6:
 //! `vis` events mirror the real reply tails, custom grid live.
 //! Slice 18 part A (#26) adds its behavior 8: the custom-item CRUD
-//! flow replayed — clone, switch, rename, restart, delete.
+//! flow replayed — clone, switch, rename, restart, delete. Part B adds
+//! its behavior 5: scoped + whole-item reset landing baseline values
+//! back in the live registry.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -513,6 +515,71 @@ async fn custom_profile_crud_replays_on_the_real_engine() {
         .get_params(session, &["dvla"])
         .expect("get_params");
     assert_eq!(values[0], [4], "Music's leveler amount again");
+}
+
+/// Behavior 5 (issue #26 B): the part-B tracer against the real
+/// engine — edit Music's `dvle` and GEQ, scoped-reset the GEQ (the
+/// leveler survives), whole-item reset the rest; every step read back
+/// from the live clamped registry, `overridden` and the config row
+/// emptied.
+#[tokio::test]
+async fn reset_falls_the_live_registry_back_to_baseline() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    let mut ws = connected(daemon.handle.addr()).await;
+
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r1", "id": "music", "params": { "dvle": [1], "gebg": [96, -96] } }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvle", "gebg"])
+        .expect("get_params");
+    assert_eq!(values[0], [1], "the edit landed");
+    assert_eq!(values[1][..2], [96, -96]);
+
+    // Scoped: clear the GEQ only — the leveler divergence survives.
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "reset_profile", "request_id": "r2", "id": "music", "only": ["gebg"] }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvle", "gebg"])
+        .expect("get_params");
+    assert_eq!(values[0], [1], "outside the scope — still diverging");
+    assert_eq!(values[1], vec![0; 40], "the flat baseline GEQ again");
+
+    // Whole-item: everything back at Music's bundled defaults.
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "reset_profile", "request_id": "r3", "id": "music" }),
+    )
+    .await;
+    assert_eq!(recv_json(&mut ws).await["type"], "ack");
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvle", "dvla"])
+        .expect("get_params");
+    assert_eq!(values[0], [0], "Music ships the leveler off");
+    assert_eq!(values[1], [4], "Music's leveler amount");
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r4" })).await;
+    let snapshot = recv_state(&mut ws).await["snapshot"].take();
+    assert_eq!(snapshot["profiles"][1]["overridden"], json!([]));
+    assert_config_becomes(&daemon.dir.path().join("data").join("config.toml"), "").await;
 }
 
 /// Behavior 9 (issue #19), plugin behavior 2's pitch-preservation

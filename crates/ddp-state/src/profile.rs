@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::param_def::ParameterDef;
 use crate::preset::PresetId;
 
 /// Stable string id of a profile (`"music"`, `"user_a3f1"`) —
@@ -33,10 +34,10 @@ pub struct Profile {
     pub selected_eq_preset: Option<PresetId>,
     /// The selection resolving beneath this profile's own `config.toml`
     /// row — `selected_eq_preset`'s write-law divergence base, the
-    /// selection twin of [`Self::baseline`]. Always `None` until
-    /// `defaults.toml` rows may ship selections (issue #26 part B);
-    /// customs never have one (no `defaults.toml` row, and the shared
-    /// tables stay params-only).
+    /// selection twin of [`Self::baseline`]: the factory selection when
+    /// the profile's `defaults.toml` row ships one (ADR-0007). Customs
+    /// never have one (no `defaults.toml` row, and the shared tables
+    /// stay params-only).
     pub selection_baseline: Option<PresetId>,
     /// Whether the id appears in `defaults.toml` — derived at load,
     /// never stored; factory items reset instead of delete/rename.
@@ -60,5 +61,20 @@ impl Profile {
     /// allocation — callers validate against `ParameterDef` first.
     pub fn splice(&mut self, name: &str, values: &[i16]) {
         crate::param_def::splice_head(&mut self.params, name, values);
+    }
+
+    /// The snapshot's per-item `overridden` list (ADR-0005): every
+    /// content key diverging from what resolves beneath the profile's
+    /// `config.toml` row — params in `defs` table order, then
+    /// `"selected_eq_preset"` when the selection diverges; never `name`
+    /// (a label, not content). Reset's dual: exactly what a whole-item
+    /// `reset_profile` would clear.
+    #[must_use]
+    pub fn overridden(&self, defs: &[ParameterDef]) -> Vec<String> {
+        let mut keys = crate::param_def::diverging(&self.params, &self.baseline, defs);
+        if self.selected_eq_preset != self.selection_baseline {
+            keys.push("selected_eq_preset".into());
+        }
+        keys
     }
 }

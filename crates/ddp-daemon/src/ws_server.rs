@@ -176,8 +176,18 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             )
             .await
         }
-        WsCommand::ResetProfile { request_id, id } => {
-            mutate(app, conn_id, &request_id, Command::ResetProfile { id }).await
+        WsCommand::ResetProfile {
+            request_id,
+            id,
+            only,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::ResetProfile { id, only },
+            )
+            .await
         }
         WsCommand::EditEqPreset {
             request_id,
@@ -193,8 +203,18 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             )
             .await
         }
-        WsCommand::ResetEqPreset { request_id, id } => {
-            mutate(app, conn_id, &request_id, Command::ResetEqPreset { id }).await
+        WsCommand::ResetEqPreset {
+            request_id,
+            id,
+            only,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::ResetEqPreset { id, only },
+            )
+            .await
         }
         WsCommand::RemoveProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::RemoveProfile { id }).await
