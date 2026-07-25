@@ -139,6 +139,37 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
             )
             .await
         }
+        WsCommand::AddProfile {
+            request_id,
+            name,
+            params,
+            selected_eq_preset,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::AddProfile {
+                    name,
+                    params,
+                    selected_eq_preset,
+                },
+            )
+            .await
+        }
+        WsCommand::AddEqPreset {
+            request_id,
+            name,
+            params,
+        } => {
+            mutate(
+                app,
+                conn_id,
+                &request_id,
+                Command::AddEqPreset { name, params },
+            )
+            .await
+        }
         WsCommand::ResetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::ResetProfile { id }).await
         }
@@ -173,7 +204,7 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
         Err(error) => return vec![invalid_request(Some(request_id), error.to_string()).to_text()],
     };
     if diff.is_empty() {
-        return vec![ack(request_id).to_text()];
+        return vec![ack(request_id, None).to_text()];
     }
     let mut engine_failure = None;
     if let Some(power) = diff.power
@@ -203,7 +234,7 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     let _ = app.updates.send((conn_id, event.into()));
     drop(state);
     vec![match engine_failure {
-        None => ack(request_id).to_text(),
+        None => ack(request_id, diff.minted.as_deref()).to_text(),
         Some(error) => engine_rejected(request_id, &error).to_text(),
     }]
 }
