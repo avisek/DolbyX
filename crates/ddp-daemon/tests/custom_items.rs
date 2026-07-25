@@ -339,11 +339,13 @@ async fn removing_the_selected_profile_falls_back_to_defaults_selection() {
 }
 
 /// Behavior 5 (issue #26 A): deleting a custom EQ preset selected by N
-/// profiles falls **all N** to an explicit `None` — the reserved
-/// `"none"` sentinel on disk, never the selection beneath — and, the
-/// selected profile among them, flush-iff-live pushes its **own** EQ.
+/// profiles falls **all N** to `None` at delete time — and the
+/// selection stores like any content key (the write law, ADR-0007):
+/// nothing resolves beneath in part A, so no row key lands on disk.
+/// The selected profile among them, flush-iff-live pushes its **own**
+/// EQ.
 #[tokio::test]
-async fn removing_a_selected_preset_pins_explicit_none_on_every_selector() {
+async fn removing_a_selected_preset_falls_every_selector_to_none() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -409,8 +411,9 @@ async fn removing_a_selected_preset_pins_explicit_none_on_every_selector() {
         "music's own IEQ enable — not the preset's"
     );
 
-    // Behavior 5's disk face: the explicit pin persists as the
-    // reserved "none" sentinel on every selector's row.
+    // Behavior 5's disk face: `None` over nothing-beneath is no
+    // divergence — the key is dropped (movie's whole row with it);
+    // only music's param divergence remains.
     let mut gebg = vec![16_i16, -16];
     gebg.extend([0; 38]);
     let gebg = gebg
@@ -420,9 +423,7 @@ async fn removing_a_selected_preset_pins_explicit_none_on_every_selector() {
         .join(", ");
     assert_config_becomes(
         &daemon.dir.path().join("data").join("config.toml"),
-        &format!(
-            "[profile.movie]\nselected_eq_preset = \"none\"\n\n[profile.music]\nselected_eq_preset = \"none\"\ngebg = [{gebg}]\n"
-        ),
+        &format!("[profile.music]\ngebg = [{gebg}]\n"),
     )
     .await;
 }

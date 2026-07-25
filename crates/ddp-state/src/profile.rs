@@ -25,15 +25,19 @@ pub struct Profile {
     pub id: ProfileId,
     /// User-editable display name (factory names ship in `defaults.toml`).
     pub name: String,
-    /// The EQ selection this profile's own `config.toml` row states —
-    /// the persisted tri-state (ADR-0007): `None` = nothing stated
-    /// (inherit what resolves beneath — always `None` until
-    /// `defaults.toml` rows may ship selections, issue #26 part B),
-    /// `Some(None)` = explicit no-preset (the reserved `"none"`
-    /// sentinel on disk, JSON `null` on the wire), `Some(Some(id))` =
-    /// select. Deletion fallback pins `Some(None)` so a delete can
-    /// never activate the selection beneath (ADR-0003).
-    pub selection_override: Option<Option<PresetId>>,
+    /// The resolved EQ selection — `None` ⇒ the profile's own EQ
+    /// params apply (factory profiles ship no selection — first-run
+    /// parity with the original's `ieon = 0`). Stores like any content
+    /// key (ADR-0007): the config row states it iff it diverges from
+    /// [`Self::selection_baseline`].
+    pub selected_eq_preset: Option<PresetId>,
+    /// The selection resolving beneath this profile's own `config.toml`
+    /// row — `selected_eq_preset`'s write-law divergence base, the
+    /// selection twin of [`Self::baseline`]. Always `None` until
+    /// `defaults.toml` rows may ship selections (issue #26 part B);
+    /// customs never have one (no `defaults.toml` row, and the shared
+    /// tables stay params-only).
+    pub selection_baseline: Option<PresetId>,
     /// Whether the id appears in `defaults.toml` — derived at load,
     /// never stored; factory items reset instead of delete/rename.
     pub is_factory: bool,
@@ -46,17 +50,6 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// The EQ overlay in effect — the resolved selection: the override
-    /// when stated, else what resolves beneath (`None` until
-    /// `defaults.toml` rows may ship selections, issue #26 part B).
-    /// `None` ⇒ the profile's own EQ params apply (factory profiles
-    /// ship no selection — first-run parity with the original's
-    /// `ieon = 0`).
-    #[must_use]
-    pub fn selected_eq_preset(&self) -> Option<&PresetId> {
-        self.selection_override.as_ref().and_then(Option::as_ref)
-    }
-
     /// Splices `values` over the head of the full-length array `name`
     /// holds — the overlay rule for band arrays shorter than the
     /// engine-capacity allocation.

@@ -55,14 +55,14 @@ impl ParamValue {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ItemTable {
     pub(crate) name: Option<String>,
-    /// The profile-row selection tri-state (ADR-0007): key absent =
-    /// outer `None` (inherit), the reserved `"none"` sentinel =
-    /// `Some(None)` (explicit no-preset), an id = `Some(Some(id))`.
-    /// Only meaningful on `config.toml` profile items; rejected
-    /// everywhere else.
+    /// The profile row's stated selection (ADR-0007): key absent =
+    /// outer `None` (inherit what resolves beneath), the reserved
+    /// `"none"` sentinel = `Some(None)` (a diverging no-preset), an
+    /// id = `Some(Some(id))`. Only meaningful on `config.toml` profile
+    /// items; rejected everywhere else.
     #[expect(
         clippy::option_option,
-        reason = "persisted tri-state: key absent ≠ \"none\" ≠ id (ADR-0007)"
+        reason = "the row's statement: key absent ≠ \"none\" ≠ id (ADR-0007)"
     )]
     pub(crate) selected_eq_preset: Option<Option<PresetId>>,
     pub(crate) params: IndexMap<String, ParamValue>,
@@ -265,7 +265,8 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
         profiles.push(Profile {
             id: ProfileId(id.clone()),
             name,
-            selection_override: None,
+            selected_eq_preset: None,
+            selection_baseline: None,
             is_factory: true,
             params: params.clone(),
             baseline: params,
@@ -400,11 +401,11 @@ fn validate_row_identity(
 /// [`State`]: per item (profile or EQ preset), `baseline` = factory ⊕
 /// config-shared and `params` = baseline ⊕ config-item — complete at
 /// load, so a switch pushes one atomic batch with no per-param
-/// fallback. A profile's selection tri-state is its config row's
-/// statement verbatim (key absent = inherit, `"none"` = explicit
-/// no-preset, an id = select). Rows `defaults.toml` doesn't ship are
-/// custom items, appended after the factory ones over the custom
-/// baseline.
+/// fallback. A profile's `selected_eq_preset` resolves like any
+/// content key: the row's statement shadows what resolves beneath
+/// (key absent = inherit, `"none"` = no-preset, an id = select). Rows
+/// `defaults.toml` doesn't ship are custom items, appended after the
+/// factory ones over the custom baseline.
 ///
 /// # Panics
 ///
@@ -427,7 +428,9 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
         profile.params = profile.baseline.clone();
         if let Some(item) = overlay.profile.items.get(&profile.id.0) {
             overlay_params(&mut profile.params, &item.params);
-            profile.selection_override = item.selected_eq_preset.clone();
+            if let Some(stated) = &item.selected_eq_preset {
+                profile.selected_eq_preset = stated.clone();
+            }
         }
     }
     for preset in &mut state.eq_presets {
@@ -452,7 +455,10 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
                 .name
                 .clone()
                 .expect("parse_config requires custom names"),
-            selection_override: item.selected_eq_preset.clone(),
+            // Absent and the `"none"` sentinel both resolve `None` —
+            // customs have nothing beneath to inherit.
+            selected_eq_preset: item.selected_eq_preset.clone().flatten(),
+            selection_baseline: None,
             is_factory: false,
             params,
             baseline: state.custom_profile_baseline.clone(),
@@ -480,12 +486,11 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
 
 /// Serializes the divergence of `state` from the factory truth — the
 /// exact bytes `config.toml` should hold. Root keys, `[profile.<id>]`
-/// and `[eq_preset.<id>]` tables carry only divergences (per-item
-/// write-back; a profile row re-states its selection tri-state
-/// verbatim — a stated override is the row's statement, `"none"` for
-/// explicit no-preset); the shared layers re-emit from `loaded`
-/// verbatim. No divergence and no hand-edits ⇒ the empty string (a
-/// 0-byte file).
+/// and `[eq_preset.<id>]` tables carry only divergences (the write
+/// law, per-item; a profile's selection is a content key like any
+/// other — stored iff it diverges from the selection beneath); the
+/// shared layers re-emit from `loaded` verbatim. No divergence and no
+/// hand-edits ⇒ the empty string (a 0-byte file).
 #[must_use]
 pub fn serialize_overlay(
     state: &State,
@@ -514,8 +519,12 @@ pub fn serialize_overlay(
         if !profile.is_factory {
             emit_value(&mut item, "name", &toml_string(&profile.name));
         }
-        if let Some(selection) = &profile.selection_override {
-            let stated = selection
+        if profile.selected_eq_preset != profile.selection_baseline {
+            // TOML has no null: a diverging no-preset is the reserved
+            // `"none"` sentinel — unreachable while nothing ships
+            // beneath (part A), so A never writes it.
+            let stated = profile
+                .selected_eq_preset
                 .as_ref()
                 .map_or("none", |preset| preset.0.as_str());
             emit_value(&mut item, "selected_eq_preset", &toml_string(stated));
@@ -774,7 +783,7 @@ iebt = [67, 95]
             defaults
                 .profiles
                 .iter()
-                .all(|profile| profile.selected_eq_preset().is_none()),
+                .all(|profile| profile.selected_eq_preset.is_none()),
             "behavior 7 (issue #23): factory selection ships None"
         );
     }
@@ -1156,8 +1165,8 @@ iebt = [44, 55, 0, 0]
             "…and the defaults [profile] shared layer"
         );
         assert_eq!(
-            custom.selected_eq_preset(),
-            Some(&PresetId("user_91c2".into())),
+            custom.selected_eq_preset,
+            Some(PresetId("user_91c2".into())),
             "customs may select custom presets"
         );
         let warmth = state.eq_preset(&PresetId("user_91c2".into())).unwrap();
@@ -1246,9 +1255,8 @@ iebt = [44, 55, 0, 0]
         );
         assert_eq!(reloaded, state);
 
-        // Detach + reset: the param divergence clears, but the explicit
-        // no-preset override persists as the reserved `"none"` sentinel
-        // (ADR-0007: wire `null` ⟷ disk `"none"`) — and round-trips.
+        // Detach + reset ⇒ no divergence left ⇒ an empty file again
+        // (the write law: `None` over nothing-beneath stores no key).
         let _ = state
             .apply(
                 Command::EditProfile {
@@ -1268,17 +1276,6 @@ iebt = [44, 55, 0, 0]
                 &defs,
             )
             .unwrap();
-        let document = serialize_overlay(&state, &defaults, &loaded, &defs);
-        assert_eq!(document, "[profile.music]\nselected_eq_preset = \"none\"\n");
-        let reloaded = resolve(
-            &defaults,
-            &parse_config(&document, &defs, &defaults).unwrap(),
-        );
-        assert_eq!(reloaded, state);
-        assert_eq!(
-            reloaded.selected().selection_override,
-            Some(None),
-            "the sentinel reloads as the explicit override, not inherit"
-        );
+        assert_eq!(serialize_overlay(&state, &defaults, &loaded, &defs), "");
     }
 }

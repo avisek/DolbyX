@@ -162,7 +162,7 @@ impl App {
                     "id": profile.id,
                     "name": profile.name,
                     "is_factory": profile.is_factory,
-                    "selected_eq_preset": profile.selected_eq_preset(),
+                    "selected_eq_preset": profile.selected_eq_preset,
                     "params": profile.params,
                 })
             })
