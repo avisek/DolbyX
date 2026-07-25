@@ -153,7 +153,7 @@ async fn whole_item_reset_works_on_factory_and_custom_ids() {
     );
     assert_eq!(diverging(music), Vec::<String>::new());
 
-    // Custom: born diverging with a selection, then renamed.
+    // Custom: born diverging with an EQ selection, then renamed.
     send_json(
         &mut ws,
         &json!({ "cmd": "add_profile", "request_id": "r5", "name": "Music 2", "params": { "dvla": [2] }, "selected_eq_preset": "rich" }),
@@ -483,7 +483,7 @@ async fn a_defaults_shipped_eq_selection_loads_and_reset_falls_back_to_it() {
 /// sentinel, or an item claiming the reserved id `none` — the daemon
 /// refuses to start.
 #[tokio::test]
-async fn bad_defaults_selections_or_reserved_ids_refuse_start() {
+async fn bad_defaults_eq_selections_or_reserved_ids_refuse_start() {
     let cases: [(&str, &str, &str); 4] = [
         (
             "name = \"Music\"",

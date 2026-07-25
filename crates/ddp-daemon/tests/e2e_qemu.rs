@@ -334,7 +334,7 @@ async fn master_control_edits_land_in_the_live_registry() {
 /// clamped registry holds Rich's `iebt` curve with `ieon = 1`; a
 /// `null` patch restores the profile's own (`ieon = 0`, flat targets).
 #[tokio::test]
-async fn a_selection_patch_lands_richs_curve_on_the_real_engine() {
+async fn an_eq_selection_patch_lands_richs_curve_on_the_real_engine() {
     let daemon = start_qemu_daemon().await;
     let session = daemon
         .handle

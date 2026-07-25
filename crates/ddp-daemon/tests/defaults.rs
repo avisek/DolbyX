@@ -24,7 +24,7 @@ fn defaults() -> ddp_state::Defaults {
 }
 
 fn scalar(profile: &Profile, name: &str) -> i16 {
-    profile.params[name][0]
+    profile.content.params[name][0]
 }
 
 /// Behavior 1 (issue #18): four factory profiles with their declared
@@ -53,8 +53,8 @@ fn ships_the_four_factory_profiles() {
         defaults
             .profiles
             .iter()
-            .all(|profile| profile.selected_eq_preset.is_none()),
-        "behavior 7 (issue #23): factory selection ships None — the \
+            .all(|profile| profile.content.selected_eq_preset.is_none()),
+        "behavior 7 (issue #23): the factory EQ selection ships None — the \
          original ships ieon = 0 on every profile"
     );
 }
@@ -92,17 +92,21 @@ fn ships_the_three_factory_eq_presets_resolving_standalone() {
     for preset in &defaults.eq_presets {
         let id = &preset.id.0;
         assert!(preset.is_factory, "{id}");
-        assert_eq!(preset.params.len(), 9, "{id}: exactly the nine");
-        assert_eq!(preset.params["genb"][0], 20, "{id}: genb");
-        assert_eq!(preset.params["ienb"][0], 20, "{id}: ienb");
-        assert_eq!(preset.params["gebf"][..20], DDP_GRID, "{id}: gebf");
-        assert_eq!(preset.params["iebf"][..20], DDP_GRID, "{id}: iebf");
-        assert_eq!(preset.params["ieon"][0], 1, "{id}: ieon staged on");
-        assert_eq!(preset.params["iea"][0], 10, "{id}: iea");
-        assert_eq!(preset.params["geon"][0], 0, "{id}: GEQ off");
-        assert_eq!(preset.params["gebg"], vec![0; 40], "{id}: flat GEQ");
-        assert_eq!(preset.params["iebt"].len(), 40, "{id}: iebt allocation");
-        assert_eq!(preset.baseline, preset.params, "{id}: no user layers");
+        assert_eq!(preset.content.params.len(), 9, "{id}: exactly the nine");
+        assert_eq!(preset.content.params["genb"][0], 20, "{id}: genb");
+        assert_eq!(preset.content.params["ienb"][0], 20, "{id}: ienb");
+        assert_eq!(preset.content.params["gebf"][..20], DDP_GRID, "{id}: gebf");
+        assert_eq!(preset.content.params["iebf"][..20], DDP_GRID, "{id}: iebf");
+        assert_eq!(preset.content.params["ieon"][0], 1, "{id}: ieon staged on");
+        assert_eq!(preset.content.params["iea"][0], 10, "{id}: iea");
+        assert_eq!(preset.content.params["geon"][0], 0, "{id}: GEQ off");
+        assert_eq!(preset.content.params["gebg"], vec![0; 40], "{id}: flat GEQ");
+        assert_eq!(
+            preset.content.params["iebt"].len(),
+            40,
+            "{id}: iebt allocation"
+        );
+        assert_eq!(preset.baseline, preset.content, "{id}: no user layers");
     }
 
     // The three IEQ target curves, verbatim from the XML (docs/ddp/05).
@@ -135,7 +139,7 @@ fn ships_the_three_factory_eq_presets_resolving_standalone() {
             .iter()
             .find(|preset| preset.id.0 == id)
             .expect("factory preset");
-        assert_eq!(preset.params["iebt"][..20], curve, "{id}: iebt");
+        assert_eq!(preset.content.params["iebt"][..20], curve, "{id}: iebt");
     }
 }
 
@@ -151,15 +155,22 @@ fn the_shared_block_applies_to_every_profile() {
         assert_eq!(scalar(profile, "aonb"), 20, "{id}: aonb");
         assert_eq!(scalar(profile, "arnb"), 20, "{id}: arnb");
         assert_eq!(scalar(profile, "aocc"), 2, "{id}: aocc");
-        assert_eq!(profile.params["gebf"][..20], DDP_GRID, "{id}: gebf");
-        assert_eq!(profile.params["iebf"][..20], DDP_GRID, "{id}: iebf");
+        assert_eq!(profile.content.params["gebf"][..20], DDP_GRID, "{id}: gebf");
+        assert_eq!(profile.content.params["iebf"][..20], DDP_GRID, "{id}: iebf");
         assert_eq!(scalar(profile, "dvli"), -320, "{id}: dvli");
         assert_eq!(scalar(profile, "dvlo"), -320, "{id}: dvlo");
         // The speaker tuning tables ride along, dormant at the pinned
         // headphone endpoint.
         assert_eq!(scalar(profile, "artp"), 12, "{id}: artp");
-        assert_eq!(profile.params["arbi"][..4], [1, 1, 1, 1], "{id}: arbi");
-        assert_eq!(profile.params["aobg"][0], 2, "{id}: aobg channel id");
+        assert_eq!(
+            profile.content.params["arbi"][..4],
+            [1, 1, 1, 1],
+            "{id}: arbi"
+        );
+        assert_eq!(
+            profile.content.params["aobg"][0], 2,
+            "{id}: aobg channel id"
+        );
         // v2 pins: the engine's HEADPHONES endpoint (AK encoding 2 —
         // probe-verified vdhe auto gate, v1's value; docs/ddp/02
         // `endp`), and the visualizer feed.
@@ -170,10 +181,18 @@ fn the_shared_block_applies_to_every_profile() {
         // put it on the DDP grid (the only guard on the exact
         // frequencies — the qemu suite proves nonzero only).
         assert_eq!(scalar(profile, "vcnb"), 20, "{id}: vcnb");
-        assert_eq!(profile.params["vcbf"], DDP_GRID, "{id}: vcbf");
+        assert_eq!(profile.content.params["vcbf"], DDP_GRID, "{id}: vcbf");
         // Band arrays stay allocated at engine capacity.
-        assert_eq!(profile.params["gebf"].len(), 40, "{id}: gebf allocation");
-        assert_eq!(profile.params["aobg"].len(), 329, "{id}: aobg allocation");
+        assert_eq!(
+            profile.content.params["gebf"].len(),
+            40,
+            "{id}: gebf allocation"
+        );
+        assert_eq!(
+            profile.content.params["aobg"].len(),
+            329,
+            "{id}: aobg allocation"
+        );
     }
 }
 
@@ -224,9 +243,9 @@ fn profiles_carry_exactly_the_writable_params() {
     let writable = defs.iter().filter(|def| def.access.is_writable()).count();
     assert_eq!(writable, 52);
     for profile in defaults().profiles {
-        assert_eq!(profile.params.len(), 52, "{}", profile.id.0);
+        assert_eq!(profile.content.params.len(), 52, "{}", profile.id.0);
         for def in defs.iter().filter(|def| def.access.is_writable()) {
-            let values = profile.params.get(&def.name).expect("complete");
+            let values = profile.content.params.get(&def.name).expect("complete");
             assert_eq!(values.len(), def.length, "{}: {}", profile.id.0, def.name);
         }
     }

@@ -1,5 +1,5 @@
 //! Slice 15 behaviors (issue #23) on the Slice 18a content grammar
-//! (issue #57): factory EQ presets apply as overlays — selection is an
+//! (issue #57): factory EQ presets apply as overlays — the EQ selection is an
 //! `edit_profile` tri-state `selected_eq_preset` patch (ADR-0005) —
 //! detach, global edits, reset, per-profile persistence, all over the
 //! wire. Stub backend (mock policy) — `e2e_qemu.rs` replays the flow.
@@ -80,10 +80,10 @@ async fn the_snapshot_carries_the_three_complete_factory_eq_presets() {
 /// Behavior 1 (issue #57) / behavior 2 (issue #23): a WS
 /// `edit_profile { id: "music", selected_eq_preset: "rich" }` patch →
 /// the stub records **one** `set_params` carrying the resolved nine EQ
-/// params — Rich's curve with `ieon = 1` among them; the selection
+/// params — Rich's curve with `ieon = 1` among them; the EQ selection
 /// lands on the profile and reaches the other client via broadcast.
 #[tokio::test]
-async fn tracer_bullet_a_selection_patch_pushes_the_resolved_nine_in_one_batch() {
+async fn tracer_bullet_an_eq_selection_patch_pushes_the_resolved_nine_in_one_batch() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -119,7 +119,7 @@ async fn tracer_bullet_a_selection_patch_pushes_the_resolved_nine_in_one_batch()
     assert_eq!(broadcast["type"], "state");
     assert_eq!(
         broadcast["snapshot"]["profiles"][1]["selected_eq_preset"], "rich",
-        "selection stored on the music profile"
+        "the EQ selection stored on the music profile"
     );
     assert_eq!(
         try_recv_json(&mut originator, 300).await,
@@ -132,7 +132,7 @@ async fn tracer_bullet_a_selection_patch_pushes_the_resolved_nine_in_one_batch()
 /// `selected_eq_preset` patch detaches — one `set_params` with the
 /// profile's own EQ params again.
 #[tokio::test]
-async fn a_null_selection_patch_detaches_to_the_profiles_own_eq() {
+async fn a_null_eq_selection_patch_detaches_to_the_profiles_own_eq() {
     let daemon = start_daemon().await;
     daemon
         .handle
@@ -216,7 +216,7 @@ async fn edit_eq_preset_flushes_for_the_active_profile_and_is_global() {
     assert_eq!(batch["iebt"][..20], curve[..]);
 
     // One global preset: the snapshot's rich carries the edit, and both
-    // selecting profiles see it through their selection.
+    // selecting profiles see it through their EQ selection.
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r4" })).await;
     let snapshot = recv_json(&mut ws).await["snapshot"].take();
     let rich_iebt = snapshot["eq_presets"][1]["params"]["iebt"]
@@ -235,7 +235,7 @@ async fn edit_eq_preset_flushes_for_the_active_profile_and_is_global() {
     }
 }
 
-/// Behavior 5 (issue #23): a selection patch targeting a non-selected
+/// Behavior 5 (issue #23): an EQ selection patch targeting a non-selected
 /// profile persists (flush + broadcast) without an engine call.
 #[tokio::test]
 async fn a_selection_patch_on_a_non_selected_profile_skips_the_engine() {
@@ -271,7 +271,7 @@ async fn a_selection_patch_on_a_non_selected_profile_skips_the_engine() {
 /// as an `Option`, and a preset edit persists globally — both survive
 /// a restart.
 #[tokio::test]
-async fn selection_and_preset_edits_survive_a_restart() {
+async fn eq_selection_and_preset_edits_survive_a_restart() {
     let daemon = start_daemon().await;
     let mut ws = connected(daemon.addr()).await;
 
@@ -443,7 +443,7 @@ async fn a_mixed_patch_applies_atomically_and_rejects_whole() {
     assert_eq!(batch["iebt"][..20], RICH_IEBT, "Rich's curve");
     assert_eq!(batch["ieon"], [1]);
 
-    // An invalid selection rejects the valid param half too.
+    // An invalid EQ selection rejects the valid param half too.
     let calls_before = daemon.stub.calls().len();
     send_json(
         &mut ws,

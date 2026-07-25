@@ -22,8 +22,8 @@ pub use param_def::{
     ParamAccess, ParamCategory, ParamKind, ParameterDef, ParseError, base_eq_params, base_params,
     lookup, parse,
 };
-pub use preset::{EqPreset, PresetId};
-pub use profile::{Profile, ProfileId};
+pub use preset::{EqPreset, PresetContent, PresetId};
+pub use profile::{Profile, ProfileContent, ProfileId};
 pub use state::{
     Command, Defaults, State, StateDiff, ValidationError, validate_eq_preset_write, validate_write,
 };
