@@ -59,6 +59,13 @@ test('profile journey: clone Music → rename → edit → reset → delete', as
   await expect(renamed).toHaveAttribute('aria-selected', 'true')
   await expect(reset).toBeDisabled()
 
+  // A pure edit re-enables Reset live — the originator's own union,
+  // no snapshot round-trip involved (behavior 2's "flipping live as
+  // edits land").
+  await dialog.click()
+  await expect(dialog).toHaveAttribute('aria-checked', 'true')
+  await expect(reset).toBeEnabled()
+
   // Delete: the tab goes; the selection falls to the Fallback profile.
   await remove.click()
   await expect(renamed).toHaveCount(0)
@@ -66,7 +73,7 @@ test('profile journey: clone Music → rename → edit → reset → delete', as
   await expect(rename).toBeDisabled()
 })
 
-test('preset journey: capture from None → rename → delete, matrix tracking the selection', async ({
+test('EQ preset journey: capture from None → rename → delete, matrix tracking the selection', async ({
   page,
 }) => {
   await page.goto('/')

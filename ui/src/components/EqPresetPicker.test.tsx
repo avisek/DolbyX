@@ -161,6 +161,21 @@ it('picking None detaches with a null selection patch', () => {
   ])
 })
 
+// Re-picking the checked option is a no-op gesture: no patch goes
+// out, so the local `overridden` union can't falsely enable Reset on
+// a pristine profile (behavior 2's disabled-iff rule).
+it('re-picking the checked option sends nothing', () => {
+  const socket = renderConnected() // Music with None selected
+
+  option('None').click()
+  expect(sentSelections(socket)).toEqual([])
+  expect(action('Reset EQ preset').disabled).toBe(true)
+
+  applySnapshot(selectingState('music', 'rich'))
+  option('Rich').click()
+  expect(sentSelections(socket)).toEqual([])
+})
+
 // Behavior 6 (#23), client half: selection is per-profile — switching
 // the active profile shows that profile's own selection.
 it("shows each profile's own selection", () => {
@@ -243,7 +258,7 @@ it('the None row sends a reset_profile scoped to the 9', () => {
 
 // Behavior 2 (#26), preset half: a selected preset resets whole-item
 // via `reset_eq_preset`, disabled iff its own `overridden` is empty.
-it('a selected preset resets whole-item via reset_eq_preset', () => {
+it('a selected EQ preset resets whole-item via reset_eq_preset', () => {
   const socket = renderConnected()
 
   applySnapshot(customPresetState('music'))
@@ -331,7 +346,7 @@ it('Add on None captures the profile own 9 as Preset 1', () => {
 // Behavior 5 (#26), preset half: the checked option's label becomes
 // an inline field — Enter commits `edit_eq_preset { id, name }`, Esc
 // cancels with no wire call.
-it('inline preset rename commits on Enter, cancels on Esc', async () => {
+it('inline EQ preset rename commits on Enter, cancels on Esc', async () => {
   applySnapshot(customPresetState('music'))
   const socket = renderConnected()
   const field = () => screen.getByRole<HTMLInputElement>('textbox')

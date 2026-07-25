@@ -9,8 +9,8 @@ import './ActionRow.css'
  * accessible names ("Add profile" vs "Add EQ preset").
  */
 const ActionRow: Component<{
-  /** The accessible-name qualifier: "profile" | "EQ preset". */
-  kind: string
+  /** The accessible-name qualifier. */
+  kind: 'profile' | 'EQ preset'
   onAdd: () => void
   renameDisabled: boolean
   onRename: () => void

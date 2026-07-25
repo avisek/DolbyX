@@ -3,7 +3,7 @@
  * plus the connection signal and the command actions components call.
  */
 import { createSignal } from 'solid-js'
-import { WsClient } from '../lib/ws'
+import { WsClient, type Command } from '../lib/ws'
 import {
   applyEqPreset,
   applyEqPresetAdded,
@@ -56,6 +56,19 @@ function reconcile(): void {
   void client?.request({ cmd: 'get_state' }).catch(() => {
     // Handled as any other error event; never unhandled-rejection noise.
   })
+}
+
+/**
+ * Sends one command whose outcome only a reconcile can apply — the
+ * shared shape of every reset/remove action.
+ */
+function requestThenReconcile(command: Command): void {
+  void client
+    ?.request(command)
+    .then(reconcile)
+    .catch(() => {
+      // Rejected or errored — the error-path reconcile already ran.
+    })
 }
 
 /**
@@ -237,14 +250,9 @@ export function addEqPreset(
  * local apply.
  */
 export function resetProfile(id: string, only?: readonly string[]): void {
-  void client
-    ?.request(
-      only ? { cmd: 'reset_profile', id, only } : { cmd: 'reset_profile', id },
-    )
-    .then(reconcile)
-    .catch(() => {
-      // Rejected or errored — the error-path reconcile already ran.
-    })
+  requestThenReconcile(
+    only ? { cmd: 'reset_profile', id, only } : { cmd: 'reset_profile', id },
+  )
 }
 
 /**
@@ -264,12 +272,7 @@ export function renameEqPreset(id: string, name: string): void {
 
 /** As [`resetProfile`], for an EQ preset. */
 export function resetEqPreset(id: string): void {
-  void client
-    ?.request({ cmd: 'reset_eq_preset', id })
-    .then(reconcile)
-    .catch(() => {
-      // Rejected or errored — the error-path reconcile already ran.
-    })
+  requestThenReconcile({ cmd: 'reset_eq_preset', id })
 }
 
 /**
@@ -278,12 +281,7 @@ export function resetEqPreset(id: string): void {
  * knows: reconcile off the ack rather than guess.
  */
 export function removeProfile(id: string): void {
-  void client
-    ?.request({ cmd: 'remove_profile', id })
-    .then(reconcile)
-    .catch(() => {
-      // Rejected or errored — the error-path reconcile already ran.
-    })
+  requestThenReconcile({ cmd: 'remove_profile', id })
 }
 
 /**
@@ -291,12 +289,7 @@ export function removeProfile(id: string): void {
  * explicit None at delete time (ADR-0003); reconcile off the ack.
  */
 export function removeEqPreset(id: string): void {
-  void client
-    ?.request({ cmd: 'remove_eq_preset', id })
-    .then(reconcile)
-    .catch(() => {
-      // Rejected or errored — the error-path reconcile already ran.
-    })
+  requestThenReconcile({ cmd: 'remove_eq_preset', id })
 }
 
 /**

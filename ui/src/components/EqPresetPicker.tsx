@@ -65,7 +65,11 @@ const EqPresetPicker: Component = () => {
                 role="radio"
                 aria-checked={selected() === (entry?.id ?? null)}
                 onClick={() => {
-                  setEqPreset(state.selected_profile, entry?.id ?? null)
+                  // Re-picking the checked option is a no-op gesture —
+                  // no patch, so the local `overridden` union can't
+                  // falsely mark a pristine profile diverging.
+                  const id = entry?.id ?? null
+                  if (id !== selected()) setEqPreset(state.selected_profile, id)
                 }}
               >
                 {entry?.name ?? 'None'}
