@@ -96,6 +96,18 @@ export function paramDef(name: string): ParameterDef {
 }
 
 /**
+ * The nine preset-carried 4-CCs, in table order — eligibility is
+ * derived, `category ∈ {Ieq, Geq}`, never a flag (ADR-0003). The
+ * vocabulary of the None row's scoped reset and its capture gesture
+ * (issue #26).
+ */
+export function presetCarried(): readonly string[] {
+  return table
+    .filter((def) => def.category === 'ieq' || def.category === 'geq')
+    .map((def) => def.name)
+}
+
+/**
  * The raw value an enable half writes for "on": a tristate's declared
  * `on` (`vdhe` writes 2 — auto — not 1), plain toggles 1. "Off" is
  * always 0.

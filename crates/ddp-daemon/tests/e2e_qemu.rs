@@ -334,7 +334,7 @@ async fn master_control_edits_land_in_the_live_registry() {
 /// clamped registry holds Rich's `iebt` curve with `ieon = 1`; a
 /// `null` patch restores the profile's own (`ieon = 0`, flat targets).
 #[tokio::test]
-async fn a_selection_patch_lands_richs_curve_on_the_real_engine() {
+async fn an_eq_selection_patch_lands_richs_curve_on_the_real_engine() {
     let daemon = start_qemu_daemon().await;
     let session = daemon
         .handle
@@ -520,8 +520,8 @@ async fn custom_profile_crud_replays_on_the_real_engine() {
 /// Behavior 5 (issue #26 B): the part-B tracer against the real
 /// engine — edit Music's `dvle` and GEQ, scoped-reset the GEQ (the
 /// leveler survives), whole-item reset the rest; every step read back
-/// from the live clamped registry, `overridden` and the config row
-/// emptied.
+/// from the live clamped registry, the snapshot back at its baseline
+/// and the config row emptied.
 #[tokio::test]
 async fn reset_falls_the_live_registry_back_to_baseline() {
     let daemon = start_qemu_daemon().await;
@@ -578,7 +578,11 @@ async fn reset_falls_the_live_registry_back_to_baseline() {
 
     send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r4" })).await;
     let snapshot = recv_state(&mut ws).await["snapshot"].take();
-    assert_eq!(snapshot["profiles"][1]["overridden"], json!([]));
+    let music = &snapshot["profiles"][1];
+    assert_eq!(
+        music["params"], music["baseline"]["params"],
+        "resolved back at the content-shaped baseline — nothing diverges"
+    );
     assert_config_becomes(&daemon.dir.path().join("data").join("config.toml"), "").await;
 }
 

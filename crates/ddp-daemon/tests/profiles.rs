@@ -152,10 +152,10 @@ async fn edit_profile_flushes_only_when_selected() {
     .await;
 }
 
-/// Behavior 6 (issue #18): the selection and per-profile edits survive
+/// Behavior 6 (issue #18): the active profile and per-profile edits survive
 /// a restart; factory values never land in `config.toml`.
 #[tokio::test]
-async fn selection_and_edits_survive_a_restart() {
+async fn the_active_profile_and_edits_survive_a_restart() {
     let daemon = start_daemon().await;
     let mut ws = connected(daemon.addr()).await;
 

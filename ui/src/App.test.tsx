@@ -119,8 +119,8 @@ const isSelected = (name: string) =>
   profileTab(name).getAttribute('aria-selected')
 
 // Behavior 10 (#18): the four factory tabs render from the snapshot,
-// the factory selection marked.
-it('renders the four factory profile tabs with the selection marked', () => {
+// the active profile marked.
+it('renders the four factory profile tabs with the active one marked', () => {
   render(() => <App />)
   const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent)
   expect(tabs).toEqual(['Movie', 'Music', 'Game', 'Voice'])
@@ -159,7 +159,7 @@ it('sends set_profile on click and applies the switch on the ack', async () => {
 })
 
 // Behavior 10 (#18): another client switched — its broadcast `state`
-// event moves this tab's selection.
+// event moves this tab's active profile.
 it('updates the selected tab on a broadcast state event', () => {
   const socket = renderConnected()
 

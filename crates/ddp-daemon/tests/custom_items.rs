@@ -25,7 +25,7 @@ async fn ack_of(ws: &mut common::WsClient, command: &serde_json::Value) -> serde
 /// Behavior 2 (issue #26 A), the slice's entry tracer: `add_profile`
 /// with content copied from Music's resolved snapshot → a fresh
 /// `user_<hash>` on the ack, no engine call (the daemon never moves
-/// selection on add), and — switched to — the clone sounds identical
+/// the active profile on add), and — switched to — the clone sounds identical
 /// to Music: its full resolved batch is byte-for-byte Music's.
 #[tokio::test]
 async fn add_profile_with_musics_content_mints_an_id_and_sounds_identical() {
@@ -91,7 +91,7 @@ async fn add_profile_with_musics_content_mints_an_id_and_sounds_identical() {
 /// Behavior 2 (issue #26 A), partial half: unstated `add_profile`
 /// params resolve from the **custom baseline** (`ParameterDef.default`
 /// ⊕ shared layers) — not from any factory profile's own values — and
-/// a `null` birth selection reads as None (issue: absent or `null` ⇒
+/// a `null` birth EQ selection reads as None (issue: absent or `null` ⇒
 /// None).
 #[tokio::test]
 async fn add_profile_partial_params_resolve_from_the_custom_baseline() {
@@ -110,7 +110,7 @@ async fn add_profile_partial_params_resolve_from_the_custom_baseline() {
     assert_eq!(
         custom["selected_eq_preset"],
         serde_json::Value::Null,
-        "an explicit `null` birth selection is None"
+        "an explicit `null` birth EQ selection is None"
     );
     assert_eq!(custom["params"]["dvla"], json!([9]), "the stated param");
     assert_eq!(
@@ -183,7 +183,7 @@ async fn add_eq_preset_mints_an_id_and_is_selectable() {
     let batches = set_params_batches(&daemon.stub);
     let batch: std::collections::HashMap<&str, &[i16]> = batches
         .last()
-        .expect("the selection flushes")
+        .expect("the EQ selection flushes")
         .iter()
         .map(|(name, values)| (name.as_str(), values.as_slice()))
         .collect();
@@ -343,7 +343,7 @@ async fn removing_the_selected_profile_falls_back_to_defaults_selection() {
 
 /// Behavior 5 (issue #26 A): deleting a custom EQ preset selected by N
 /// profiles falls **all N** to `None` at delete time — and the
-/// selection stores like any content key (the write law, ADR-0007):
+/// EQ selection stores like any content key (the write law, ADR-0007):
 /// nothing resolves beneath in part A, so no row key lands on disk.
 /// The selected profile among them, flush-iff-live pushes its **own**
 /// EQ.
@@ -560,7 +560,7 @@ async fn tracer_bullet_add_rename_restart_survives() {
     );
     assert_eq!(
         custom["selected_eq_preset"], preset_id,
-        "the selection survived"
+        "the EQ selection survived"
     );
 
     let presets = snapshot["eq_presets"].as_array().expect("array");

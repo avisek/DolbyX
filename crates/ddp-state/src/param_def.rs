@@ -139,23 +139,6 @@ pub(crate) fn splice_head(
     current[..values.len()].copy_from_slice(values);
 }
 
-/// The keys of `params` whose values diverge from `baseline`, in
-/// `defs` table order — the param half of an item's `overridden` list.
-pub(crate) fn diverging(
-    params: &std::collections::HashMap<String, Vec<i16>>,
-    baseline: &std::collections::HashMap<String, Vec<i16>>,
-    defs: &[ParameterDef],
-) -> Vec<String> {
-    defs.iter()
-        .filter(|def| {
-            params
-                .get(&def.name)
-                .is_some_and(|values| baseline.get(&def.name) != Some(values))
-        })
-        .map(|def| def.name.clone())
-        .collect()
-}
-
 /// UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -34,7 +34,7 @@ pub(crate) enum WsCommand {
         id: ddp_state::ProfileId,
     },
     /// The one sparse patch verb (ADR-0005): params and/or the EQ
-    /// preset selection, atomic — an invalid part rejects the whole.
+    /// selection, atomic — an invalid part rejects the whole.
     EditProfile {
         /// Correlation id echoed on the reply.
         request_id: String,
@@ -46,7 +46,7 @@ pub(crate) enum WsCommand {
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
         #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
-        /// Tri-state selection patch: absent = untouched, `null` =
+        /// Tri-state EQ selection patch: absent = untouched, `null` =
         /// detach (the profile's own EQ params apply), id = select.
         #[serde(default, deserialize_with = "tri_state")]
         #[expect(

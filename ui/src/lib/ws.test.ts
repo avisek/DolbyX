@@ -91,6 +91,36 @@ it('settles get_state on the request_id-echoing state event', async () => {
   expect(snapshots).toHaveLength(3)
 })
 
+// Behavior 3 (#26), the wire half: an `add_*` ack carries the
+// server-minted id, resolved through the request promise so the
+// originator applies locally without waiting for a snapshot (ADR-0005).
+it('resolves an add_* ack with the server-minted id', async () => {
+  const socket = MockWebSocket.latest()
+  socket.open()
+
+  const add = client.request({
+    cmd: 'add_profile',
+    name: 'Music 2',
+    params: { dvla: [4] },
+    selected_eq_preset: null,
+  })
+  const sent = socket.sentCommands().at(-1)
+  socket.serverMessage({
+    type: 'ack',
+    request_id: sent?.request_id,
+    id: 'user_a3f1',
+  })
+  await expect(add).resolves.toBe('user_a3f1')
+
+  // A plain mutation ack minted nothing.
+  const flip = client.request({ cmd: 'set_power', on: false })
+  socket.serverMessage({
+    type: 'ack',
+    request_id: socket.sentCommands().at(-1)?.request_id,
+  })
+  await expect(flip).resolves.toBeUndefined()
+})
+
 it('rejects a command while the socket is not open', async () => {
   // Still CONNECTING — the daemon truth arrives on connect anyway.
   await expect(client.request({ cmd: 'get_state' })).rejects.toThrow(

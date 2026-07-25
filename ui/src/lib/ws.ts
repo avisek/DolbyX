@@ -4,16 +4,41 @@
  * engine-native i16 1/16-dB throughout; params travel by 4-CC name.
  */
 
+/**
+ * A profile's content shape — the EQ selection plus every writable
+ * param: what a profile resolves and what its `baseline` mirrors
+ * (ADR-0005).
+ */
+export interface ProfileContent {
+  /** `null` ⇒ the profile's own EQ params apply. */
+  readonly selected_eq_preset: string | null
+  /** Every writable param, keyed by 4-CC, in engine-native i16. */
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
+/** An EQ preset's content shape — the nine preset-carried params. */
+export interface PresetContent {
+  readonly params: Readonly<Record<string, readonly number[]>>
+}
+
 /** One profile as the snapshot carries it — complete, cascade-resolved. */
 export interface Profile {
   readonly id: string
   readonly name: string
-  /** Factory items reset instead of delete/rename. */
+  /** Factory items cannot be deleted or renamed (Reset still valid). */
   readonly is_factory: boolean
   /** `null` ⇒ the profile's own EQ params apply. */
   readonly selected_eq_preset: string | null
   /** Every writable param, keyed by 4-CC, in engine-native i16. */
   readonly params: Readonly<Record<string, readonly number[]>>
+  /**
+   * What resolves beneath the item's `config.toml` row, content-shaped
+   * (ADR-0005). Divergence — resolved ≠ baseline per content key,
+   * exactly what a whole-item reset would clear — is derived from it,
+   * never shipped: the snapshot ships inputs, and every
+   * Reset-disabled state follows.
+   */
+  readonly baseline: ProfileContent
 }
 
 /**
@@ -24,10 +49,12 @@ export interface Profile {
 export interface EqPreset {
   readonly id: string
   readonly name: string
-  /** Factory items reset instead of delete/rename. */
+  /** Factory items cannot be deleted or renamed (Reset still valid). */
   readonly is_factory: boolean
   /** The nine preset-carried params, keyed by 4-CC, in engine-native i16. */
   readonly params: Readonly<Record<string, readonly number[]>>
+  /** As [`Profile.baseline`], over the preset-carried params. */
+  readonly baseline: PresetContent
 }
 
 /** Mirror of the WS `state` event's snapshot. */
@@ -59,25 +86,88 @@ export type Command =
   | { readonly cmd: 'set_profile'; readonly id: string }
   | {
       /**
-       * The one sparse patch verb (ADR-0005): params and/or the EQ
-       * preset selection, atomic — an invalid part rejects the whole.
+       * The one sparse patch verb (ADR-0005): params, a rename, and/or
+       * the EQ selection, atomic — an invalid part rejects the
+       * whole.
        */
       readonly cmd: 'edit_profile'
       readonly id: string
+      /** A rename patch — factory ids reject. */
+      readonly name?: string
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
       readonly params?: Readonly<Record<string, readonly number[]>>
       /**
-       * Tri-state selection patch: absent = untouched, `null` = detach
-       * (the profile's own EQ params apply), id = select. EQ selection
-       * is per-profile — the target is explicit.
+       * Tri-state EQ selection patch: absent = untouched, `null` =
+       * detach (the profile's own EQ params apply), id = select. The
+       * EQ selection is per-profile — the target is explicit.
        */
       readonly selected_eq_preset?: string | null
     }
   | {
       readonly cmd: 'edit_eq_preset'
       readonly id: string
+      /** A rename patch — factory ids reject. */
+      readonly name?: string
       /** The edited entries: `{ "<4-CC>": [i16, …] }`. */
-      readonly params: Readonly<Record<string, readonly number[]>>
+      readonly params?: Readonly<Record<string, readonly number[]>>
+    }
+  | {
+      /**
+       * Create a custom profile from its content (ADR-0005) — never a
+       * source reference: "clone" and "capture" are UI gestures, the
+       * client copies resolved values it already holds. Unstated
+       * params resolve from the custom baseline; the ack returns the
+       * server-minted id.
+       */
+      readonly cmd: 'add_profile'
+      readonly name: string
+      readonly params?: Readonly<Record<string, readonly number[]>>
+      /** The birth EQ selection; absent or `null` ⇒ no preset. */
+      readonly selected_eq_preset?: string | null
+    }
+  | {
+      /** As `add_profile`, over the preset-carried params. */
+      readonly cmd: 'add_eq_preset'
+      readonly name: string
+      readonly params?: Readonly<Record<string, readonly number[]>>
+    }
+  | {
+      /**
+       * The un-edit (ADR-0007): drop the id's `config.toml`
+       * divergences so the cascade beneath resolves. Valid on every
+       * item; `name` never resets.
+       */
+      readonly cmd: 'reset_profile'
+      readonly id: string
+      /**
+       * The scope: absent ⇒ the whole item (the EQ selection override
+       * included); present ⇒ exactly these content keys. A key the
+       * item doesn't carry rejects.
+       */
+      readonly only?: readonly string[]
+    }
+  | {
+      /** As `reset_profile`, over the preset-carried params. */
+      readonly cmd: 'reset_eq_preset'
+      readonly id: string
+      readonly only?: readonly string[]
+    }
+  | {
+      /**
+       * Delete a custom profile (factory ids reject). Deleting the
+       * selected profile falls the active profile to the Fallback
+       * profile.
+       */
+      readonly cmd: 'remove_profile'
+      readonly id: string
+    }
+  | {
+      /**
+       * Delete a custom EQ preset (factory ids reject); selecting
+       * profiles fall to explicit `None` at delete time.
+       */
+      readonly cmd: 'remove_eq_preset'
+      readonly id: string
     }
 
 /** A daemon → client event frame. */
@@ -92,7 +182,16 @@ export type ServerEvent =
       readonly request_id?: string
     }
   | { readonly type: 'vis'; readonly params: VisParams }
-  | { readonly type: 'ack'; readonly request_id: string }
+  | {
+      readonly type: 'ack'
+      readonly request_id: string
+      /**
+       * The server-minted item id — present exactly on `add_*` acks,
+       * so the originator applies locally without waiting for a
+       * snapshot (ADR-0005). Opaque beyond the `user_` prefix.
+       */
+      readonly id?: string
+    }
   | {
       readonly type: 'error'
       /** `null` when the frame was too malformed to carry one. */
@@ -114,7 +213,7 @@ export interface WsClientHandlers {
 /** One command awaiting its reply (`ack` | `error` | `state`). */
 interface Pending {
   readonly cmd: Command['cmd']
-  readonly resolve: () => void
+  readonly resolve: (minted?: string) => void
   readonly reject: (reason: Error) => void
 }
 
@@ -184,10 +283,11 @@ export class WsClient {
   /**
    * Sends one command with a fresh `request_id`; the returned promise
    * settles on the daemon's matching reply — `ack` or an id-echoing
-   * `state` (resolve), `error` (reject). Rejects immediately while
-   * the socket is not open.
+   * `state` (resolve), `error` (reject). An `add_*` ack resolves the
+   * server-minted item id; every other reply resolves `undefined`.
+   * Rejects immediately while the socket is not open.
    */
-  request(command: Command): Promise<void> {
+  request(command: Command): Promise<string | undefined> {
     if (this.#socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('WS not open'))
     }
@@ -222,7 +322,7 @@ export class WsClient {
         this.#handlers.onVis(parsed.params)
         break
       case 'ack':
-        this.#settle(parsed.request_id)?.resolve()
+        this.#settle(parsed.request_id)?.resolve(parsed.id)
         break
       case 'error': {
         const pending = this.#settle(parsed.request_id)

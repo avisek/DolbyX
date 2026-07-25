@@ -162,12 +162,14 @@ impl App {
                     "id": profile.id,
                     "name": profile.name,
                     "is_factory": profile.is_factory,
-                    "selected_eq_preset": profile.selected_eq_preset,
-                    "params": profile.params,
-                    // The diverging content keys (ADR-0005) — reset's
-                    // dual; the UI derives every Reset-disabled state
-                    // from it.
-                    "overridden": profile.overridden(&self.params),
+                    "selected_eq_preset": profile.content.selected_eq_preset,
+                    "params": profile.content.params,
+                    // What resolves beneath the item's config.toml row,
+                    // content-shaped (ADR-0005): divergence — resolved
+                    // ≠ baseline per content key — is client-derived,
+                    // never shipped (originator suppression would
+                    // starve a precomputed list on the editing tab).
+                    "baseline": profile.baseline,
                 })
             })
             .collect();
@@ -179,8 +181,8 @@ impl App {
                     "id": preset.id,
                     "name": preset.name,
                     "is_factory": preset.is_factory,
-                    "params": preset.params,
-                    "overridden": preset.overridden(&self.params),
+                    "params": preset.content.params,
+                    "baseline": preset.baseline,
                 })
             })
             .collect();

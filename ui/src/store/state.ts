@@ -76,8 +76,10 @@ export function applyProfile(id: string): void {
 }
 
 /**
- * Applies this tab's own acked EQ preset selection (local-first) —
- * per-profile, `null` detaching to the profile's own EQ params.
+ * Applies this tab's own acked EQ selection patch (local-first) —
+ * per-profile, `null` detaching to the profile's own EQ params. The
+ * EQ selection is a content key (ADR-0007): moving it off
+ * `baseline.selected_eq_preset` is divergence like any edit.
  */
 export function applyEqPreset(profileId: string, id: string | null): void {
   setState('profiles', (profiles) =>
@@ -101,6 +103,55 @@ function mergeParams(
   return merged
 }
 
+/** Element-wise equality of two param value arrays. */
+function sameValues(
+  a: readonly number[] | undefined,
+  b: readonly number[] | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.length === b.length && a.every((value, slot) => value === b[slot])
+}
+
+/**
+ * Whether any of an item's params diverge from its snapshot `baseline`
+ * — optionally scoped to `keys` (the None row scopes to the 9). Purely
+ * derived (ADR-0005): the snapshot ships the baseline, never a
+ * precomputed list, so the originating tab sees a divergence disappear
+ * the moment an edit lands back on the baseline value.
+ */
+export function paramsDiverge(
+  item: {
+    readonly params: Readonly<Record<string, readonly number[]>>
+    readonly baseline: {
+      readonly params: Readonly<Record<string, readonly number[]>>
+    }
+  },
+  keys?: readonly string[],
+): boolean {
+  const named = keys ?? Object.keys(item.params)
+  return named.some(
+    (name) => !sameValues(item.params[name], item.baseline.params[name]),
+  )
+}
+
+/**
+ * Whole-item divergence of a profile — any content key off its
+ * baseline: a param, or the EQ selection. Exactly what a whole-item
+ * `reset_profile` would clear; the profile Reset affordance disables
+ * on its negation.
+ */
+export function profileDiverges(profile: Profile): boolean {
+  return (
+    profile.selected_eq_preset !== profile.baseline.selected_eq_preset ||
+    paramsDiverge(profile)
+  )
+}
+
+/** As [`profileDiverges`], for an EQ preset (params only). */
+export function presetDiverges(preset: EqPreset): boolean {
+  return paramsDiverge(preset)
+}
+
 /**
  * Applies one of this tab's own profile edits. Short value arrays
  * overlay the head of the param's full allocation — the daemon merges
@@ -116,6 +167,38 @@ export function applyProfileEdit(
         ? { ...profile, params: mergeParams(profile.params, params) }
         : profile,
     ),
+  )
+}
+
+/**
+ * Inserts this tab's own acked clone — content as sent, id as minted
+ * (ADR-0005: the ack id exists so the originator applies locally
+ * without waiting for a snapshot). `baseline` starts as the caller's
+ * guess; the add's `get_state` chaser fetches the true one (it lives
+ * in the cascade, daemon-side).
+ */
+export function applyProfileAdded(profile: Profile): void {
+  setState('profiles', (profiles) => [...profiles, profile])
+}
+
+/** As [`applyProfileAdded`], for a fresh custom EQ preset. */
+export function applyEqPresetAdded(preset: EqPreset): void {
+  setState('eq_presets', (presets) => [...presets, preset])
+}
+
+/** Applies this tab's own acked rename — a label change, id stable. */
+export function applyProfileRename(id: string, name: string): void {
+  setState('profiles', (profiles) =>
+    profiles.map((profile) =>
+      profile.id === id ? { ...profile, name } : profile,
+    ),
+  )
+}
+
+/** As [`applyProfileRename`], for an EQ preset. */
+export function applyEqPresetRename(id: string, name: string): void {
+  setState('eq_presets', (presets) =>
+    presets.map((preset) => (preset.id === id ? { ...preset, name } : preset)),
   )
 }
 
