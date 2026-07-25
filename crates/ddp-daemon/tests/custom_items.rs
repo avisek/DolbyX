@@ -182,6 +182,84 @@ async fn add_eq_preset_mints_an_id_and_is_selectable() {
     assert_eq!(batch["ieon"], [1]);
 }
 
+/// Behavior 3 (issue #26 A): a rename is an `edit_* { id, name }`
+/// patch (ADR-0005 — no `rename_*` verb): customs rename with id
+/// stable and no engine call; a factory `name` patch, an
+/// empty-after-trim name, and the retired `rename_profile` cmd are
+/// `INVALID_REQUEST`. Plain acks carry no `id` — that key is `add_*`'s.
+#[tokio::test]
+async fn edit_name_patches_rename_customs_and_reject_factory() {
+    let daemon = start_daemon().await;
+    let mut ws = connected(daemon.addr()).await;
+
+    let profile_id = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_profile", "request_id": "r1", "name": "Music 2" }),
+    )
+    .await;
+    let preset_id = ack_of(
+        &mut ws,
+        &json!({ "cmd": "add_eq_preset", "request_id": "r2", "name": "Preset 1" }),
+    )
+    .await;
+
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "edit_profile", "request_id": "r3", "id": profile_id, "name": "Late Night" }),
+    )
+    .await;
+    let ack = recv_json(&mut ws).await;
+    assert_eq!(ack["type"], "ack");
+    assert!(
+        !ack.as_object().expect("object").contains_key("id"),
+        "the minted-id key is add_*'s alone: {ack}"
+    );
+    let _ = ack_of(
+        &mut ws,
+        &json!({ "cmd": "edit_eq_preset", "request_id": "r4", "id": preset_id, "name": "Warmth" }),
+    )
+    .await;
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r5" })).await;
+    let snapshot = recv_json(&mut ws).await["snapshot"].take();
+    assert_eq!(snapshot["profiles"][4]["id"], profile_id, "id stable");
+    assert_eq!(snapshot["profiles"][4]["name"], "Late Night");
+    assert_eq!(snapshot["eq_presets"][3]["id"], preset_id, "id stable");
+    assert_eq!(snapshot["eq_presets"][3]["name"], "Warmth");
+    assert!(
+        daemon.stub.calls().is_empty(),
+        "a rename never touches the engine"
+    );
+
+    for (request, needle) in [
+        (
+            json!({ "cmd": "edit_profile", "request_id": "r6", "id": "music", "name": "Loud" }),
+            "renamed",
+        ),
+        (
+            json!({ "cmd": "edit_eq_preset", "request_id": "r7", "id": "rich", "name": "Loud" }),
+            "renamed",
+        ),
+        (
+            json!({ "cmd": "edit_profile", "request_id": "r8", "id": profile_id, "name": "   " }),
+            "empty",
+        ),
+        (
+            json!({ "cmd": "rename_profile", "request_id": "r9", "id": profile_id, "name": "X" }),
+            "unknown variant `rename_profile`",
+        ),
+    ] {
+        send_json(&mut ws, &request).await;
+        let error = recv_json(&mut ws).await;
+        assert_eq!(error["type"], "error", "{request}");
+        assert_eq!(error["code"], "INVALID_REQUEST");
+        assert!(
+            error["message"].as_str().expect("message").contains(needle),
+            "wanted {needle:?} in {error}"
+        );
+    }
+}
+
 /// `add_*` validation (epic validation section): empty-after-trim
 /// names, undeclared/read-only/out-of-range params, non-preset-carried
 /// preset params, and an unknown `selected_eq_preset` are

@@ -210,9 +210,10 @@ impl State {
             }
             Command::EditProfile {
                 id,
+                name,
                 params,
                 selected_eq_preset,
-            } => self.edit_profile(id, &params, selected_eq_preset, defs),
+            } => self.edit_profile(id, name, &params, selected_eq_preset, defs),
             Command::AddProfile {
                 name,
                 params,
@@ -235,13 +236,16 @@ impl State {
                     minted: None,
                 })
             }
-            Command::EditEqPreset { id, params } => self.edit_eq_preset(id, &params, defs),
+            Command::EditEqPreset { id, name, params } => {
+                self.edit_eq_preset(id, name, &params, defs)
+            }
             Command::ResetEqPreset { id } => self.reset_eq_preset(id, defs),
         }
     }
 
     /// [`Command::EditProfile`]: merge the param patch, apply the
-    /// tri-state selection patch, flush-iff-live — atomically.
+    /// tri-state selection patch and/or the rename, flush-iff-live —
+    /// atomically.
     #[expect(
         clippy::option_option,
         reason = "tri-state: absent ≠ null ≠ id (ADR-0005)"
@@ -249,14 +253,18 @@ impl State {
     fn edit_profile(
         &mut self,
         id: ProfileId,
+        name: Option<String>,
         params: &HashMap<String, Vec<i16>>,
         selection: Option<Option<PresetId>>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
         // Validate everything before mutating anything — commands are
         // atomic: reject all or apply all (ADR-0005).
-        for (name, values) in params {
-            validate_write(defs, name, values)?;
+        if let Some(name) = &name {
+            validate_name(name)?;
+        }
+        for (param, values) in params {
+            validate_write(defs, param, values)?;
         }
         if let Some(Some(preset_id)) = &selection
             && self.eq_preset(preset_id).is_none()
@@ -267,6 +275,10 @@ impl State {
         let profile = self
             .profile_mut(&id)
             .ok_or(ValidationError::UnknownProfile(id.0))?;
+        if name.is_some() && profile.is_factory {
+            return Err(ValidationError::FactoryRename(profile.id.0.clone()));
+        }
+        let name_changed = name.as_ref().is_some_and(|new| profile.name != *new);
         // The tri-state splits "changed": a patch restating the resolved
         // selection as an explicit override (`null` on a profile that
         // never stated one) must persist — the `"none"` sentinel lands
@@ -290,7 +302,10 @@ impl State {
         if let Some(new) = selection {
             profile.selection_override = Some(new);
         }
-        if !params_changed && !override_changed {
+        if let Some(new) = name {
+            profile.name = new;
+        }
+        if !params_changed && !override_changed && !name_changed {
             return Ok(StateDiff::default());
         }
         // Live ⇒ the targeted profile is the selected one.
@@ -414,38 +429,50 @@ impl State {
         })
     }
 
-    /// [`Command::EditEqPreset`]: merge into the global preset; flush
-    /// iff the selected profile selects it.
+    /// [`Command::EditEqPreset`]: merge the param patch and/or apply
+    /// the rename into the global preset; flush iff the selected
+    /// profile selects it (a rename alone never flushes).
     fn edit_eq_preset(
         &mut self,
         id: PresetId,
+        name: Option<String>,
         params: &HashMap<String, Vec<i16>>,
         defs: &[ParameterDef],
     ) -> Result<StateDiff, ValidationError> {
         // Validate everything before mutating anything.
-        for (name, values) in params {
-            validate_eq_preset_write(defs, name, values)?;
+        if let Some(name) = &name {
+            validate_name(name)?;
+        }
+        for (param, values) in params {
+            validate_eq_preset_write(defs, param, values)?;
         }
         let live = self.selected().selected_eq_preset() == Some(&id);
         let preset = self
             .eq_preset_mut(&id)
             .ok_or(ValidationError::UnknownEqPreset(id.0))?;
+        if name.is_some() && preset.is_factory {
+            return Err(ValidationError::FactoryRename(preset.id.0.clone()));
+        }
+        let name_changed = name.as_ref().is_some_and(|new| preset.name != *new);
         let mut batch = Vec::with_capacity(params.len());
-        let mut changed = false;
+        let mut params_changed = false;
         for def in defs {
             let Some(values) = params.get(&def.name) else {
                 continue;
             };
             if preset.params[&def.name][..values.len()] != values[..] {
                 preset.splice(&def.name, values);
-                changed = true;
+                params_changed = true;
             }
             batch.push((def.name.clone(), values.clone()));
         }
+        if let Some(new) = name {
+            preset.name = new;
+        }
         Ok(StateDiff {
             power: None,
-            params: (changed && live).then_some(batch),
-            changed,
+            params: (params_changed && live).then_some(batch),
+            changed: params_changed || name_changed,
             minted: None,
         })
     }
@@ -495,6 +522,9 @@ pub enum Command {
     EditProfile {
         /// The profile to edit.
         id: ProfileId,
+        /// A rename patch — the new display name; `None` = untouched.
+        /// Factory ids reject (their shipped names are fixed).
+        name: Option<String>,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
         /// Tri-state selection patch: `None` = untouched, `Some(None)`
@@ -542,6 +572,8 @@ pub enum Command {
     EditEqPreset {
         /// The preset to edit.
         id: PresetId,
+        /// A rename patch — as [`Command::EditProfile`]'s.
+        name: Option<String>,
         /// The edited entries, keyed by 4-CC.
         params: HashMap<String, Vec<i16>>,
     },
@@ -603,6 +635,10 @@ pub enum ValidationError {
     /// label is unusable.
     #[error("name is empty after trimming")]
     EmptyName,
+    /// Factory items keep their shipped names — a `name` patch on one
+    /// rejects (a Reset restores content, never names).
+    #[error("factory item `{0}` cannot be renamed")]
+    FactoryRename(String),
     /// The 4-CC names no declared parameter.
     #[error("unknown parameter `{0}`")]
     UnknownParam(String),
@@ -873,6 +909,7 @@ mod tests {
     /// `Some(None)` detaches, `Some(Some(id))` selects.
     fn select_preset(profile_id: &str, id: Option<PresetId>) -> Command {
         Command::EditProfile {
+            name: None,
             id: ProfileId(profile_id.into()),
             params: HashMap::new(),
             selected_eq_preset: Some(id),
@@ -984,6 +1021,7 @@ mod tests {
 
     fn edit(id: &str, entries: &[(&str, &[i16])]) -> Command {
         Command::EditProfile {
+            name: None,
             id: ProfileId(id.into()),
             params: entries
                 .iter()
@@ -1274,6 +1312,7 @@ mod tests {
         let diff = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [
                         ("dvla".to_string(), vec![9_i16]),
@@ -1310,6 +1349,7 @@ mod tests {
         let diff = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("gebg".to_string(), vec![5_i16, -5])].into(),
                     selected_eq_preset: Some(None),
@@ -1339,6 +1379,7 @@ mod tests {
         let rejected = [
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![9_i16])].into(),
                     selected_eq_preset: Some(Some(PresetId("ghost".into()))),
@@ -1347,6 +1388,7 @@ mod tests {
             ),
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![11_i16])].into(),
                     selected_eq_preset: Some(Some(rich())),
@@ -1361,6 +1403,7 @@ mod tests {
             ),
             (
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("ghost".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(Some(rich())),
@@ -1386,6 +1429,7 @@ mod tests {
 
         // Selected profile (music) doesn't select rich: persist only.
         let edit_rich = |values: &'static [i16]| Command::EditEqPreset {
+            name: None,
             id: PresetId("rich".into()),
             params: [("iebt".to_string(), values.to_vec())].into(),
         };
@@ -1428,6 +1472,7 @@ mod tests {
         let mut state = State::new_from_defaults(&defaults());
         let before = state.clone();
         let edit = |id: &str, name: &str, values: &[i16]| Command::EditEqPreset {
+            name: None,
             id: PresetId(id.into()),
             params: [(name.to_string(), values.to_vec())].into(),
         };
@@ -1582,6 +1627,71 @@ mod tests {
         );
     }
 
+    /// Behavior 3 (issue #26 A), state half: a rename is a `name`
+    /// patch on the one sparse verb — atomic with the rest (a valid
+    /// name beside a bad param rejects whole), a same-name patch a
+    /// no-op, factory names immutable.
+    #[test]
+    fn a_name_patch_renames_customs_atomically() {
+        let mut state = State::new_from_defaults(&defaults());
+        let minted = state
+            .apply(
+                Command::AddProfile {
+                    name: "Music 2".into(),
+                    params: HashMap::new(),
+                    selected_eq_preset: None,
+                },
+                &defs(),
+            )
+            .unwrap()
+            .minted
+            .unwrap();
+        let rename = |name: &str, dvla: &[i16]| Command::EditProfile {
+            id: ProfileId(minted.clone()),
+            name: Some(name.into()),
+            params: [("dvla".to_string(), dvla.to_vec())].into(),
+            selected_eq_preset: None,
+        };
+
+        let diff = state.apply(rename("Late Night", &[3]), &defs()).unwrap();
+        assert!(!diff.is_empty());
+        let profile = state.profile(&ProfileId(minted.clone())).unwrap();
+        assert_eq!(profile.name, "Late Night");
+        assert_eq!(profile.params["dvla"], vec![3], "one atomic patch");
+
+        let before = state.clone();
+        assert_eq!(
+            state.apply(rename("Later", &[99]), &defs()),
+            Err(ValidationError::OutOfRange {
+                name: "dvla".into(),
+                index: 0,
+                value: 99,
+                min: 0,
+                max: 10,
+            }),
+        );
+        assert_eq!(state, before, "a valid rename beside a bad param");
+
+        let diff = state.apply(rename("Late Night", &[3]), &defs()).unwrap();
+        assert!(diff.is_empty(), "restating the current name and value");
+
+        assert_eq!(
+            state.apply(
+                Command::EditEqPreset {
+                    id: PresetId("rich".into()),
+                    name: Some("Loud".into()),
+                    params: HashMap::new(),
+                },
+                &defs(),
+            ),
+            Err(ValidationError::FactoryRename("rich".into())),
+        );
+        assert_eq!(
+            ValidationError::FactoryRename("rich".into()).to_string(),
+            "factory item `rich` cannot be renamed"
+        );
+    }
+
     /// Behavior 2 (issue #26 A), preset half: `add_eq_preset` births
     /// over the preset-carried custom baseline; a birth selection on
     /// `add_profile` is the row's statement.
@@ -1635,6 +1745,7 @@ mod tests {
         let mut state = State::new_from_defaults(&defaults());
         let rich_id = PresetId("rich".into());
         let edit_rich = Command::EditEqPreset {
+            name: None,
             id: rich_id.clone(),
             params: [("iebt".to_string(), vec![100_i16])].into(),
         };

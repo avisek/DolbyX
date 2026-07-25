@@ -40,6 +40,9 @@ pub(crate) enum WsCommand {
         request_id: String,
         /// The profile to edit.
         id: ddp_state::ProfileId,
+        /// A rename patch — absent = untouched; factory ids reject.
+        #[serde(default)]
+        name: Option<String>,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
         #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
@@ -85,13 +88,18 @@ pub(crate) enum WsCommand {
         /// The profile to reset.
         id: ddp_state::ProfileId,
     },
-    /// Write a param map into one EQ preset (preset-carried params only).
+    /// Patch one EQ preset: a param map (preset-carried params only)
+    /// and/or a rename.
     EditEqPreset {
         /// Correlation id echoed on the reply.
         request_id: String,
         /// The preset to edit.
         id: ddp_state::PresetId,
+        /// A rename patch — absent = untouched; factory ids reject.
+        #[serde(default)]
+        name: Option<String>,
         /// The edited entries: `{ "<4-CC>": [i16, …] }`.
+        #[serde(default)]
         params: std::collections::HashMap<String, Vec<i16>>,
     },
     /// Drop an EQ preset's own overrides, restoring its baseline.

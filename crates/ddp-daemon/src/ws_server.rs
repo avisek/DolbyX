@@ -124,6 +124,7 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::EditProfile {
             request_id,
             id,
+            name,
             params,
             selected_eq_preset,
         } => {
@@ -133,6 +134,7 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
                 &request_id,
                 Command::EditProfile {
                     id,
+                    name,
                     params,
                     selected_eq_preset,
                 },
@@ -176,13 +178,14 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::EditEqPreset {
             request_id,
             id,
+            name,
             params,
         } => {
             mutate(
                 app,
                 conn_id,
                 &request_id,
-                Command::EditEqPreset { id, params },
+                Command::EditEqPreset { id, name, params },
             )
             .await
         }

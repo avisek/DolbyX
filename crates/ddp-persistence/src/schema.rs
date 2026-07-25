@@ -933,6 +933,7 @@ iebt = [67, 95]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![5_i16])].into(),
                     selected_eq_preset: None,
@@ -943,6 +944,7 @@ iebt = [67, 95]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("movie".into()),
                     params: [("gebf".to_string(), vec![99_i16, 64])].into(),
                     selected_eq_preset: None,
@@ -988,6 +990,7 @@ iebt = [44, 55]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: [("dvla".to_string(), vec![9_i16])].into(),
                     selected_eq_preset: None,
@@ -1060,6 +1063,7 @@ iebt = [44, 55, 0, 0]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(Some(PresetId("rich".into()))),
@@ -1070,6 +1074,7 @@ iebt = [44, 55, 0, 0]
         let _ = state
             .apply(
                 Command::EditEqPreset {
+                    name: None,
                     id: PresetId("rich".into()),
                     params: [("iebt".to_string(), vec![100_i16])].into(),
                 },
@@ -1094,6 +1099,7 @@ iebt = [44, 55, 0, 0]
         let _ = state
             .apply(
                 Command::EditProfile {
+                    name: None,
                     id: ProfileId("music".into()),
                     params: HashMap::new(),
                     selected_eq_preset: Some(None),
