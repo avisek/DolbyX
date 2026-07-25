@@ -749,12 +749,12 @@ fn validate_name(name: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// Mints a fresh custom-item id — `user_` + four hex digits of a
-/// content hash, re-hashed until it collides with nothing `taken`
-/// reports (the `user_` prefix keeps factory ids and the reserved
-/// `"none"` sentinel out of reach). Ids persist in `config.toml`; a
-/// mint is a one-shot — stability across restarts comes from
-/// persistence, never re-derivation.
+/// Mints a fresh custom-item id — `user_` + four hex digits of a name
+/// hash, re-hashed until it collides with nothing `taken` reports (the
+/// `user_` prefix keeps factory ids and the reserved `"none"` sentinel
+/// out of reach). Ids persist in `config.toml`; a mint is a one-shot —
+/// stability across restarts comes from persistence, never
+/// re-derivation.
 fn mint_id(name: &str, taken: impl Fn(&str) -> bool) -> String {
     use std::hash::{Hash, Hasher};
     let rehash = |seed: u64, salt: &str| {

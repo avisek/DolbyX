@@ -332,13 +332,13 @@ pub fn parse_config(
     let factory_profile = |id: &str| defaults.profiles.iter().any(|profile| profile.id.0 == id);
     let factory_preset = |id: &str| defaults.eq_presets.iter().any(|preset| preset.id.0 == id);
     for (id, item) in &eq_preset.items {
-        validate_row_name("eq_preset", id, item, factory_preset(id)).map_err(Error::Config)?;
+        validate_row_identity("eq_preset", id, item, factory_preset(id)).map_err(Error::Config)?;
         reject_selection(id, item).map_err(Error::Config)?;
     }
     // A selection may name a factory preset or any custom row above.
     let known_preset = |id: &PresetId| factory_preset(&id.0) || eq_preset.items.contains_key(&id.0);
     for (id, item) in &profile.items {
-        validate_row_name("profile", id, item, factory_profile(id)).map_err(Error::Config)?;
+        validate_row_identity("profile", id, item, factory_profile(id)).map_err(Error::Config)?;
         if let Some(Some(preset)) = &item.selected_eq_preset
             && !known_preset(preset)
         {
@@ -365,11 +365,11 @@ pub fn parse_config(
     })
 }
 
-/// The `name` rule per row kind: factory rows never carry one (their
-/// shipped names are fixed), custom rows must (the id is the table
-/// key, the display name lives in the row — ADR-0007) — and no custom
-/// row may claim the reserved `"none"` sentinel id.
-fn validate_row_name(
+/// The id + `name` rules per row kind: factory rows never carry a
+/// `name` (their shipped names are fixed), custom rows must (the id is
+/// the table key, the display name lives in the row — ADR-0007) — and
+/// no custom row may claim the reserved `"none"` sentinel id.
+fn validate_row_identity(
     namespace: &str,
     id: &str,
     item: &ItemTable,
