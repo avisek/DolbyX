@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
-use crate::{SyncedFile, WINDOW};
+use crate::{SyncedFile, WINDOW, WriteOutcome};
 
 /// A message to the writer task.
 pub(crate) enum Msg {
@@ -32,37 +32,49 @@ pub(crate) async fn writer(file: Arc<SyncedFile>, mut rx: mpsc::UnboundedReceive
                 Some(Msg::Write(document, epoch)) => {
                     if Instant::now() >= next_allowed {
                         // A newer document supersedes any pending one.
-                        pending = None;
-                        write(&file, &document, epoch, &mut next_allowed);
+                        pending = write(&file, document, epoch, &mut next_allowed);
                     } else {
                         pending = Some((document, epoch));
                     }
                 }
                 Some(Msg::Flush(ack)) => {
                     if let Some((document, epoch)) = pending.take() {
-                        write(&file, &document, epoch, &mut next_allowed);
+                        pending = write(&file, document, epoch, &mut next_allowed);
                     }
                     let _ = ack.send(());
                 }
                 None => {
                     if let Some((document, epoch)) = pending.take() {
-                        write(&file, &document, epoch, &mut next_allowed);
+                        write(&file, document, epoch, &mut next_allowed);
                     }
                     return;
                 }
             },
             () = tokio::time::sleep_until(next_allowed), if pending.is_some() => {
                 let (document, epoch) = pending.take().expect("guarded by the select arm");
-                write(&file, &document, epoch, &mut next_allowed);
+                pending = write(&file, document, epoch, &mut next_allowed);
             }
         }
     }
 }
 
-/// One write attempt — [`SyncedFile`] may still refuse it (a hand-edit
-/// owns the file until the watcher reloads it). Either way the window
-/// re-arms: at most one disk touch per [`WINDOW`].
-fn write(file: &SyncedFile, document: &str, epoch: u64, next_allowed: &mut Instant) {
-    file.write(document, epoch);
+/// One write attempt; the window re-arms either way — at most one disk
+/// touch per [`WINDOW`]. [`SyncedFile`] may refuse it: a stale epoch
+/// drops the document for good (an accepted reload cut it over), an
+/// uningested hand-edit defers it — handed back as the pending write,
+/// retried next window (by then the watcher has ingested: accepted ⇒
+/// the retry goes stale, rejected ⇒ it lands, overwriting the broken
+/// file — last-writer-wins).
+fn write(
+    file: &SyncedFile,
+    document: String,
+    epoch: u64,
+    next_allowed: &mut Instant,
+) -> Option<(String, u64)> {
+    let outcome = file.write(&document, epoch);
     *next_allowed = Instant::now() + WINDOW;
+    match outcome {
+        WriteOutcome::Written | WriteOutcome::Stale => None,
+        WriteOutcome::Foreign => Some((document, epoch)),
+    }
 }

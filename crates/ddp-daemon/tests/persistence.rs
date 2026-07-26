@@ -5,8 +5,8 @@
 mod common;
 
 use common::{
-    assert_config_becomes, connected, edit_param, recv_json, set_power, start_daemon, start_over,
-    ws_connect,
+    assert_config_becomes, assert_config_becomes_within, connected, edit_param, recv_json,
+    set_power, start_daemon, start_over, ws_connect,
 };
 
 /// Behavior 5 (issue #27), leading edge: an idle mutation is on disk
@@ -26,19 +26,9 @@ async fn an_idle_mutation_writes_only_the_overlay_immediately() {
     set_power(&mut ws, false).await;
 
     // Exactly the divergence — factory `selected_profile` omitted —
-    // inside the window (the leading edge, not a trailing debounce).
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(80);
-    loop {
-        let content = std::fs::read_to_string(&config).expect("config.toml readable");
-        if content == "power = false\n" {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "an idle mutation must land immediately, file still holds {content:?}"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    // well inside the window (the leading edge, not a trailing
+    // debounce, which would still be idle at 80 ms).
+    assert_config_becomes_within(&config, "power = false\n", 80).await;
 
     // Back to factory: the divergence disappears again (this write
     // rides the throttle's trailing edge — the toggle was a burst).

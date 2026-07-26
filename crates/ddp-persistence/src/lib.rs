@@ -9,9 +9,9 @@
 
 #![forbid(unsafe_code)]
 
-pub mod file_watcher;
+mod file_watcher;
 pub mod schema;
-pub mod throttle;
+mod throttle;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -76,20 +76,33 @@ struct Synced {
     epoch: u64,
 }
 
-/// What a [`SyncedFile::read`] found at window fire.
+/// What a [`SyncedFile::ingest`] found at window fire.
 pub(crate) enum ReadOutcome {
     /// The file holds the synced bytes — a self-write echo (or no
     /// change at all).
     Clean,
-    /// External contents — now recorded as the synced bytes (even when
-    /// they later fail to parse, so a UI mutation may overwrite a
-    /// broken file: last-writer-wins), with the epoch bumped.
-    Foreign(Vec<u8>),
+    /// External contents — now recorded as the synced bytes; whether
+    /// they were accepted is the `ingest` closure's answer.
+    Foreign,
     /// The file is gone (vim's save dance has a transient no-file
     /// window; deletion is more often accident than intent).
     Absent,
     /// The file exists but could not be read.
     Unreadable(std::io::Error),
+}
+
+/// How a [`SyncedFile::write`] ended.
+pub(crate) enum WriteOutcome {
+    /// The atomic replace ran (I/O failures are logged, never fatal —
+    /// the daemon keeps serving from memory).
+    Written,
+    /// Dropped: a reload cut over since the document was serialized.
+    Stale,
+    /// Deferred: the file holds foreign bytes the watcher has not
+    /// ingested yet — the caller should retry next window (the ingest
+    /// either accepts them, cutting this document over, or records
+    /// them rejected, letting the retry land).
+    Foreign,
 }
 
 impl SyncedFile {
@@ -116,21 +129,21 @@ impl SyncedFile {
     /// preference data; the page cache coalesces physical writes.
     ///
     /// The write yields — file untouched — when a reload cut over
-    /// since the document was serialized (`epoch` is stale) or the
-    /// file holds foreign bytes the watcher has not reloaded yet
-    /// (behavior 6, issue #27: the hand-edit wins). I/O failures are
-    /// logged, never fatal — the daemon keeps serving from memory.
-    pub(crate) fn write(&self, document: &str, epoch: u64) {
+    /// since the document was serialized ([`WriteOutcome::Stale`]) or
+    /// the file holds foreign bytes the watcher has not ingested yet
+    /// ([`WriteOutcome::Foreign`] — behavior 6, issue #27: the
+    /// hand-edit wins).
+    pub(crate) fn write(&self, document: &str, epoch: u64) -> WriteOutcome {
         let mut inner = self.inner.lock().expect("file sync lock");
         if inner.epoch != epoch {
             tracing::debug!("write-back dropped: an external reload cut over");
-            return;
+            return WriteOutcome::Stale;
         }
         if let Ok(bytes) = std::fs::read(&self.path)
             && bytes != inner.bytes
         {
-            tracing::debug!("write-back yielded: the file holds an unreloaded external edit");
-            return;
+            tracing::debug!("write-back deferred: the file holds an uningested external edit");
+            return WriteOutcome::Foreign;
         }
         let tmp = self.path.with_extension("toml.tmp");
         let replace =
@@ -141,18 +154,27 @@ impl SyncedFile {
                 tracing::error!(path = %self.path.display(), %error, "config.toml write failed");
             }
         }
+        WriteOutcome::Written
     }
 
-    /// Reads the file once and classifies it against the synced bytes
-    /// — the read side's window-fire primitive.
-    pub(crate) fn read(&self) -> ReadOutcome {
+    /// Reads the file once under the sync lock and classifies it
+    /// against the synced bytes — the window-fire primitive. Foreign
+    /// bytes are recorded as synced accepted or not (so a UI mutation
+    /// may overwrite a broken file: last-writer-wins); `accept` —
+    /// parse, effectively — runs inside the same critical section, and
+    /// only an accepted ingest bumps the epoch: a rejected hand-edit
+    /// is no cutover, so a write-back it raced retries and overwrites
+    /// it rather than stranding in memory.
+    pub(crate) fn ingest(&self, accept: impl FnOnce(&[u8]) -> bool) -> ReadOutcome {
         let mut inner = self.inner.lock().expect("file sync lock");
         match std::fs::read(&self.path) {
             Ok(bytes) if bytes == inner.bytes => ReadOutcome::Clean,
             Ok(bytes) => {
-                inner.bytes.clone_from(&bytes);
-                inner.epoch += 1;
-                ReadOutcome::Foreign(bytes)
+                if accept(&bytes) {
+                    inner.epoch += 1;
+                }
+                inner.bytes = bytes;
+                ReadOutcome::Foreign
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => ReadOutcome::Absent,
             Err(error) => ReadOutcome::Unreadable(error),

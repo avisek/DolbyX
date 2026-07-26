@@ -6,8 +6,8 @@
 mod common;
 
 use common::{
-    assert_config_becomes, connected, edit_param, recv_state, set_params_batches, start_daemon,
-    try_recv_json, wait_until,
+    assert_config_becomes, connected, edit_param, recv_state, set_params_batches,
+    snapshot_profile as profile, start_daemon, try_recv_json, wait_until,
 };
 use ddp_persistence::WINDOW;
 
@@ -19,16 +19,6 @@ fn engine_heard(stub: &ddp_engine::StubBackend, param: &str, values: &[i16]) -> 
             .iter()
             .any(|(name, held)| name == param && held == values)
     })
-}
-
-/// The snapshot's profile with id `id`.
-fn profile<'a>(snapshot: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
-    snapshot["snapshot"]["profiles"]
-        .as_array()
-        .expect("profiles array")
-        .iter()
-        .find(|profile| profile["id"] == id)
-        .unwrap_or_else(|| panic!("profile `{id}` in snapshot"))
 }
 
 /// The tracer bullet — behavior 1: an external `config.toml` edit
@@ -109,6 +99,40 @@ async fn own_flushes_never_echo_back_as_reloads() {
         try_recv_json(&mut ws, 300).await,
         None,
         "own flushes must not reload-broadcast"
+    );
+}
+
+/// Root keys (`power`, `selected_profile`) apply like any mutation:
+/// one hand-edit flips power on the live session and lands the
+/// switched profile's batch — engine first, broadcast after, so both
+/// asserts run unpolled.
+#[tokio::test]
+async fn root_key_edits_apply_like_mutations() {
+    let daemon = start_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    let config = daemon.dir.path().join("data").join("config.toml");
+    let mut ws = connected(daemon.addr()).await;
+
+    std::fs::write(&config, "power = false\nselected_profile = \"movie\"\n")
+        .expect("hand-edit lands");
+
+    let snapshot = recv_state(&mut ws).await;
+    assert_eq!(snapshot["snapshot"]["power"], false);
+    assert_eq!(snapshot["snapshot"]["selected_profile"], "movie");
+    assert!(
+        daemon
+            .stub
+            .calls()
+            .contains(&ddp_engine::Call::SetEnabled(session, false)),
+        "the power flip reached the session"
+    );
+    assert!(
+        engine_heard(&daemon.stub, "dvla", &[7]),
+        "the switch's batch landed Movie's leveler (7 over Music's 4)"
     );
 }
 
@@ -221,8 +245,9 @@ async fn a_mutation_burst_rewrites_at_window_cadence() {
 
 /// Behavior 7, malformed: a mid-run edit that fails to parse — or to
 /// validate — keeps last-good state (no broadcast, no crash); a UI
-/// mutation meanwhile overwrites the broken file (last-writer-wins),
-/// and a later valid external write reloads normally.
+/// mutation overwrites the broken file (last-writer-wins) even when it
+/// races the broken edit into the same window; and a later valid
+/// external write reloads normally.
 #[tokio::test]
 async fn a_malformed_edit_keeps_last_good_state_until_recovery() {
     let daemon = start_daemon().await;
@@ -232,19 +257,20 @@ async fn a_malformed_edit_keeps_last_good_state_until_recovery() {
     edit_param(&mut ws, "music", "dvla", &[6]).await;
     assert_config_becomes(&config, "[profile.music]\ndvla = 6\n").await;
 
-    // Unparseable and invalid-under-validation land in one bucket.
-    for broken in ["not toml [[[", "[profile.music]\ndvla = 99\n"] {
-        std::fs::write(&config, broken).expect("broken edit lands");
-        assert_eq!(
-            try_recv_json(&mut ws, 300).await,
-            None,
-            "malformed ⇒ keep last-good state, no broadcast"
-        );
-    }
-
-    // A UI mutation overwrites the broken file — last-writer-wins.
+    // A UI mutation right behind the broken bytes — before the window
+    // has even ingested them: the write-back defers one window, then
+    // overwrites the broken file (a rejected edit is no cutover).
+    std::fs::write(&config, "not toml [[[").expect("broken edit lands");
     edit_param(&mut ws, "music", "dvla", &[3]).await;
     assert_config_becomes(&config, "[profile.music]\ndvla = 3\n").await;
+
+    // The invalid-under-validation flavor: same last-good bucket.
+    std::fs::write(&config, "[profile.music]\ndvla = 99\n").expect("broken edit lands");
+    assert_eq!(
+        try_recv_json(&mut ws, 300).await,
+        None,
+        "malformed ⇒ keep last-good state, no broadcast"
+    );
 
     // And the next valid external write recovers (refuse-to-start
     // applies only at startup).

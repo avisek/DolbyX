@@ -26,7 +26,7 @@ use std::sync::Arc;
 use common::plugin::SyntheticPlugin;
 use common::{
     RICH_IEBT, assert_config_becomes, connected, recv_json, recv_state, send_json, set_power,
-    socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
+    snapshot_profile, socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -297,13 +297,10 @@ async fn an_external_config_edit_lands_in_the_real_registry() {
     // The reload broadcast — the engine heard the batch before it was
     // queued, so the registry read below cannot race the write.
     let snapshot = recv_state(&mut ws).await;
-    let music = snapshot["snapshot"]["profiles"]
-        .as_array()
-        .expect("profiles array")
-        .iter()
-        .find(|profile| profile["id"] == "music")
-        .expect("music in snapshot");
-    assert_eq!(music["params"]["dvla"], json!([7]));
+    assert_eq!(
+        snapshot_profile(&snapshot, "music")["params"]["dvla"],
+        json!([7])
+    );
 
     let values = daemon
         .handle

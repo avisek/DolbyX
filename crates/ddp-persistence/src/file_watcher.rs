@@ -98,37 +98,39 @@ fn touches_config(event: &notify::Result<notify::Event>) -> bool {
 /// conflict semantics). Equal bytes ⇒ self-echo, ignore. An accepted
 /// external edit swaps the loaded overlay — hand-edited shared layers
 /// included, so later flushes re-emit them — and resolves the full
-/// cascade; the bumped epoch cuts over any pending write-back.
+/// cascade; its epoch bump cuts over any pending write-back.
 /// Malformed or absent contents keep last-good state (recovery is the
 /// next valid write; an empty file is valid — factory state). Reload
 /// never writes the file: a hand-edit stays byte-for-byte as written
 /// until the next real mutation rewrites it.
 fn reload(shared: &Shared) -> Option<State> {
     let mut loaded = shared.overlay.lock().expect("overlay lock");
-    let bytes = match shared.file.read() {
-        ReadOutcome::Clean => return None,
-        ReadOutcome::Foreign(bytes) => bytes,
+    let mut accepted = None;
+    let outcome = shared.file.ingest(|bytes| {
+        let parsed = std::str::from_utf8(bytes)
+            .map_err(|error| Error::Config(error.to_string()))
+            .and_then(|document| parse_config(document, &shared.defs, &shared.defaults));
+        match parsed {
+            Ok(overlay) => {
+                accepted = Some(overlay);
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, "external config.toml edit rejected; keeping last-good state");
+                false
+            }
+        }
+    });
+    match outcome {
+        ReadOutcome::Clean | ReadOutcome::Foreign => {}
         ReadOutcome::Absent => {
             tracing::warn!("config.toml is gone; keeping state (the next write-back recreates it)");
-            return None;
         }
         ReadOutcome::Unreadable(error) => {
             tracing::warn!(%error, "config.toml unreadable; keeping state");
-            return None;
-        }
-    };
-    let parsed = String::from_utf8(bytes)
-        .map_err(|error| Error::Config(error.to_string()))
-        .and_then(|document| parse_config(&document, &shared.defs, &shared.defaults));
-    match parsed {
-        Ok(overlay) => {
-            *loaded = overlay;
-            tracing::info!("config.toml edited externally; reloaded");
-            Some(resolve(&shared.defaults, &loaded))
-        }
-        Err(error) => {
-            tracing::warn!(%error, "external config.toml edit rejected; keeping last-good state");
-            None
         }
     }
+    *loaded = accepted?;
+    tracing::info!("config.toml edited externally; reloaded");
+    Some(resolve(&shared.defaults, &loaded))
 }

@@ -154,7 +154,14 @@ pub async fn wait_until(condition: impl Fn() -> bool, what: &str) {
 /// Polls `config.toml` (up to 3 s) until it holds `expected` — the
 /// throttled write-back assertion primitive.
 pub async fn assert_config_becomes(path: &Path, expected: &str) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    assert_config_becomes_within(path, expected, 3000).await;
+}
+
+/// [`assert_config_becomes`] with the deadline in the caller's hands —
+/// tight bounds prove cadence (a leading-edge write lands well inside
+/// the 100 ms window).
+pub async fn assert_config_becomes_within(path: &Path, expected: &str, ms: u64) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(ms);
     loop {
         let content = std::fs::read_to_string(path).expect("config.toml readable");
         if content == expected {
@@ -162,10 +169,20 @@ pub async fn assert_config_becomes(path: &Path, expected: &str) {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "config.toml settled at {content:?}, wanted {expected:?}"
+            "config.toml settled at {content:?}, wanted {expected:?} within {ms} ms"
         );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+}
+
+/// The snapshot's profile with id `id`.
+pub fn snapshot_profile<'a>(snapshot: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+    snapshot["snapshot"]["profiles"]
+        .as_array()
+        .expect("profiles array")
+        .iter()
+        .find(|profile| profile["id"] == id)
+        .unwrap_or_else(|| panic!("profile `{id}` in snapshot"))
 }
 
 /// One raw `GET` over a real TCP connection; returns (status, body).
