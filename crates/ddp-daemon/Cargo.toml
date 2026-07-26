@@ -29,6 +29,8 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
+# The write-cadence test counts the daemon's atomic replaces (issue #27).
+notify.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 

@@ -12,7 +12,8 @@
 //! Slice 18 part A (#26) adds its behavior 8: the custom-item CRUD
 //! flow replayed — clone, switch, rename, restart, delete. Part B adds
 //! its behavior 5: scoped + whole-item reset landing baseline values
-//! back in the live registry.
+//! back in the live registry. Slice 19 (#27) adds its behavior 9: an
+//! external `config.toml` edit read back from the registry.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use common::plugin::SyntheticPlugin;
 use common::{
     RICH_IEBT, assert_config_becomes, connected, recv_json, recv_state, send_json, set_power,
-    socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
+    snapshot_profile, socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -99,7 +100,7 @@ async fn power_toggle_persists() {
     }
     assert_eq!(output, block, "disabled ⇒ the engine deposits dry input");
 
-    // The divergence lands in config.toml (500 ms shared debounce)…
+    // The divergence lands in config.toml (100 ms leading-edge throttle)…
     let config = daemon.dir.path().join("data").join("config.toml");
     assert_config_becomes(&config, "power = false\n").await;
 
@@ -271,6 +272,46 @@ async fn set_profile_lands_movies_values_on_the_real_engine() {
     assert_eq!(values[1], [3], "Movie's dialog enhancer amount");
     assert_eq!(values[2], [96], "Movie's surround boost");
     assert_eq!(values[3], [20], "still 20-band after the switch");
+}
+
+/// Behavior 9 (issue #27): behavior 1 against the real engine — an
+/// external `config.toml` edit reloads within a window, and
+/// `get_params` reads the new `dvla` back from the live clamped
+/// registry.
+#[tokio::test]
+async fn an_external_config_edit_lands_in_the_real_registry() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(48_000)
+        .expect("session");
+    let mut ws = connected(daemon.handle.addr()).await;
+
+    std::fs::write(
+        daemon.dir.path().join("data").join("config.toml"),
+        "[profile.music]\ndvla = 7\n",
+    )
+    .expect("hand-edit lands");
+
+    // The reload broadcast — the engine heard the batch before it was
+    // queued, so the registry read below cannot race the write.
+    let snapshot = recv_state(&mut ws).await;
+    assert_eq!(
+        snapshot_profile(&snapshot, "music")["params"]["dvla"],
+        json!([7])
+    );
+
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla"])
+        .expect("get_params");
+    assert_eq!(
+        values[0],
+        [7],
+        "the hand-edited leveler amount, read back from the registry"
+    );
 }
 
 /// Behavior 9 (issue #22): master-control edits — each half of the

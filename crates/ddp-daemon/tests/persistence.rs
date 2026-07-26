@@ -1,14 +1,19 @@
-//! Behaviors 6–8 (issue #12): debounced overlay write-back, restart
-//! reload, shutdown flush — against a real tempdir (mock policy).
+//! Behaviors 6–8 (issue #12) under the revised write law (issue #27):
+//! leading-edge throttled overlay write-back, restart reload, shutdown
+//! flush — against a real tempdir (mock policy).
 
 mod common;
 
 use common::{
-    assert_config_becomes, connected, recv_json, set_power, start_daemon, start_over, ws_connect,
+    assert_config_becomes, assert_config_becomes_within, connected, edit_param, recv_json,
+    set_power, start_daemon, start_over, ws_connect,
 };
 
+/// Behavior 5 (issue #27), leading edge: an idle mutation is on disk
+/// immediately — well inside the 100 ms window a trailing writer would
+/// still be sitting on — and it lands exactly the divergence.
 #[tokio::test]
-async fn power_divergence_debounces_then_writes_only_the_overlay() {
+async fn an_idle_mutation_writes_only_the_overlay_immediately() {
     let daemon = start_daemon().await;
     let config = daemon.dir.path().join("data").join("config.toml");
     assert_eq!(
@@ -20,17 +25,13 @@ async fn power_divergence_debounces_then_writes_only_the_overlay() {
     let mut ws = connected(daemon.addr()).await;
     set_power(&mut ws, false).await;
 
-    // Inside the 500 ms debounce window nothing has hit the disk.
-    assert_eq!(
-        std::fs::read(&config).expect("config.toml readable").len(),
-        0,
-        "the write must debounce, not land immediately"
-    );
+    // Exactly the divergence — factory `selected_profile` omitted —
+    // well inside the window (the leading edge, not a trailing
+    // debounce, which would still be idle at 80 ms).
+    assert_config_becomes_within(&config, "power = false\n", 80).await;
 
-    // Then exactly the divergence — factory `selected_profile` omitted.
-    assert_config_becomes(&config, "power = false\n").await;
-
-    // Back to factory: the divergence disappears again.
+    // Back to factory: the divergence disappears again (this write
+    // rides the throttle's trailing edge — the toggle was a burst).
     set_power(&mut ws, true).await;
     assert_config_becomes(&config, "").await;
 }
@@ -41,16 +42,18 @@ async fn graceful_shutdown_flushes_a_pending_write() {
     let config = daemon.dir.path().join("data").join("config.toml");
 
     let mut ws = connected(daemon.addr()).await;
+    // A burst: the first mutation writes on the leading edge, the
+    // second — inside the same window — arms the pending trailing
+    // write shutdown must carry out.
     set_power(&mut ws, false).await;
+    edit_param(&mut ws, "music", "dvla", &[5]).await;
 
-    // Shut down inside the debounce window: the write is still pending.
-    assert_eq!(std::fs::read(&config).expect("readable").len(), 0);
     drop(ws);
     daemon.handle.shutdown().await;
 
     assert_eq!(
         std::fs::read_to_string(&config).expect("readable"),
-        "power = false\n",
+        "power = false\n\n[profile.music]\ndvla = 5\n",
         "shutdown must flush the pending write"
     );
 }
@@ -99,10 +102,13 @@ async fn sigterm_flushes_the_pending_write_and_exits_zero() {
     let addr: std::net::SocketAddr = addr.expect("reader task").parse().expect("valid addr");
 
     let mut ws = connected(addr).await;
+    // The burst that arms a pending trailing write (leading edge lands
+    // the first mutation on its own).
     set_power(&mut ws, false).await;
+    edit_param(&mut ws, "music", "dvla", &[5]).await;
     drop(ws);
 
-    // Terminate inside the debounce window.
+    // Terminate while the trailing write is (typically) still pending.
     assert!(
         Command::new("kill")
             .args(["-TERM", &child.id().to_string()])
@@ -116,7 +122,7 @@ async fn sigterm_flushes_the_pending_write_and_exits_zero() {
     assert!(status.success(), "graceful exit, got {status}");
     assert_eq!(
         std::fs::read_to_string(dir.path().join("data").join("config.toml")).expect("readable"),
-        "power = false\n",
+        "power = false\n\n[profile.music]\ndvla = 5\n",
         "SIGTERM must flush the pending write"
     );
 }

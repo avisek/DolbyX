@@ -239,32 +239,15 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     if diff.is_empty() {
         return vec![ack(request_id, None).to_text()];
     }
-    let mut engine_failure = None;
-    if let Some(power) = diff.power
-        && let Err(error) = app.supervisor.set_power(power)
-    {
-        tracing::error!(%error, "engine set_power failed");
-        engine_failure = Some(error);
-    }
-    if let Some(batch) = diff.params {
-        // The engine hears the diff (full set on switch/reset, edited
-        // entries on a live edit); the replay set for future session
-        // inits and crash recovery is the full resolved profile.
-        let resolved = state.resolved_batch(&app.params);
-        if let Err(error) = app.supervisor.apply_params(&batch, resolved) {
-            tracing::error!(%error, "engine set_params failed");
-            engine_failure = Some(error);
-        }
-    }
+    // The engine hears the diff (full set on switch/reset, edited
+    // entries on a live edit); the replay set for future session inits
+    // and crash recovery is the full resolved profile.
+    let params = diff
+        .params
+        .map(|batch| (batch, state.resolved_batch(&app.params)));
+    let engine_failure = app.push_to_engine(diff.power, params);
     app.persistence.flush(&state);
-    // Serialize + queue under the write lock so broadcast order always
-    // matches state order.
-    let event = WsEvent::State {
-        snapshot: app.snapshot_json_of(&state),
-        request_id: None,
-    }
-    .to_text();
-    let _ = app.updates.send((conn_id, event.into()));
+    app.queue_state_broadcast(&state, conn_id);
     drop(state);
     vec![match engine_failure {
         None => ack(request_id, diff.minted.as_deref()).to_text(),
