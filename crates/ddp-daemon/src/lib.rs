@@ -22,7 +22,7 @@ use ddp_engine::Engine;
 use ddp_persistence::Persistence;
 use ddp_state::{ParameterDef, State};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 pub use engine_supervisor::{EngineSupervisor, SupervisorError};
@@ -138,6 +138,50 @@ impl App {
         let _ = self.updates.send((self.fresh_conn_id(), event.into()));
     }
 
+    /// Applies an externally reloaded state — a `config.toml`
+    /// hand-edit the watcher accepted (issue #27): swap the state,
+    /// flush the resolved changes to live engine sessions like any
+    /// other mutation, and broadcast a fresh snapshot to every client
+    /// (no originator to suppress — non-WS source).
+    pub(crate) async fn apply_external_reload(&self, reloaded: State) {
+        let mut state = self.state.write().await;
+        if *state == reloaded {
+            return; // formatting-only edit — nothing resolved changed
+        }
+        let power = (state.power != reloaded.power).then_some(reloaded.power);
+        let before = state.resolved_batch(&self.params);
+        *state = reloaded;
+        let after = state.resolved_batch(&self.params);
+        if let Some(on) = power
+            && let Err(error) = self.supervisor.set_power(on)
+        {
+            tracing::error!(%error, "engine set_power failed");
+        }
+        // The engine hears what actually changed — both batches run in
+        // `defs` order, so they zip; the replay set is the full
+        // resolved profile, as every mutation stores it.
+        let batch: Vec<(String, Vec<i16>)> = after
+            .iter()
+            .zip(&before)
+            .filter(|(new, old)| new != old)
+            .map(|(new, _)| new.clone())
+            .collect();
+        if !batch.is_empty()
+            && let Err(error) = self.supervisor.apply_params(&batch, after)
+        {
+            tracing::error!(%error, "engine set_params failed");
+        }
+        // Serialize + queue under the write lock so broadcast order
+        // always matches state order.
+        let event = ws_commands::WsEvent::State {
+            snapshot: self.snapshot_json_of(&state),
+            request_id: None,
+        }
+        .to_text();
+        let _ = self.updates.send((self.fresh_conn_id(), event.into()));
+        drop(state);
+    }
+
     /// The full snapshot of `state` as wire JSON: user state (profiles
     /// complete, params keyed by 4-CC) + the `readouts` map — the 8
     /// ReadOnly-Static values live from the main session,
@@ -204,6 +248,7 @@ pub struct Daemon {
     server: JoinHandle<()>,
     audio_server: JoinHandle<std::convert::Infallible>,
     vis_bridge: JoinHandle<()>,
+    reload_bridge: JoinHandle<()>,
 }
 
 impl Daemon {
@@ -264,6 +309,20 @@ impl Daemon {
             ui_path: config.ui_path,
         });
 
+        // The config.toml watcher (issue #27): accepted external
+        // reloads land on the app through one channel, so they apply
+        // in arrival order.
+        let (reload_tx, mut reload_rx) = mpsc::unbounded_channel();
+        persistence.watch(move |state| {
+            let _ = reload_tx.send(state);
+        })?;
+        let reload_app = app.clone();
+        let reload_bridge = tokio::spawn(async move {
+            while let Some(state) = reload_rx.recv().await {
+                reload_app.apply_external_reload(state).await;
+            }
+        });
+
         let bind_error = |source| StartError::Bind {
             port: config.port,
             source,
@@ -296,6 +355,7 @@ impl Daemon {
             server,
             audio_server,
             vis_bridge,
+            reload_bridge,
         })
     }
 
@@ -318,9 +378,11 @@ impl Daemon {
         self.server.abort();
         self.audio_server.abort();
         self.vis_bridge.abort();
+        self.reload_bridge.abort();
         let _ = self.server.await;
         let _ = self.audio_server.await;
         let _ = self.vis_bridge.await;
+        let _ = self.reload_bridge.await;
         self.persistence.shutdown().await;
     }
 }
