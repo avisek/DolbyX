@@ -16,8 +16,10 @@ appliance posture (Sonos/Chromecast), so Syncthing-style forced
 credentials were rejected. Independent of the toggle, same-origin
 hardening always applies: WS upgrades reject a cross-host `Origin`
 (WS is CORS-exempt — any webpage in range could otherwise command the
-daemon) and `GET /` rejects non-IP-literal `Host`s, closing drive-by
-tabs and DNS rebinding. Belt, not gate: the Windows installer ships a
+daemon) and both routes reject a `Host` that is neither an IP literal
+nor `localhost` (a rebound page's `Origin` agrees with its `Host`, so
+only the `Host` check sees rebinding), closing drive-by tabs and DNS
+rebinding. Belt, not gate: the Windows installer ships a
 Private-profile, program-scoped inbound rule (Slice 22, #30) — services
 never see the interactive firewall dialog. The port stays a `--port`
 flag (dev/test knob, never user state); there is no `--bind` flag.

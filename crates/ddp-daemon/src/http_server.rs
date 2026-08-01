@@ -36,17 +36,11 @@ pub(crate) fn router(app: Arc<App>) -> Router {
 /// that way (no mDNS — epic #67), so a resolving DNS name means an
 /// attacker-controlled record pointed the browser here: DNS rebinding,
 /// which the cross-origin check can't see (a rebound page's `Origin`
-/// agrees with its `Host`). The raw `Host` header is the truth — no
-/// reverse proxy sits in front, and `X-Forwarded-Host` is
-/// script-settable.
+/// agrees with its `Host`).
 async fn reject_dns_names(request: Request, next: Next) -> Response {
-    let host = request
-        .headers()
-        .get(header::HOST)
-        .and_then(|host| host.to_str().ok());
-    match host.map(host_part) {
+    match request_host(request.headers()) {
         Some(host) if is_ip_or_localhost(host) => next.run(request).await,
-        _ => {
+        host => {
             tracing::warn!(
                 ?host,
                 "refused: Host is neither an IP literal nor localhost"
@@ -69,17 +63,24 @@ async fn reject_cross_origin(request: Request, next: Next) -> Response {
         return next.run(request).await;
     };
     let origin_host = origin.to_str().ok().and_then(origin_host);
-    let request_host = headers
-        .get(header::HOST)
-        .and_then(|host| host.to_str().ok())
-        .map(host_part);
-    match (origin_host, request_host) {
+    match (origin_host, request_host(headers)) {
         (Some(origin), Some(host)) if origin.eq_ignore_ascii_case(host) => next.run(request).await,
-        _ => {
-            tracing::warn!(?origin, host = ?request_host, "ws upgrade refused: cross-origin");
+        (_, host) => {
+            tracing::warn!(?origin, ?host, "ws upgrade refused: cross-origin");
             StatusCode::FORBIDDEN.into_response()
         }
     }
+}
+
+/// The request's `Host` host — port stripped; `None` when absent or
+/// unreadable (refused: locality can't be verified). The raw header is
+/// the truth — no reverse proxy sits in front, and `X-Forwarded-Host`
+/// is script-settable.
+fn request_host(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
+        .get(header::HOST)
+        .and_then(|host| host.to_str().ok())
+        .map(host_part)
 }
 
 /// The host of an authority (`host[:port]`) — the port, when present,

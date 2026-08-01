@@ -41,12 +41,15 @@ async fn raw_status(addr: SocketAddr, request: &str) -> u16 {
         .expect("numeric status")
 }
 
-/// A raw `/ws` upgrade request under an arbitrary `Host` (+ optional
-/// `Origin`).
-fn raw_upgrade(host: &str, origin: Option<&str>) -> String {
-    let origin = origin.map_or_else(String::new, |origin| format!("Origin: {origin}\r\n"));
+/// A raw `GET /` request under an arbitrary `Host`.
+fn raw_index(host: &str) -> String {
+    format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+}
+
+/// A raw `/ws` upgrade request under an arbitrary `Host` and `Origin`.
+fn raw_upgrade(host: &str, origin: &str) -> String {
     format!(
-        "GET /ws HTTP/1.1\r\nHost: {host}\r\n{origin}\
+        "GET /ws HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\n\
          Upgrade: websocket\r\nConnection: Upgrade\r\n\
          Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
     )
@@ -63,11 +66,13 @@ async fn a_rebound_dns_name_host_is_refused_on_both_routes() {
     let port = daemon.addr().port();
     let host = format!("attacker.example:{port}");
 
-    let index = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
-    assert_eq!(raw_status(daemon.addr(), &index).await, 403, "GET /");
+    assert_eq!(
+        raw_status(daemon.addr(), &raw_index(&host)).await,
+        403,
+        "GET /"
+    );
 
-    let origin = format!("http://{host}");
-    let upgrade = raw_upgrade(&host, Some(&origin));
+    let upgrade = raw_upgrade(&host, &format!("http://{host}"));
     assert_eq!(raw_status(daemon.addr(), &upgrade).await, 403, "GET /ws");
 }
 
@@ -85,8 +90,11 @@ async fn ip_literal_and_localhost_hosts_pass() {
         format!("[::1]:{port}"),
         format!("192.168.1.5:{port}"),
     ] {
-        let index = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
-        assert_eq!(raw_status(daemon.addr(), &index).await, 200, "`{host}`");
+        assert_eq!(
+            raw_status(daemon.addr(), &raw_index(&host)).await,
+            200,
+            "`{host}`"
+        );
     }
 }
 
