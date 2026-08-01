@@ -9,6 +9,7 @@ import {
   applyEqPresetAdded,
   applyEqPresetEdit,
   applyEqPresetRename,
+  applyLanAccess,
   applyPower,
   applyProfile,
   applyProfileAdded,
@@ -95,6 +96,23 @@ export function setPower(on: boolean): void {
     ?.request({ cmd: 'set_power', on })
     .then(() => {
       applyPower(on)
+    })
+    .catch(() => {
+      // Rejected or errored — the client's get_state reconcile restores
+      // daemon truth; the toggle simply never moved.
+    })
+}
+
+/**
+ * Local-first `set_lan_access` (ADR-0012), shaped like [`setPower`].
+ * A remote tab toggling off is severed right after this ack — the
+ * last snapshot keeps rendering and commands stop, by design.
+ */
+export function setLanAccess(on: boolean): void {
+  void client
+    ?.request({ cmd: 'set_lan_access', on })
+    .then(() => {
+      applyLanAccess(on)
     })
     .catch(() => {
       // Rejected or errored — the client's get_state reconcile restores

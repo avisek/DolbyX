@@ -60,6 +60,12 @@ export interface EqPreset {
 /** Mirror of the WS `state` event's snapshot. */
 export interface StateSnapshot {
   readonly power: boolean
+  /**
+   * Whether other devices on the local network may reach the daemon
+   * (ADR-0012) — off (the default) means this PC only. A remote tab
+   * toggling this off severs its own connection right after the ack.
+   */
+  readonly lan_access: boolean
   readonly selected_profile: string
   readonly profiles: readonly Profile[]
   readonly eq_presets: readonly EqPreset[]
@@ -83,6 +89,7 @@ export interface VisParams {
 export type Command =
   | { readonly cmd: 'get_state' }
   | { readonly cmd: 'set_power'; readonly on: boolean }
+  | { readonly cmd: 'set_lan_access'; readonly on: boolean }
   | { readonly cmd: 'set_profile'; readonly id: string }
   | {
       /**

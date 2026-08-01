@@ -180,6 +180,9 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     };
     let config = DaemonConfig {
         port: args.port,
+        // The LAN door is all interfaces — fixed, no `--bind` flag
+        // (ADR-0012); whether it is open is the `lan_access` toggle.
+        lan_ip: std::net::Ipv4Addr::UNSPECIFIED.into(),
         ui_path: args.ui.unwrap_or_else(|| daemon_dir.join("index.html")),
         daemon_dir,
         config_dir: args.config_dir.unwrap_or_else(platform_config_dir),

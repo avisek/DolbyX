@@ -4,13 +4,14 @@
 
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, State};
 use axum::response::Response;
 use ddp_state::Command;
 use tokio::sync::broadcast;
 
 use crate::App;
+use crate::http_server::LocalAddr;
 use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
 
 /// Bridges the supervisor's vis fan-out onto the update channel: each
@@ -45,16 +46,31 @@ pub(crate) async fn vis_bridge(app: Arc<App>) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ConnId(pub(crate) u64);
 
-/// `GET /ws`: upgrade and serve the connection.
-pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
-    ws.on_upgrade(move |socket| connection(socket, app))
+/// `GET /ws`: upgrade and serve the connection, carrying which door it
+/// came through (issue #70 — LAN-door connections sever on off).
+pub(crate) async fn handle_upgrade(
+    ws: WebSocketUpgrade,
+    ConnectInfo(local): ConnectInfo<LocalAddr>,
+    State(app): State<Arc<App>>,
+) -> Response {
+    ws.on_upgrade(move |socket| connection(socket, app, local.lan_door()))
 }
 
 /// One client connection: full snapshot first, then command dispatch
-/// interleaved with broadcast delivery.
-async fn connection(mut socket: WebSocket, app: Arc<App>) {
+/// interleaved with broadcast delivery. A LAN-door connection is
+/// severed the moment LAN access turns off (ADR-0012) — and because
+/// dispatch finishes sending its replies before the next `select!`
+/// poll, an originator that toggled off gets its ack, then the close.
+async fn connection(mut socket: WebSocket, app: Arc<App>, lan_door: bool) {
     let conn_id = app.fresh_conn_id();
     let mut updates = app.updates.subscribe();
+    let mut lan = app.lan_access.subscribe();
+    // The upgrade may have raced an off-flip through the old listener:
+    // never serve a LAN-door connection while the toggle is off.
+    if lan_door && !*lan.borrow_and_update() {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
     if send(&mut socket, &state_event(&app, None).await)
         .await
         .is_err()
@@ -85,6 +101,15 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
                     Err(broadcast::error::RecvError::Closed) => return,
                 };
                 if send(&mut socket, &text).await.is_err() {
+                    return;
+                }
+            }
+            changed = lan.changed(), if lan_door => {
+                if changed.is_err() || !*lan.borrow_and_update() {
+                    // Severed: LAN access turned off (or the daemon is
+                    // going down) while this connection sits on the
+                    // LAN door.
+                    let _ = socket.send(Message::Close(None)).await;
                     return;
                 }
             }
@@ -121,6 +146,9 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         }
         WsCommand::SetPower { request_id, on } => {
             mutate(app, conn_id, &request_id, Command::SetPower { on }).await
+        }
+        WsCommand::SetLanAccess { request_id, on } => {
+            mutate(app, conn_id, &request_id, Command::SetLanAccess { on }).await
         }
         WsCommand::SetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::SetProfile { id }).await
@@ -238,6 +266,12 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
     };
     if diff.is_empty() {
         return vec![ack(request_id, None).to_text()];
+    }
+    // A LAN access flip fans out to the listener + severing watchers;
+    // the ack below still reaches the originator first — its send
+    // precedes this task's next `select!` poll.
+    if let Some(on) = diff.lan_access {
+        app.sync_lan_access(on);
     }
     // The engine hears the diff (full set on switch/reset, edited
     // entries on a live edit); the replay set for future session inits

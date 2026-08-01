@@ -22,7 +22,7 @@ use ddp_engine::Engine;
 use ddp_persistence::Persistence;
 use ddp_state::{ParameterDef, State};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 
 pub use engine_supervisor::{EngineSupervisor, SupervisorError};
@@ -44,6 +44,13 @@ pub struct DaemonConfig {
     /// TCP port for `GET /` + `GET /ws`; `0` binds an ephemeral port.
     /// From `--port` (default 9876), never from config.
     pub port: u16,
+    /// The interface the listener opens while LAN access is on
+    /// (ADR-0012): `0.0.0.0` in production — `main` hardcodes it,
+    /// there is no `--bind` flag. Tests inject a second loopback
+    /// address (`127.0.0.2`) so `cargo test` never binds an interface
+    /// an OS firewall would prompt about; the trade: a test daemon's
+    /// LAN door doesn't cover `127.0.0.1` the way `0.0.0.0` does.
+    pub lan_ip: std::net::IpAddr,
     /// The UI HTML file served on `GET /` (`--ui` in dev, else
     /// `index.html` beside the binary).
     pub ui_path: PathBuf,
@@ -77,10 +84,11 @@ pub enum StartError {
     #[error(transparent)]
     ParsePersistence(#[from] ddp_persistence::Error),
     /// The listen socket could not be bound.
-    #[error("bind 127.0.0.1:{port}: {source}")]
+    #[error("bind {addr}: {source}")]
     Bind {
-        /// The requested port.
-        port: u16,
+        /// The address the daemon actually tried — loopback, or the
+        /// LAN interface when `lan_access` resolves on at startup.
+        addr: SocketAddr,
         /// The underlying I/O error.
         source: std::io::Error,
     },
@@ -108,6 +116,11 @@ pub(crate) struct App {
     pub(crate) persistence: Arc<Persistence>,
     /// The originator-aware event fan-out — `state` + `vis` (ADR-0005).
     pub(crate) updates: broadcast::Sender<EventBroadcast>,
+    /// LAN access, live (issue #70): the listener rebind loop and the
+    /// per-connection severing ride this watch; every mutation path
+    /// keeps it in lockstep with `state.lan_access` via
+    /// [`App::sync_lan_access`].
+    pub(crate) lan_access: watch::Sender<bool>,
     /// `ConnId` allocator.
     pub(crate) next_conn_id: AtomicU64,
     /// The UI HTML file, re-read on every `GET /`.
@@ -118,6 +131,17 @@ impl App {
     /// The current snapshot as wire JSON.
     pub(crate) async fn snapshot_json(&self) -> serde_json::Value {
         self.snapshot_json_of(&*self.state.read().await)
+    }
+
+    /// Publishes `state.lan_access` to the rebind/severing watchers —
+    /// called by every path that may move it (a WS `set_lan_access`,
+    /// an accepted external reload); no-ops stay silent.
+    pub(crate) fn sync_lan_access(&self, on: bool) {
+        self.lan_access.send_if_modified(|current| {
+            let changed = *current != on;
+            *current = on;
+            changed
+        });
     }
 
     /// Mints a connection identity no other connection holds.
@@ -187,6 +211,9 @@ impl App {
         let power = (state.power != reloaded.power).then_some(reloaded.power);
         let before = state.resolved_batch(&self.params);
         *state = reloaded;
+        // A hand-edited `lan_access` drives the same rebind/severing
+        // fan-out a WS toggle does (issue #70).
+        self.sync_lan_access(state.lan_access);
         let after = state.resolved_batch(&self.params);
         // The engine hears what actually changed — both batches run in
         // `defs` order, so they zip; the replay set is the full
@@ -253,6 +280,7 @@ impl App {
             .collect();
         serde_json::json!({
             "power": state.power,
+            "lan_access": state.lan_access,
             "selected_profile": state.selected_profile,
             "profiles": profiles,
             "eq_presets": eq_presets,
@@ -266,7 +294,10 @@ pub struct Daemon {
     addr: SocketAddr,
     supervisor: Arc<EngineSupervisor>,
     persistence: Arc<Persistence>,
-    server: JoinHandle<()>,
+    /// The live serve task — swapped by the rebind loop on a LAN
+    /// access flip, so shutdown must go through the shared slot.
+    serving: Arc<Mutex<JoinHandle<()>>>,
+    rebind: JoinHandle<()>,
     audio_server: JoinHandle<std::convert::Infallible>,
     vis_bridge: JoinHandle<()>,
     reload_bridge: JoinHandle<()>,
@@ -319,6 +350,7 @@ impl Daemon {
             state.resolved_batch(&params),
             readout_names,
         ));
+        let lan_on = state.lan_access;
         let app = Arc::new(App {
             params_json: serde_json::to_value(&params).expect("defs always serialize"),
             params,
@@ -326,6 +358,7 @@ impl Daemon {
             supervisor: supervisor.clone(),
             persistence: persistence.clone(),
             updates: broadcast::channel(64).0,
+            lan_access: watch::channel(lan_on).0,
             next_conn_id: AtomicU64::new(0),
             ui_path: config.ui_path,
         });
@@ -344,13 +377,19 @@ impl Daemon {
             }
         });
 
-        let bind_error = |source| StartError::Bind {
-            port: config.port,
-            source,
-        };
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port))
-            .await
-            .map_err(bind_error)?;
+        // The startup door mirrors the resolved toggle: loopback while
+        // LAN access is off, the LAN interface while on — e.g. a
+        // hand-enabled `config.toml` surviving a restart (ADR-0012).
+        let door = SocketAddr::new(
+            if lan_on {
+                config.lan_ip
+            } else {
+                std::net::Ipv4Addr::LOCALHOST.into()
+            },
+            config.port,
+        );
+        let bind_error = |source| StartError::Bind { addr: door, source };
+        let listener = TcpListener::bind(door).await.map_err(bind_error)?;
         let addr = listener.local_addr().map_err(bind_error)?;
         let plugins = platform::PluginListener::bind(&config.socket_path).map_err(|source| {
             StartError::BindSocket {
@@ -362,18 +401,27 @@ impl Daemon {
 
         let audio_server = tokio::spawn(audio_server::accept_loop(plugins, app.clone()));
         let vis_bridge = tokio::spawn(ws_server::vis_bridge(app.clone()));
-        let router = http_server::router(app);
-        let server = tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router).await {
-                tracing::error!(%error, "http server exited");
-            }
-        });
+        let router = http_server::router(app.clone());
+        let serving = Arc::new(Mutex::new(http_server::spawn_serve(
+            listener,
+            router.clone(),
+        )));
+        // The toggle's listener side (issue #70): live rebinds on the
+        // effective port — ephemeral test ports stay stable across flips.
+        let rebind = tokio::spawn(http_server::rebind_loop(
+            app,
+            router,
+            config.lan_ip,
+            addr.port(),
+            serving.clone(),
+        ));
 
         Ok(Self {
             addr,
             supervisor,
             persistence,
-            server,
+            serving,
+            rebind,
             audio_server,
             vis_bridge,
             reload_bridge,
@@ -387,7 +435,9 @@ impl Daemon {
         &self.supervisor
     }
 
-    /// The bound listen address.
+    /// The address bound at startup — the loopback door, or the LAN
+    /// door when `lan_access` resolved on. A live toggle rebinds on
+    /// the same port.
     #[must_use]
     pub const fn addr(&self) -> SocketAddr {
         self.addr
@@ -396,11 +446,17 @@ impl Daemon {
     /// Stops serving and flushes any pending `config.toml` write — the
     /// graceful-shutdown path.
     pub async fn shutdown(self) {
-        self.server.abort();
+        // The rebind loop first, so nothing respawns the serve task
+        // after the slot is drained.
+        self.rebind.abort();
         self.audio_server.abort();
         self.vis_bridge.abort();
         self.reload_bridge.abort();
-        let _ = self.server.await;
+        let _ = self.rebind.await;
+        let mut serving = self.serving.lock().await;
+        serving.abort();
+        let _ = (&mut *serving).await;
+        drop(serving);
         let _ = self.audio_server.await;
         let _ = self.vis_bridge.await;
         let _ = self.reload_bridge.await;

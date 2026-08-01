@@ -18,6 +18,8 @@ use crate::profile::{Profile, ProfileContent, ProfileId};
 pub struct Defaults {
     /// Factory master power.
     pub power: bool,
+    /// Factory LAN access — ships `false` (ADR-0012).
+    pub lan_access: bool,
     /// Factory selected profile.
     pub selected_profile: ProfileId,
     /// Factory profiles in declaration order, `content` fully resolved
@@ -42,6 +44,10 @@ pub struct State {
     /// Master power — `false` ⇒ every session is bypassed
     /// (`EFFECT_CMD_DISABLE`; parameter state survives the toggle).
     pub power: bool,
+    /// LAN access — whether other devices on the local network may
+    /// reach the daemon (ADR-0012). A root scalar like `power`; pure
+    /// state here — the daemon owns the listener it drives.
+    pub lan_access: bool,
     /// The one active profile, applied to all sessions. Invariant: it
     /// always names an entry of `profiles`.
     pub selected_profile: ProfileId,
@@ -72,6 +78,7 @@ impl State {
     pub fn new_from_defaults(defaults: &Defaults) -> Self {
         Self {
             power: defaults.power,
+            lan_access: defaults.lan_access,
             selected_profile: defaults.selected_profile.clone(),
             profiles: defaults.profiles.clone(),
             eq_presets: defaults.eq_presets.clone(),
@@ -190,6 +197,18 @@ impl State {
                 self.power = on;
                 Ok(StateDiff {
                     power: changed.then_some(on),
+                    lan_access: None,
+                    params: None,
+                    changed,
+                    minted: None,
+                })
+            }
+            Command::SetLanAccess { on } => {
+                let changed = self.lan_access != on;
+                self.lan_access = on;
+                Ok(StateDiff {
+                    power: None,
+                    lan_access: changed.then_some(on),
                     params: None,
                     changed,
                     minted: None,
@@ -205,6 +224,7 @@ impl State {
                 self.selected_profile = id;
                 Ok(StateDiff {
                     power: None,
+                    lan_access: None,
                     params: Some(self.resolved_batch(defs)),
                     changed: true,
                     minted: None,
@@ -240,6 +260,7 @@ impl State {
                 }
                 Ok(StateDiff {
                     power: None,
+                    lan_access: None,
                     params: was_selected.then(|| self.resolved_batch(defs)),
                     changed: true,
                     minted: None,
@@ -269,6 +290,7 @@ impl State {
                 self.eq_presets.retain(|preset| preset.id != id);
                 Ok(StateDiff {
                     power: None,
+                    lan_access: None,
                     params: live.then(|| self.eq_batch(defs)),
                     changed: true,
                     minted: None,
@@ -340,6 +362,7 @@ impl State {
         let batch = live.then(|| self.edit_batch(params, eq_selection_changed, defs));
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             params: batch.filter(|batch| !batch.is_empty()),
             changed: true,
             minted: None,
@@ -417,6 +440,7 @@ impl State {
         });
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             // The daemon never moves the active profile on an add — no
             // batch.
             params: None,
@@ -455,6 +479,7 @@ impl State {
         });
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             params: None,
             changed: true,
             minted: Some(id),
@@ -503,6 +528,7 @@ impl State {
         }
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             params: (params_changed && live).then_some(batch),
             changed: params_changed || name_changed,
             minted: None,
@@ -571,6 +597,7 @@ impl State {
         });
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             params: batch.filter(|batch| !batch.is_empty()),
             changed: true,
             minted: None,
@@ -636,6 +663,7 @@ impl State {
         });
         Ok(StateDiff {
             power: None,
+            lan_access: None,
             params: batch,
             changed: true,
             minted: None,
@@ -650,6 +678,12 @@ pub enum Command {
     /// Master power toggle.
     SetPower {
         /// The requested power state.
+        on: bool,
+    },
+    /// LAN access toggle (ADR-0012) — the same root-scalar grammar as
+    /// [`Command::SetPower`]; the engine never hears it.
+    SetLanAccess {
+        /// The requested LAN access state.
         on: bool,
     },
     /// Selects the active profile (global — all sessions follow).
@@ -762,6 +796,9 @@ pub enum Command {
 pub struct StateDiff {
     /// New power state, when it changed.
     pub power: Option<bool>,
+    /// New LAN access state, when it changed — drives the daemon's
+    /// listener rebind and connection severing, never the engine.
+    pub lan_access: Option<bool>,
     /// One atomic engine batch, when the engine must hear the change: a
     /// profile switch or reset carries the full resolved set, an EQ
     /// preset switch/detach/reset the resolved preset-carried set, a
@@ -1078,6 +1115,7 @@ mod tests {
         music.baseline = music.content.clone();
         Defaults {
             power: true,
+            lan_access: false,
             selected_profile: ProfileId("music".into()),
             profiles: vec![profile("movie", "Movie", &table), music],
             eq_presets: vec![
@@ -1137,6 +1175,34 @@ mod tests {
         assert!(!state.power);
         assert_eq!(diff.power, Some(false));
         assert!(!diff.is_empty());
+    }
+
+    /// Issue #70: `set_lan_access` follows the root-scalar grammar —
+    /// the flip lands on the scalar, the diff reports it (the daemon's
+    /// rebind/sever fan-out rides it), and the engine hears nothing.
+    #[test]
+    fn set_lan_access_flips_the_scalar_and_reports_the_change() {
+        let mut state = State::new_from_defaults(&defaults());
+        assert!(!state.lan_access, "ships off (ADR-0012)");
+        let diff = state
+            .apply(Command::SetLanAccess { on: true }, &defs())
+            .unwrap();
+        assert!(state.lan_access);
+        assert_eq!(diff.lan_access, Some(true));
+        assert_eq!(diff.power, None);
+        assert_eq!(diff.params, None, "the engine never hears LAN access");
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn set_lan_access_to_the_current_value_is_a_no_op() {
+        let mut state = State::new_from_defaults(&defaults());
+        let diff = state
+            .apply(Command::SetLanAccess { on: false }, &defs())
+            .unwrap();
+        assert!(!state.lan_access);
+        assert!(diff.is_empty());
+        assert_eq!(diff.lan_access, None);
     }
 
     #[test]

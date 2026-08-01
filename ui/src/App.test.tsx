@@ -75,6 +75,38 @@ it('sends set_power on click and applies the flip on the ack', async () => {
   })
 })
 
+// Issue #70: the LAN access toggle — bootstrap-off, `set_lan_access`
+// on the wire, the flip lands local-first on the ack (a remote tab is
+// severed right after; the daemon's broadcast covers other tabs).
+it('sends set_lan_access on click and applies the flip on the ack', async () => {
+  const socket = renderConnected()
+  const toggle = screen.getByRole('switch', { name: 'LAN access' })
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+
+  toggle.click()
+  const sent = socket
+    .sentCommands()
+    .filter((frame) => frame.cmd === 'set_lan_access')
+  expect(sent).toEqual([
+    {
+      cmd: 'set_lan_access',
+      request_id: expect.any(String) as string,
+      on: true,
+    },
+  ])
+
+  // Not yet acked — the toggle still shows daemon truth.
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+
+  socket.serverMessage({
+    type: 'ack',
+    request_id: sent[0]?.request_id,
+  })
+  await waitFor(() => {
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+  })
+})
+
 // Behavior 5 (#13): drop → badge reconnecting; reconnect → `get_state`
 // issued, badge connected, state reconciled.
 it('walks the badge through drop and recovery, reconciling state', () => {

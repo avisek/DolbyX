@@ -26,6 +26,15 @@ pub(crate) enum WsCommand {
         /// The requested power state.
         on: bool,
     },
+    /// LAN access toggle (ADR-0012) — the root-scalar grammar, like
+    /// `set_power`. Off severs the originator itself when it came
+    /// through the LAN door: ack first, then the close.
+    SetLanAccess {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The requested LAN access state.
+        on: bool,
+    },
     /// Select the active profile.
     SetProfile {
         /// Correlation id echoed on the reply.

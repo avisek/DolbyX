@@ -1,17 +1,24 @@
 //! `HttpServer` — exactly two routes: `GET /` (bootstrap-injected HTML)
 //! and `GET /ws` (upgrade; lands with the WS behaviors). No `/api/*`
 //! routes exist (ADR-0006). Same-origin hardening (issue #69,
-//! ADR-0012) fronts them, independent of the LAN access toggle.
+//! ADR-0012) fronts them, independent of the LAN access toggle; the
+//! toggle itself (issue #70) is the listener — loopback while off, the
+//! LAN interface while on, rebound live — plus a per-request door gate
+//! for connections established before an off-flip.
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::connect_info::Connected;
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use axum::serve::IncomingStream;
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
 use crate::App;
 
@@ -19,7 +26,8 @@ use crate::App;
 const BOOTSTRAP_MARKER: &str = "<!--BOOTSTRAP-->";
 
 /// Builds the daemon router — `GET /` and `GET /ws`, nothing else,
-/// fronted by the same-origin hardening (ADR-0012).
+/// fronted by the LAN door gate and the same-origin hardening
+/// (ADR-0012).
 pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(serve_index))
@@ -28,7 +36,118 @@ pub(crate) fn router(app: Arc<App>) -> Router {
             get(crate::ws_server::handle_upgrade).layer(middleware::from_fn(reject_cross_origin)),
         )
         .layer(middleware::from_fn(reject_dns_names))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            reject_lan_door_when_off,
+        ))
         .with_state(app)
+}
+
+/// The daemon-side address a connection was accepted on — which door
+/// it came through. The *local* address, not the peer: the doors are
+/// defined by where the daemon listens (ADR-0012's bind-address gate),
+/// and a connection to the LAN interface is a LAN-door connection even
+/// from this machine.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalAddr(Option<SocketAddr>);
+
+impl LocalAddr {
+    /// Whether the connection came through the LAN door — any accept
+    /// address other than `127.0.0.1` (production's `0.0.0.0` accepts
+    /// both doors on one listener; the tests' second-loopback LAN
+    /// door is why this compares against the loopback bind address,
+    /// not `is_loopback`). An unreadable socket counts as LAN: refuse
+    /// rather than trust what can't be verified.
+    pub(crate) fn lan_door(self) -> bool {
+        self.0
+            .is_none_or(|addr| addr.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST))
+    }
+}
+
+impl Connected<IncomingStream<'_, TcpListener>> for LocalAddr {
+    fn connect_info(stream: IncomingStream<'_, TcpListener>) -> Self {
+        Self(stream.io().local_addr().ok())
+    }
+}
+
+/// Refuses LAN-door requests while LAN access is off (ADR-0012). The
+/// rebind already closed that door for *new* connections; this closes
+/// it for requests still arriving on ones established before the
+/// off-flip — a browser's kept-alive socket outlives the toggle, and a
+/// trust toggle that doesn't revoke is broken.
+async fn reject_lan_door_when_off(
+    State(app): State<Arc<App>>,
+    ConnectInfo(local): ConnectInfo<LocalAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if local.lan_door() && !*app.lan_access.borrow() {
+        tracing::warn!(?local, "refused: LAN access is off");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+/// Serves `router` on `listener` until aborted. Established connections
+/// ride their own tasks — aborting stops accepting only; revocation is
+/// the door gate's and the WS severing's job.
+pub(crate) fn spawn_serve(listener: TcpListener, router: Router) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let service = router.into_make_service_with_connect_info::<LocalAddr>();
+        if let Err(error) = axum::serve(listener, service).await {
+            tracing::error!(%error, "http server exited");
+        }
+    })
+}
+
+/// Follows the LAN access toggle (issue #70): on each flip, drop the
+/// current listener and open the new door — loopback while off,
+/// `lan_ip` while on — on the same port, live, no daemon restart. A
+/// failed bind (the freed port was snatched inside the swap window)
+/// logs the address it actually tried and retries every second until
+/// it lands or the toggle moves again.
+pub(crate) async fn rebind_loop(
+    app: Arc<App>,
+    router: Router,
+    lan_ip: IpAddr,
+    port: u16,
+    serving: Arc<tokio::sync::Mutex<JoinHandle<()>>>,
+) {
+    let mut lan = app.lan_access.subscribe();
+    loop {
+        if lan.changed().await.is_err() {
+            return;
+        }
+        loop {
+            let on = *lan.borrow_and_update();
+            let door = if on {
+                lan_ip
+            } else {
+                IpAddr::V4(Ipv4Addr::LOCALHOST)
+            };
+            let target = SocketAddr::new(door, port);
+            let mut current = serving.lock().await;
+            current.abort();
+            // Await the abort: the old listener must be dropped before
+            // the same port can bind again.
+            let _ = (&mut *current).await;
+            match TcpListener::bind(target).await {
+                Ok(listener) => {
+                    *current = spawn_serve(listener, router.clone());
+                    tracing::info!(addr = %target, lan_access = on, "listener rebound");
+                    break;
+                }
+                Err(error) => {
+                    tracing::error!(addr = %target, %error, "rebind failed; retrying");
+                    drop(current);
+                    tokio::select! {
+                        () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                        _ = lan.changed() => {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Refuses any request whose `Host` host is neither an IP literal nor

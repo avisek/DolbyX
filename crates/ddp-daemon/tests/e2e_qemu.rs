@@ -13,7 +13,9 @@
 //! flow replayed — clone, switch, rename, restart, delete. Part B adds
 //! its behavior 5: scoped + whole-item reset landing baseline values
 //! back in the live registry. Slice 19 (#27) adds its behavior 9: an
-//! external `config.toml` edit read back from the registry.
+//! external `config.toml` edit read back from the registry. LAN
+//! access 2/4 (#70) adds its behavior 3: a LAN-door client driving
+//! the registry, severed on off.
 //!
 //! Feature-gated `qemu`; prerequisites as in
 //! `ddp_engine::test_support`.
@@ -25,8 +27,9 @@ use std::sync::Arc;
 
 use common::plugin::SyntheticPlugin;
 use common::{
-    RICH_IEBT, assert_config_becomes, connected, recv_json, recv_state, send_json, set_power,
-    snapshot_profile, socket_path_for, try_recv_json, vis_params_json, wait_until, ws_connect,
+    RICH_IEBT, assert_config_becomes, assert_severed, connected, edit_param, recv_json, recv_state,
+    send_json, set_lan_access, set_power, snapshot_profile, socket_path_for, try_recv_json,
+    vis_params_json, wait_connectable, wait_until, ws_connect,
 };
 use ddp_daemon::Daemon;
 use ddp_engine::test_support::staged_engine_dir;
@@ -836,4 +839,42 @@ async fn a_session_created_while_power_off_starts_disabled() {
             .expect("process");
         assert_eq!(output, block, "disabled from the first block onward");
     }
+}
+
+/// Issue #70's behavior 3 replayed over the real engine: a LAN-door
+/// client drives a real param edit into the live registry, and the
+/// off-flip severs it while the loopback door keeps serving. The LAN
+/// door is the harness seam (`TEST_LAN_IP` — a second loopback), so
+/// even the qemu job binds loopback only.
+#[tokio::test]
+async fn a_lan_client_drives_the_real_engine_and_severs_on_off() {
+    let daemon = start_qemu_daemon().await;
+    let session = daemon
+        .handle
+        .supervisor()
+        .create_session(44_100)
+        .expect("session");
+    let mut local = connected(daemon.handle.addr()).await;
+
+    set_lan_access(&mut local, true).await;
+    let lan = std::net::SocketAddr::from((common::TEST_LAN_IP, daemon.handle.addr().port()));
+    wait_connectable(lan).await;
+    let mut remote = connected(lan).await;
+
+    edit_param(&mut remote, "music", "dvla", &[9]).await;
+    let values = daemon
+        .handle
+        .supervisor()
+        .get_params(session, &["dvla"])
+        .expect("get_params");
+    assert_eq!(
+        values[0],
+        vec![9],
+        "the remote edit landed in the live clamped registry"
+    );
+
+    set_lan_access(&mut local, false).await;
+    assert_severed(&mut remote).await;
+    // The loopback client that flipped it still drives the daemon.
+    set_power(&mut local, false).await;
 }

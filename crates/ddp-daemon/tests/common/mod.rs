@@ -64,12 +64,22 @@ pub fn fixture_dir() -> TempDir {
     dir
 }
 
+/// The fixture's LAN door (`DaemonConfig::lan_ip`): a second loopback
+/// address standing in for production's `0.0.0.0`, so `cargo test`
+/// never binds an interface an OS firewall would prompt about
+/// (issue #70). Unlike `0.0.0.0` it does not cover `127.0.0.1` — while
+/// LAN access is on, a test daemon accepts *new* connections on this
+/// address only (established loopback connections survive the flip,
+/// as in production).
+pub const TEST_LAN_IP: std::net::Ipv4Addr = std::net::Ipv4Addr::new(127, 0, 0, 2);
+
 /// The config a [`fixture_dir`] daemon runs with: ephemeral port,
 /// `config.toml` under `<dir>/data/`, plugin socket per
-/// [`socket_path_for`].
+/// [`socket_path_for`], LAN door on [`TEST_LAN_IP`].
 pub fn config_for(dir: &TempDir) -> DaemonConfig {
     DaemonConfig {
         port: 0,
+        lan_ip: TEST_LAN_IP.into(),
         ui_path: dir.path().join("index.html"),
         daemon_dir: dir.path().to_path_buf(),
         config_dir: dir.path().join("data"),
@@ -247,6 +257,71 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
         assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
         assert_eq!(frame["request_id"], request_id.as_str());
         return;
+    }
+}
+
+/// Issues `set_lan_access` and awaits its `ack` promise-style, as
+/// [`set_power`] (the root-scalar reply law, issue #70).
+pub async fn set_lan_access(ws: &mut WsClient, on: bool) {
+    let request_id = format!("rq-set-lan-{on}");
+    send_json(
+        ws,
+        &serde_json::json!({ "cmd": "set_lan_access", "request_id": request_id, "on": on }),
+    )
+    .await;
+    loop {
+        let frame = recv_json(ws).await;
+        if frame["type"] == "state" || frame["type"] == "vis" {
+            continue;
+        }
+        assert_eq!(frame["type"], "ack", "set_lan_access must ack, got {frame}");
+        assert_eq!(frame["request_id"], request_id.as_str());
+        return;
+    }
+}
+
+/// Asserts the daemon severed this connection: nothing but pub/sub
+/// events (a final broadcast may race the close) until a close frame
+/// or the stream's end.
+pub async fn assert_severed(ws: &mut WsClient) {
+    use futures_util::StreamExt;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match ws.next().await {
+                None | Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)) | Err(_)) => {
+                    return;
+                }
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .expect("not severed within 5s");
+}
+
+/// Polls until `addr` accepts a TCP connection — the rebind lands
+/// asynchronously after the toggle's ack.
+pub async fn wait_connectable(addr: SocketAddr) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::net::TcpStream::connect(addr).await.is_err() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{addr} not connectable within 5s"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Polls until `addr` refuses a TCP connection — the door is closed
+/// (and stays closed: an off-flip never reopens it).
+pub async fn wait_refused(addr: SocketAddr) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::net::TcpStream::connect(addr).await.is_ok() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{addr} still connectable after 5s"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 

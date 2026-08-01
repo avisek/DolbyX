@@ -5,6 +5,8 @@
 # cascade; anything unstated runs the parameters.toml default.
 
 power = true
+# LAN access ships off — opt-in only (ADR-0012)
+lan_access = false
 selected_profile = "music"
 
 # Shared operational config — applies to every profile, stated once

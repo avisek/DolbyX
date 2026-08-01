@@ -15,6 +15,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 // snapshot just keeps module init from throwing until then.
 const inert: StateSnapshot = {
   power: false,
+  lan_access: false,
   selected_profile: '',
   profiles: [],
   eq_presets: [],
@@ -68,6 +69,11 @@ export function applySnapshot(snapshot: StateSnapshot): void {
 /** Applies the originator's own acked power flip (local-first). */
 export function applyPower(on: boolean): void {
   setState('power', on)
+}
+
+/** Applies this tab's own acked LAN access flip (local-first). */
+export function applyLanAccess(on: boolean): void {
+  setState('lan_access', on)
 }
 
 /** Applies the originator's own acked profile switch (local-first). */

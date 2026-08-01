@@ -83,6 +83,7 @@ pub(crate) struct Namespace {
 #[serde(deny_unknown_fields)]
 struct DefaultsFile {
     power: bool,
+    lan_access: bool,
     selected_profile: ProfileId,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -97,6 +98,7 @@ struct DefaultsFile {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     power: Option<bool>,
+    lan_access: Option<bool>,
     selected_profile: Option<ProfileId>,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -110,6 +112,7 @@ struct ConfigFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigOverlay {
     pub(crate) power: Option<bool>,
+    pub(crate) lan_access: Option<bool>,
     pub(crate) selected_profile: Option<ProfileId>,
     pub(crate) profile: Namespace,
     pub(crate) eq_preset: Namespace,
@@ -302,6 +305,7 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
     overlay_params(&mut custom_eq_preset_params, &eq_preset.shared);
     let defaults = Defaults {
         power: file.power,
+        lan_access: file.lan_access,
         selected_profile: file.selected_profile,
         profiles,
         eq_presets,
@@ -403,6 +407,7 @@ pub fn parse_config(
     }
     Ok(ConfigOverlay {
         power: file.power,
+        lan_access: file.lan_access,
         selected_profile: file.selected_profile,
         profile,
         eq_preset,
@@ -454,6 +459,7 @@ fn validate_row_identity(
 pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     let mut state = State::new_from_defaults(defaults);
     state.power = overlay.power.unwrap_or(defaults.power);
+    state.lan_access = overlay.lan_access.unwrap_or(defaults.lan_access);
     if let Some(selected) = &overlay.selected_profile {
         state.selected_profile = selected.clone();
     }
@@ -542,6 +548,9 @@ pub fn serialize_overlay(
     let mut doc = String::new();
     if state.power != defaults.power {
         emit_value(&mut doc, "power", &toml_bool(state.power));
+    }
+    if state.lan_access != defaults.lan_access {
+        emit_value(&mut doc, "lan_access", &toml_bool(state.lan_access));
     }
     if state.selected_profile != defaults.selected_profile {
         emit_value(
@@ -768,6 +777,7 @@ mod tests {
 
     const DEFAULTS: &str = r#"
 power = true
+lan_access = false
 selected_profile = "music"
 
 [profile]
@@ -804,6 +814,7 @@ iebt = [67, 95]
     fn parses_defaults_with_shared_keys_applying_to_every_profile() {
         let defaults = defaults();
         assert!(defaults.power);
+        assert!(!defaults.lan_access, "ships off (ADR-0012)");
         assert_eq!(defaults.selected_profile, ProfileId("music".into()));
 
         let ids: Vec<&str> = defaults
@@ -998,7 +1009,11 @@ iebt = [67, 95]
     #[test]
     fn rejects_malformed_or_invalid_defaults() {
         let cases = [
-            ("power = true\n".to_string(), "selected_profile"),
+            (
+                "power = true\nlan_access = false\n".to_string(),
+                "selected_profile",
+            ),
+            ("power = true\n".to_string(), "lan_access"),
             ("power = tru".to_string(), "expected"),
             (DEFAULTS.replace("power = true", "power = true\nx = 1"), "x"),
             (DEFAULTS.replace("dvla = 4", "dvla = 11"), "outside"),
@@ -1068,6 +1083,7 @@ iebt = [67, 95]
     fn rejects_invalid_config() {
         let cases = [
             ("powr = false\n", "powr"),
+            ("lan_access = 5\n", "boolean"),
             // A non-factory row is a custom item — its name is required
             // (also the guard against typo'd factory ids).
             ("[profile.gost]\ndvla = 1\n", "missing `name`"),
@@ -1130,7 +1146,7 @@ iebt = [67, 95]
         for (first, second, expected, layer) in layers {
             let (defaults_doc, config_doc) = match first {
                 "cfg-shared" => (
-                    "power = true\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
+                    "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
                     if second.is_empty() {
                         "[profile]\ndvla = 3\n".to_string()
                     } else {
@@ -1139,7 +1155,7 @@ iebt = [67, 95]
                 ),
                 shared => (
                     format!(
-                        "power = true\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
+                        "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
                     ),
                     String::new(),
                 ),
@@ -1253,6 +1269,38 @@ iebt = [67, 95]
             &parse_config(&document, &defs, &defaults).unwrap(),
         );
         assert_eq!(reloaded, state);
+    }
+
+    /// Issue #70: `lan_access` rides the Cascade like `power` — the
+    /// shipped default resolves, a config statement shadows it, and
+    /// the write law stores the key iff it diverges.
+    #[test]
+    fn lan_access_cascades_and_serializes_iff_diverging() {
+        let defs = defs();
+        let defaults = defaults();
+        let loaded = ConfigOverlay::default();
+        let mut state = resolve(&defaults, &loaded);
+        assert!(!state.lan_access, "a fresh install stays this-PC-only");
+
+        let _ = state
+            .apply(Command::SetLanAccess { on: true }, &defs)
+            .unwrap();
+        let written = serialize_overlay(&state, &defaults, &loaded, &defs);
+        assert_eq!(written, "lan_access = true\n");
+        let reloaded = resolve(
+            &defaults,
+            &parse_config(&written, &defs, &defaults).unwrap(),
+        );
+        assert_eq!(reloaded, state, "a hand-editable round trip");
+
+        let _ = state
+            .apply(Command::SetLanAccess { on: false }, &defs)
+            .unwrap();
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &loaded, &defs),
+            "",
+            "back at the shipped default ⇒ the key drops (the write law)"
+        );
     }
 
     /// Hand-edited shared layers survive a write-back verbatim — the

@@ -1,0 +1,43 @@
+.lan-access-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-surface);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.lan-access-toggle__track {
+  display: inline-flex;
+  align-items: center;
+  width: 2rem;
+  height: 1.125rem;
+  padding: 0.125rem;
+  border-radius: 0.5625rem;
+  background: var(--color-bg);
+  transition: background 0.15s ease;
+}
+
+.lan-access-toggle__thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.lan-access-toggle[aria-checked='true'] .lan-access-toggle__track {
+  background: var(--color-accent);
+}
+
+.lan-access-toggle[aria-checked='true'] .lan-access-toggle__thumb {
+  transform: translateX(0.875rem);
+  background: var(--color-bg);
+}

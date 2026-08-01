@@ -79,6 +79,11 @@ impl World {
         assert!(self.daemon.is_none(), "daemon already up");
         let config = DaemonConfig {
             port: 0,
+            // A second-loopback stand-in for production's `0.0.0.0`
+            // (issue #70) — never bound here (LAN access stays off),
+            // and `cargo test` must not bind an interface an OS
+            // firewall would prompt about anyway.
+            lan_ip: std::net::Ipv4Addr::new(127, 0, 0, 2).into(),
             ui_path: self.dir.path().join("index.html"),
             daemon_dir: self.dir.path().to_path_buf(),
             config_dir: self.dir.path().join("data"),
