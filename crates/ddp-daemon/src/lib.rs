@@ -296,7 +296,7 @@ pub struct Daemon {
     persistence: Arc<Persistence>,
     /// The live serve task — swapped by the rebind loop on a LAN
     /// access flip, so shutdown must go through the shared slot.
-    serving: Arc<Mutex<JoinHandle<()>>>,
+    serving: http_server::ServeSlot,
     rebind: JoinHandle<()>,
     audio_server: JoinHandle<std::convert::Infallible>,
     vis_bridge: JoinHandle<()>,
@@ -402,10 +402,10 @@ impl Daemon {
         let audio_server = tokio::spawn(audio_server::accept_loop(plugins, app.clone()));
         let vis_bridge = tokio::spawn(ws_server::vis_bridge(app.clone()));
         let router = http_server::router(app.clone());
-        let serving = Arc::new(Mutex::new(http_server::spawn_serve(
+        let serving: http_server::ServeSlot = Arc::new(Mutex::new(Some(http_server::spawn_serve(
             listener,
             router.clone(),
-        )));
+        ))));
         // The toggle's listener side (issue #70): live rebinds on the
         // effective port — ephemeral test ports stay stable across flips.
         let rebind = tokio::spawn(http_server::rebind_loop(
@@ -453,10 +453,7 @@ impl Daemon {
         self.vis_bridge.abort();
         self.reload_bridge.abort();
         let _ = self.rebind.await;
-        let mut serving = self.serving.lock().await;
-        serving.abort();
-        let _ = (&mut *serving).await;
-        drop(serving);
+        http_server::drain_serve(&mut *self.serving.lock().await).await;
         let _ = self.audio_server.await;
         let _ = self.vis_bridge.await;
         let _ = self.reload_bridge.await;

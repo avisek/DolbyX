@@ -140,6 +140,15 @@ A root scalar resolved through the Cascade like `power`.
 _Avoid_: remote access (implies internet), bind address (the mechanism,
 not the concept).
 
+**LAN door** / **loopback door**:
+Which listener address a connection was accepted on — the daemon-side
+`127.0.0.1` is the loopback door (this PC), anything else the LAN door.
+Doors are defined by where the listener binds (ADR-0012): LAN access on
+opens the LAN door (`0.0.0.0` in production, so it covers both; a
+second loopback in tests), off leaves loopback only and severs LAN-door
+connections. The accept-side address, never the peer's.
+_Avoid_: remote connection (peer framing — the door is local).
+
 **`vis` event**:
 The per-block visualizer broadcast — the vis tail's four arrays keyed by
 4-CC; a pure event stream (no audio → no events, no client-side

@@ -100,6 +100,22 @@ pub(crate) fn spawn_serve(listener: TcpListener, router: Router) -> JoinHandle<(
     })
 }
 
+/// The serve-task slot shared by the rebind loop and shutdown. `None`
+/// between an abort and the next successful bind — a `JoinHandle`
+/// panics if polled again after completion, so whoever drains it
+/// takes it out.
+pub(crate) type ServeSlot = Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>;
+
+/// Aborts and awaits the slot's serve task, dropping its listener —
+/// awaited, not just aborted: the port must actually be free before
+/// it can bind again.
+pub(crate) async fn drain_serve(slot: &mut Option<JoinHandle<()>>) {
+    if let Some(mut task) = slot.take() {
+        task.abort();
+        let _ = (&mut task).await;
+    }
+}
+
 /// Follows the LAN access toggle (issue #70): on each flip, drop the
 /// current listener and open the new door — loopback while off,
 /// `lan_ip` while on — on the same port, live, no daemon restart. A
@@ -111,13 +127,17 @@ pub(crate) async fn rebind_loop(
     router: Router,
     lan_ip: IpAddr,
     port: u16,
-    serving: Arc<tokio::sync::Mutex<JoinHandle<()>>>,
+    serving: ServeSlot,
 ) {
     let mut lan = app.lan_access.subscribe();
     loop {
         if lan.changed().await.is_err() {
             return;
         }
+        // Holding the slot across the retries keeps shutdown ordered:
+        // it aborts this loop first, which releases the lock.
+        let mut current = serving.lock().await;
+        drain_serve(&mut current).await;
         loop {
             let on = *lan.borrow_and_update();
             let door = if on {
@@ -126,20 +146,14 @@ pub(crate) async fn rebind_loop(
                 IpAddr::V4(Ipv4Addr::LOCALHOST)
             };
             let target = SocketAddr::new(door, port);
-            let mut current = serving.lock().await;
-            current.abort();
-            // Await the abort: the old listener must be dropped before
-            // the same port can bind again.
-            let _ = (&mut *current).await;
             match TcpListener::bind(target).await {
                 Ok(listener) => {
-                    *current = spawn_serve(listener, router.clone());
+                    *current = Some(spawn_serve(listener, router.clone()));
                     tracing::info!(addr = %target, lan_access = on, "listener rebound");
                     break;
                 }
                 Err(error) => {
                     tracing::error!(addr = %target, %error, "rebind failed; retrying");
-                    drop(current);
                     tokio::select! {
                         () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
                         _ = lan.changed() => {}

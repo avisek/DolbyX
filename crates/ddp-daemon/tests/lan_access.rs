@@ -201,9 +201,11 @@ async fn a_hand_edited_lan_access_arrives_live() {
 }
 
 /// Behavior 8: revocation covers a kept-alive LAN-door socket — after
-/// the off-flip it cannot complete another request: the rebind's abort
-/// makes hyper close idle connections, and one that slips a request in
-/// first meets the door gate's `403`. Either way, never a `200`.
+/// the off-flip it cannot complete another request: aborting the serve
+/// task drops its shutdown watch, which makes hyper gracefully close
+/// idle connections (per-connection tasks outlive the abort, the
+/// signal doesn't); one that slips a request in first meets the door
+/// gate's `403`. Either way, never a `200`.
 #[tokio::test]
 async fn a_lingering_lan_connection_cannot_request_after_off() {
     let daemon = start_daemon().await;
@@ -326,6 +328,28 @@ async fn a_bind_failure_names_the_address_it_tried() {
         error.contains(&format!("bind 127.0.0.2:{port}")),
         "must name the LAN door: {error}"
     );
+}
+
+/// Behavior 10: a rebind that loses its target address — a squatter
+/// holds the LAN door when the toggle flips on — retries instead of
+/// dying: the daemon stays up, and the door opens the moment the
+/// address frees (the doc'd every-second retry).
+#[tokio::test]
+async fn a_failed_rebind_retries_until_the_door_frees() {
+    let daemon = start_daemon().await;
+    let mut local = connected(daemon.addr()).await;
+    let squatter = std::net::TcpListener::bind(lan_addr(&daemon)).expect("squat the LAN door");
+
+    set_lan_access(&mut local, true).await;
+    // Give the rebind loop time to hit the squatted bind and enter
+    // its retry path (the old loopback listener is already gone).
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    drop(squatter);
+    wait_connectable(lan_addr(&daemon)).await;
+    let _ = connected(lan_addr(&daemon)).await;
+    // The daemon rode through the whole episode.
+    set_power(&mut local, false).await;
 }
 
 /// The root-scalar grammar (reply law): a malformed `set_lan_access`

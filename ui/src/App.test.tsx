@@ -107,6 +107,28 @@ it('sends set_lan_access on click and applies the flip on the ack', async () => 
   })
 })
 
+// Issue #70: a severed remote tab — the daemon closes the WS right
+// after an off-flip's ack — keeps rendering its last snapshot while
+// commands stop leaving the closed socket.
+it('keeps the last snapshot rendered after a sever, with commands stopped', async () => {
+  const socket = renderConnected()
+
+  socket.drop()
+  await waitFor(() => {
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting…')
+  })
+  // The last snapshot still renders…
+  expect(powerToggle().getAttribute('aria-checked')).toBe('true')
+
+  // …and a click sends nothing: the socket is closed, the request
+  // rejects locally, daemon truth never moves.
+  powerToggle().click()
+  expect(
+    socket.sentCommands().filter((frame) => frame.cmd === 'set_power'),
+  ).toEqual([])
+  expect(powerToggle().getAttribute('aria-checked')).toBe('true')
+})
+
 // Behavior 5 (#13): drop → badge reconnecting; reconnect → `get_state`
 // issued, badge connected, state reconciled.
 it('walks the badge through drop and recovery, reconciling state', () => {
