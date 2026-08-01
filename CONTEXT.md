@@ -132,6 +132,14 @@ state snapshot) the daemon injects into `index.html` at request time,
 read synchronously so the first paint is fully populated.
 _Avoid_: config, init payload, manifest.
 
+**LAN access**:
+The root toggle deciding whether other devices on the local network may
+reach the daemon's UI and WebSocket — off (the default) means this
+machine only; on trusts every device on the network equally (no auth).
+A root scalar resolved through the Cascade like `power`.
+_Avoid_: remote access (implies internet), bind address (the mechanism,
+not the concept).
+
 **`vis` event**:
 The per-block visualizer broadcast — the vis tail's four arrays keyed by
 4-CC; a pure event stream (no audio → no events, no client-side
