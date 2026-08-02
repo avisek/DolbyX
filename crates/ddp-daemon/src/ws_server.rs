@@ -2,10 +2,11 @@
 //! command dispatch (with the `set_power` behavior), broadcast fan-out
 //! (`state` + the bridged `vis` feed).
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, State};
 use axum::response::Response;
 use ddp_state::Command;
 use tokio::sync::broadcast;
@@ -47,16 +48,26 @@ pub(crate) async fn vis_bridge(app: Arc<App>) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ConnId(pub(crate) u64);
 
-/// `GET /ws`: upgrade and serve the connection.
-pub(crate) async fn handle_upgrade(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
-    ws.on_upgrade(move |socket| connection(socket, app))
+/// `GET /ws`: upgrade and serve the connection. The peer address
+/// decides severability — loopback connections outlive every LAN
+/// access flip; non-loopback ones live at the gate's pleasure
+/// (issue #75, ADR-0012).
+pub(crate) async fn handle_upgrade(
+    ws: WebSocketUpgrade,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<Arc<App>>,
+) -> Response {
+    ws.on_upgrade(move |socket| connection(socket, peer, app))
 }
 
 /// One client connection: full snapshot first, then command dispatch
-/// interleaved with broadcast delivery.
-async fn connection(mut socket: WebSocket, app: Arc<App>) {
+/// interleaved with broadcast delivery — under the LAN gate for
+/// non-loopback peers.
+async fn connection(mut socket: WebSocket, peer: SocketAddr, app: Arc<App>) {
     let conn_id = app.fresh_conn_id();
     let mut updates = app.updates.subscribe();
+    let mut lan_gate = app.lan_gate.subscribe();
+    let severable = !peer.ip().is_loopback();
     if send(&mut socket, &state_event(&app, None).await)
         .await
         .is_err()
@@ -65,6 +76,20 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
     }
     loop {
         tokio::select! {
+            // The gate is checked first (`biased`) and level-triggered:
+            // a non-loopback task severs on its next iteration once the
+            // gate reads off — never processing another frame, and only
+            // after whatever reply it was sending flushed, so the
+            // originator's own ack outruns its close (the reply law,
+            // even when the reply severs the replier). Returning drops
+            // the socket; a task busy in a branch below severs one
+            // iteration later, since `wait_for` re-checks the value.
+            biased;
+            // (The async block drops `wait_for`'s non-Send lock guard
+            // before the select resumes.)
+            () = async { let _ = lan_gate.wait_for(|on| !on).await; }, if severable => {
+                return;
+            }
             message = socket.recv() => {
                 let Some(Ok(message)) = message else { return };
                 let Message::Text(text) = message else {

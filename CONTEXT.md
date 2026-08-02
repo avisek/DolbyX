@@ -136,7 +136,9 @@ _Avoid_: config, init payload, manifest.
 The root toggle deciding whether other devices on the local network may
 reach the daemon's UI and WebSocket — off (the default) means this
 machine only; on trusts every device on the network equally (no auth).
-A root scalar resolved through the Cascade like `power`.
+Off also revokes: established non-loopback connections are severed on
+the flip (ADR-0012). A root scalar resolved through the Cascade like
+`power`.
 _Avoid_: remote access (implies internet), bind address (the mechanism,
 not the concept).
 

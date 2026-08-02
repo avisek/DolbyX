@@ -41,7 +41,17 @@ rebind, so a retry loop would only mask a race in our own shutdown.
 Rebind first, sever second; if the new bind fails, re-bind the previous
 address and answer `LAN_BIND_FAILED` — a deliberate third daemon-side
 code, since reporting a busy port as `INVALID_REQUEST` would lie —
-never ending a flip with nothing bound.
+never ending a flip with nothing bound. Severing keys on the peer
+address — loopback connections are never touched, in either direction —
+and off closes both surfaces: non-loopback WebSocket tasks watch a
+level-triggered gate and close on reading off, after flushing the reply
+in hand, so a device flipping the toggle off hears its own `ack` before
+the close (the reply law holds even when the reply severs the replier);
+non-loopback HTTP connection tasks are aborted outright, so a lingering
+keep-alive socket cannot serve a reload (upgraded WebSockets sit beyond
+the abort — hyper's connection future resolves at upgrade). A severed
+tab keeps its last snapshot, and its ordinary reconnect backoff is the
+way back in should access return.
 
 **Discovery.** Every snapshot carries a root `lan_url`, derived at
 serialization like `readouts` — default-route interface pick plus the

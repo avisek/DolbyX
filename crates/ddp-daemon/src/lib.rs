@@ -116,6 +116,11 @@ pub(crate) struct App {
     /// The one HTTP/WS listener's control slot — LAN access flips
     /// rebind it live (ADR-0012); shared with [`Daemon::shutdown`].
     pub(crate) listener: Arc<tokio::sync::Mutex<http_server::HttpListener>>,
+    /// The LAN gate's live enforcement (issue #75, ADR-0012):
+    /// [`http_server::rebind`] publishes each successful bind into it,
+    /// and publishing off *is* the sever — non-loopback WS tasks watch
+    /// it, non-loopback HTTP connection tasks register in it.
+    pub(crate) lan_gate: Arc<http_server::LanGate>,
 }
 
 impl App {
@@ -347,6 +352,8 @@ impl Daemon {
         let listener = TcpListener::bind(bind_addr).await.map_err(bind_error)?;
         let addr = listener.local_addr().map_err(bind_error)?;
 
+        // The gate opens on what actually got bound (issue #75).
+        let lan_gate = Arc::new(http_server::LanGate::new(state.lan_access));
         let app = Arc::new(App {
             params_json: serde_json::to_value(&params).expect("defs always serialize"),
             params,
@@ -360,6 +367,7 @@ impl Daemon {
                 port: addr.port(),
                 serve: None,
             })),
+            lan_gate,
         });
 
         // The slot fills before any rebind source exists (the watcher
