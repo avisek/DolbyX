@@ -79,10 +79,10 @@ inside Windows' ~5 s grace window.
 
 ## Phone-reachable dev loop (`just dev-lan`)
 
-`just dev-lan` (in WSL) serves the daemon (:9876) and Vite (:5173) on
-all interfaces — but WSL2's default NAT hides both from the LAN. Bridge
-on the Windows side (below), then flip **LAN access** on in the UI: the
-daemon stays gated by the toggle exactly as in prod (ADR-0012).
+`just dev-lan` (in WSL) serves Vite (:5173) on all interfaces; the
+daemon (:9876) joins once **LAN access** is flipped on in the UI —
+gated exactly as in prod (ADR-0012). WSL2's default NAT still hides
+both from the LAN: bridge on the Windows side.
 
 While up, :5173 serves the workspace source tree to every device on the
 LAN — the bridge extends that reach beyond the machine.

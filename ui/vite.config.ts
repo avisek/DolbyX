@@ -28,11 +28,10 @@ function assertBootstrapPlaceholder(): PluginOption {
 // /api exists and /ws is same-origin with the page). No `origin`, no
 // `hmr.host`: both would pin `localhost` and break `just dev-lan` —
 // dev.html derives module URLs from the page hostname, and the HMR
-// client falls back to its own module URL's host (issue #72). The day
-// the first static asset appears this stops sufficing: Vite renders
-// asset URLs root-relative, the page origin is the daemon, and the
-// daemon serves exactly two routes — whoever adds that asset owns the
-// dev-origin story.
+// client falls back to its own module URL's host (issue #72). The first
+// static asset breaks this: Vite renders asset URLs root-relative and
+// the page origin — the daemon — serves exactly two routes; whoever
+// adds it owns the dev-origin story.
 export default defineConfig({
   plugins: [solid(), viteSingleFile(), assertBootstrapPlaceholder()],
   server: {
