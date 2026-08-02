@@ -4,17 +4,26 @@
 //! ADR-0012) fronts them, independent of the LAN access toggle — whose
 //! listener flip machinery also lives here (issue #70).
 
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::body::Body;
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use hyper::body::Incoming;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as ConnBuilder;
+use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
-use tokio::task::JoinHandle;
+use tokio::sync::watch;
+use tokio::task::{AbortHandle, JoinHandle};
+use tower::ServiceExt as _;
 
 use crate::App;
 
@@ -40,18 +49,138 @@ pub(crate) const fn bind_target(lan_access: bool) -> Ipv4Addr {
     }
 }
 
-/// Spawns one accept-task epoch: `axum::serve` over `listener` with a
-/// fresh router. Aborting it drops the listener — freeing the port the
-/// moment the FD closes — while established connections keep running
-/// in their own tasks (upgraded WS sessions included), which is
-/// exactly the flip's survival rule (issue #70).
-pub(crate) fn spawn_serve(listener: TcpListener, app: Arc<App>) -> JoinHandle<()> {
-    let router = router(app);
-    tokio::spawn(async move {
-        if let Err(error) = axum::serve(listener, router).await {
-            tracing::error!(%error, "http server exited");
+/// The LAN gate's live enforcement (issue #75, ADR-0012): what the
+/// rebind machinery publishes, and what severs on off. Two surfaces,
+/// one truth — the gate-state watch non-loopback WebSocket tasks sever
+/// themselves by, and the registry of non-loopback HTTP connection
+/// tasks the off-flip abort-sweeps (lingering keep-alive sockets would
+/// otherwise keep serving). Loopback connections appear in neither:
+/// never tracked, never severed, in either direction of a flip.
+pub(crate) struct LanGate {
+    /// `true` while the listener serves all interfaces — the *bound*
+    /// truth, moved by [`rebind`] only after a successful bind, so
+    /// severing always happens after the rebind, never before.
+    state: watch::Sender<bool>,
+    /// Live non-loopback HTTP connection tasks. An entry leaves on
+    /// natural completion — a keep-alive close, or the upgrade that
+    /// hands the socket to a WS task (hyper's connection future
+    /// resolves at upgrade, so aborting a registered task can never
+    /// touch an upgraded WebSocket) — or under the off-flip's sweep.
+    conns: Mutex<HashMap<u64, AbortHandle>>,
+    /// Registry id allocator.
+    next_conn: AtomicU64,
+}
+
+impl LanGate {
+    /// A gate opening on what startup actually bound.
+    pub(crate) fn new(on: bool) -> Self {
+        Self {
+            state: watch::channel(on).0,
+            conns: Mutex::new(HashMap::new()),
+            next_conn: AtomicU64::new(0),
         }
-    })
+    }
+
+    /// A watch on the gate — level-triggered `false` means severed,
+    /// for every non-loopback WS task polling it.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.state.subscribe()
+    }
+
+    /// Publishes a freshly bound target's gate state; off is the sever
+    /// (ADR-0012: rebind first, sever second): the watch flips — every
+    /// non-loopback WS task closes on reading it — and every
+    /// registered HTTP connection task is aborted, dropping its socket.
+    /// Nothing is published on a failed flip: the gate only ever
+    /// states what is bound.
+    pub(crate) fn publish(&self, on: bool) {
+        self.state.send_replace(on);
+        if !on {
+            let mut conns = self.conns.lock().expect("gate registry poisoned");
+            for (_, conn) in conns.drain() {
+                conn.abort();
+            }
+        }
+    }
+
+    /// Spawns and registers one non-loopback connection task. The
+    /// registry insert happens under the lock *around* the spawn, so
+    /// the task's own [`Self::forget`] — however instantly the
+    /// connection ends — can only run after the entry exists: no
+    /// zombie entries, no leak.
+    fn adopt(self: &Arc<Self>, serve: impl Future<Output = ()> + Send + 'static) {
+        let id = self.next_conn.fetch_add(1, Ordering::Relaxed);
+        let gate = self.clone();
+        let mut conns = self.conns.lock().expect("gate registry poisoned");
+        let task = tokio::spawn(async move {
+            serve.await;
+            gate.forget(id);
+        });
+        conns.insert(id, task.abort_handle());
+    }
+
+    /// Drops a naturally completed connection's entry (aborted entries
+    /// leave via the sweep's `drain`; a race of the two is idempotent).
+    fn forget(&self, id: u64) {
+        self.conns
+            .lock()
+            .expect("gate registry poisoned")
+            .remove(&id);
+    }
+}
+
+/// Spawns one accept-task epoch over `listener`. Aborting it drops the
+/// listener — freeing the port the moment the FD closes — while
+/// established connections keep running in their own tasks (upgraded
+/// WS sessions included), which is exactly the flip's survival rule
+/// (issue #70); only the LAN gate ever severs one (issue #75).
+pub(crate) fn spawn_serve(listener: TcpListener, app: Arc<App>) -> JoinHandle<()> {
+    tokio::spawn(accept_loop(listener, app))
+}
+
+/// The accept loop: each connection served by hyper in its own plain
+/// spawned task — `axum::serve`'s shape, hand-rolled because severing
+/// needs the two things it hides: the peer address (who is loopback)
+/// and a per-connection handle (what an off-flip aborts). Non-loopback
+/// tasks register with the LAN gate; loopback tasks are anonymous,
+/// coupled to nothing — no epoch signal, no gate — so they live
+/// through every flip.
+async fn accept_loop(listener: TcpListener, app: Arc<App>) {
+    let router = router(app.clone());
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                // Transient by nature (EMFILE & friends): don't spin,
+                // don't die — the accept task owns the bound port.
+                tracing::error!(%error, "accept failed");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        // What `into_make_service_with_connect_info` would do: hand
+        // the router hyper-shaped requests carrying the peer address
+        // for the `ConnectInfo` extractor.
+        let service = TowerToHyperService::new(router.clone().map_request(
+            move |mut request: Request<Incoming>| {
+                request.extensions_mut().insert(ConnectInfo(peer));
+                request.map(Body::new)
+            },
+        ));
+        let serve = async move {
+            let builder = ConnBuilder::new(TokioExecutor::new());
+            let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
+            if let Err(error) = connection.await {
+                // Browsers reset sockets as a matter of course.
+                tracing::trace!(%error, "connection ended");
+            }
+        };
+        if peer.ip().is_loopback() {
+            tokio::spawn(serve);
+        } else {
+            app.lan_gate.adopt(serve);
+        }
+    }
 }
 
 /// Rebinds the listener for a LAN access flip (ADR-0012): await the
@@ -78,6 +207,10 @@ pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
     match TcpListener::bind((bind_target(on), slot.port)).await {
         Ok(listener) => {
             slot.serve = Some(spawn_serve(listener, app.clone()));
+            // Rebind first, sever second (ADR-0012): publishing off
+            // *is* the sever (issue #75). A failed flip publishes
+            // nothing — the gate only ever states what is bound.
+            app.lan_gate.publish(on);
             Ok(())
         }
         Err(error) => {

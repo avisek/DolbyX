@@ -11,6 +11,10 @@ publish = false
 axum = { version = "0.8.9", features = ["ws"] }
 clap = { version = "4.6.1", features = ["derive"] }
 futures-util = "0.3.32"
+# The daemon's hand-rolled accept loop (issue #75) — axum::serve's own
+# internals, pinned to the versions already in axum's tree.
+hyper = "1.10.1"
+hyper-util = { version = "0.1.20", features = ["server-auto", "service", "tokio"] }
 indexmap = { version = "2.14.0", features = ["serde"] }
 libloading = "0.8.9"
 notify = "8.2.0"
@@ -24,6 +28,7 @@ tokio = { version = "1.52.3", features = ["fs", "macros", "net", "rt-multi-threa
 tokio-tungstenite = "0.29.0"
 # preserve_order: profile declaration order is UI tab order (Slice 10).
 toml = { version = "1.1.2", features = ["preserve_order"] }
+tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The VST shim's ShellExecuteW/popup bindings + the daemon's pipe
