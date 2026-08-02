@@ -6,9 +6,11 @@ import App from './App'
 import { startWs } from './store/ws'
 
 // Devs visiting :5173 directly get no daemon-injected bootstrap — bounce
-// them to the daemon, the single front door (ADR-0006).
+// them to the daemon, the single front door (ADR-0006), on the same
+// host: a phone tapping Vite's printed network URL must not land on
+// its own localhost (issue #72).
 if (!window.__BOOTSTRAP__) {
-  location.replace('http://localhost:9876' + location.pathname)
+  location.replace(`http://${location.hostname}:9876${location.pathname}`)
   throw new Error('Bootstrap missing — redirecting to daemon')
 }
 

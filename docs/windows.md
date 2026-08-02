@@ -76,3 +76,52 @@ target/windows/ddp-daemon.exe --engine-dir "$(realpath target/windows/engine)"
 Open `http://localhost:9876`. Ctrl-C flushes pending `config.toml`
 writes before exit; closing the console rides the same shutdown path
 inside Windows' ~5 s grace window.
+
+## Phone-reachable dev loop (`just dev-lan`)
+
+`just dev-lan` (in WSL) serves Vite (:5173) on all interfaces; the
+daemon (:9876) joins once **LAN access** is flipped on in the UI —
+gated exactly as in prod (ADR-0012). WSL2's default NAT still hides
+both from the LAN: bridge on the Windows side.
+
+While up, :5173 serves the workspace source tree to every device on the
+LAN — the bridge extends that reach beyond the machine.
+
+### Mirrored networking (Windows 11 22H2+)
+
+`%UserProfile%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+`wsl --shutdown`, reopen. WSL ports now answer on the Windows LAN IP —
+the UI's QR encodes it correctly. Allow inbound through the Hyper-V
+firewall (admin PowerShell; the GUID is WSL's VM creator id):
+
+```powershell
+New-NetFirewallHyperVRule -Name DolbyX-dev -DisplayName "DolbyX dev" `
+  -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' `
+  -Protocol TCP -LocalPorts 9876,5173
+```
+
+### `netsh` portproxy fallback (default NAT mode)
+
+Admin PowerShell; the WSL address changes per reboot — re-run after
+`wsl --shutdown`:
+
+```powershell
+$wsl = (wsl hostname -I).Trim().Split()[0]
+netsh interface portproxy add v4tov4 listenport=9876 connectaddress=$wsl connectport=9876
+netsh interface portproxy add v4tov4 listenport=5173 connectaddress=$wsl connectport=5173
+New-NetFirewallRule -DisplayName "DolbyX dev" -Direction Inbound -Protocol TCP -LocalPort 9876,5173 -Action Allow
+```
+
+Proxy to the WSL address, never `127.0.0.1` — via localhost the daemon
+would see loopback peers: reachable with the toggle off, invisible to
+severing. Phones dial the **Windows host's** LAN IP; the UI's QR shows
+the WSL NAT address, which they can't reach — ignore it here.
+
+Undo: `netsh interface portproxy delete v4tov4 listenport=9876` (and
+`5173`), `Remove-NetFirewallRule -DisplayName "DolbyX dev"`.

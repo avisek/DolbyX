@@ -8,7 +8,15 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="http://localhost:5173/@vite/client"></script>
-    <script type="module" src="http://localhost:5173/src/main.tsx"></script>
+    <script type="module">
+      // Vite rides the page hostname (issue #72): a phone reaching the
+      // daemon at http://<ip>:9876 pulls modules from http://<ip>:5173,
+      // and HMR follows — @vite/client falls back to its own module
+      // URL's host when `hmr.host` is unset. Sequential awaits keep
+      // the HMR client first, as Vite's own index.html would.
+      const vite = `http://${location.hostname}:5173`
+      await import(`${vite}/@vite/client`)
+      await import(`${vite}/src/main.tsx`)
+    </script>
   </body>
 </html>
