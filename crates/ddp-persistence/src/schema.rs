@@ -83,6 +83,7 @@ pub(crate) struct Namespace {
 #[serde(deny_unknown_fields)]
 struct DefaultsFile {
     power: bool,
+    lan_access: bool,
     selected_profile: ProfileId,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -97,6 +98,7 @@ struct DefaultsFile {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     power: Option<bool>,
+    lan_access: Option<bool>,
     selected_profile: Option<ProfileId>,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -110,6 +112,7 @@ struct ConfigFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigOverlay {
     pub(crate) power: Option<bool>,
+    pub(crate) lan_access: Option<bool>,
     pub(crate) selected_profile: Option<ProfileId>,
     pub(crate) profile: Namespace,
     pub(crate) eq_preset: Namespace,
@@ -302,6 +305,7 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
     overlay_params(&mut custom_eq_preset_params, &eq_preset.shared);
     let defaults = Defaults {
         power: file.power,
+        lan_access: file.lan_access,
         selected_profile: file.selected_profile,
         profiles,
         eq_presets,
@@ -404,6 +408,7 @@ pub fn parse_config(
     Ok(ConfigOverlay {
         power: file.power,
         selected_profile: file.selected_profile,
+        lan_access: file.lan_access,
         profile,
         eq_preset,
     })
@@ -454,6 +459,7 @@ fn validate_row_identity(
 pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     let mut state = State::new_from_defaults(defaults);
     state.power = overlay.power.unwrap_or(defaults.power);
+    state.lan_access = overlay.lan_access.unwrap_or(defaults.lan_access);
     if let Some(selected) = &overlay.selected_profile {
         state.selected_profile = selected.clone();
     }
@@ -542,6 +548,9 @@ pub fn serialize_overlay(
     let mut doc = String::new();
     if state.power != defaults.power {
         emit_value(&mut doc, "power", &toml_bool(state.power));
+    }
+    if state.lan_access != defaults.lan_access {
+        emit_value(&mut doc, "lan_access", &toml_bool(state.lan_access));
     }
     if state.selected_profile != defaults.selected_profile {
         emit_value(
@@ -768,6 +777,7 @@ mod tests {
 
     const DEFAULTS: &str = r#"
 power = true
+lan_access = false
 selected_profile = "music"
 
 [profile]
@@ -998,7 +1008,13 @@ iebt = [67, 95]
     #[test]
     fn rejects_malformed_or_invalid_defaults() {
         let cases = [
-            ("power = true\n".to_string(), "selected_profile"),
+            ("power = true\n".to_string(), "lan_access"),
+            (
+                "power = true\nlan_access = false\n".to_string(),
+                "selected_profile",
+            ),
+            // Issue #70: the strict root — lan_access must be stated.
+            (DEFAULTS.replace("lan_access = false\n", ""), "lan_access"),
             ("power = tru".to_string(), "expected"),
             (DEFAULTS.replace("power = true", "power = true\nx = 1"), "x"),
             (DEFAULTS.replace("dvla = 4", "dvla = 11"), "outside"),
@@ -1130,7 +1146,7 @@ iebt = [67, 95]
         for (first, second, expected, layer) in layers {
             let (defaults_doc, config_doc) = match first {
                 "cfg-shared" => (
-                    "power = true\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
+                    "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
                     if second.is_empty() {
                         "[profile]\ndvla = 3\n".to_string()
                     } else {
@@ -1139,7 +1155,7 @@ iebt = [67, 95]
                 ),
                 shared => (
                     format!(
-                        "power = true\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
+                        "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
                     ),
                     String::new(),
                 ),
@@ -1153,6 +1169,40 @@ iebt = [67, 95]
                 "layer: {layer}"
             );
         }
+    }
+
+    /// Issue #70: `lan_access` rides the cascade like `power` — the
+    /// shipped default is off, a config statement shadows it, and the
+    /// write law stores exactly the divergence (flip on ⇒ a root key,
+    /// flip back ⇒ the key drops).
+    #[test]
+    fn lan_access_rides_the_cascade_and_the_write_law() {
+        let defs = defs();
+        let defaults = defaults();
+        assert!(!defaults.lan_access, "shipped default is off");
+
+        let loaded = ConfigOverlay::default();
+        let mut state = resolve(&defaults, &loaded);
+        assert!(!state.lan_access, "a fresh install is this-PC-only");
+
+        let stated = parse_config("lan_access = true\n", &defs, &defaults).unwrap();
+        assert!(resolve(&defaults, &stated).lan_access, "config shadows");
+
+        let _ = state
+            .apply(Command::SetLanAccess { on: true }, &defs)
+            .unwrap();
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &loaded, &defs),
+            "lan_access = true\n"
+        );
+        let _ = state
+            .apply(Command::SetLanAccess { on: false }, &defs)
+            .unwrap();
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &loaded, &defs),
+            "",
+            "back on the default ⇒ dropped, not stored"
+        );
     }
 
     /// The baseline is what resolves beneath the item's own overrides —

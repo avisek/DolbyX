@@ -18,6 +18,9 @@ use crate::profile::{Profile, ProfileContent, ProfileId};
 pub struct Defaults {
     /// Factory master power.
     pub power: bool,
+    /// Factory LAN access — shipped `false`: a fresh install is
+    /// this-PC-only (ADR-0012).
+    pub lan_access: bool,
     /// Factory selected profile.
     pub selected_profile: ProfileId,
     /// Factory profiles in declaration order, `content` fully resolved
@@ -42,6 +45,10 @@ pub struct State {
     /// Master power — `false` ⇒ every session is bypassed
     /// (`EFFECT_CMD_DISABLE`; parameter state survives the toggle).
     pub power: bool,
+    /// LAN access — whether other devices on the network may reach the
+    /// daemon (ADR-0012). Pure state here: the daemon owns the
+    /// listener rebind the flip drives.
+    pub lan_access: bool,
     /// The one active profile, applied to all sessions. Invariant: it
     /// always names an entry of `profiles`.
     pub selected_profile: ProfileId,
@@ -72,6 +79,7 @@ impl State {
     pub fn new_from_defaults(defaults: &Defaults) -> Self {
         Self {
             power: defaults.power,
+            lan_access: defaults.lan_access,
             selected_profile: defaults.selected_profile.clone(),
             profiles: defaults.profiles.clone(),
             eq_presets: defaults.eq_presets.clone(),
@@ -193,6 +201,14 @@ impl State {
                     params: None,
                     changed,
                     minted: None,
+                })
+            }
+            Command::SetLanAccess { on } => {
+                let changed = self.lan_access != on;
+                self.lan_access = on;
+                Ok(StateDiff {
+                    changed,
+                    ..StateDiff::default()
                 })
             }
             Command::SetProfile { id } => {
@@ -652,6 +668,13 @@ pub enum Command {
         /// The requested power state.
         on: bool,
     },
+    /// LAN access toggle (ADR-0012). Only the scalar moves here; the
+    /// daemon rebinds the listener *before* applying, so a refused
+    /// flip never touches the store.
+    SetLanAccess {
+        /// The requested LAN access state.
+        on: bool,
+    },
     /// Selects the active profile (global — all sessions follow).
     SetProfile {
         /// The profile to select.
@@ -1078,6 +1101,7 @@ mod tests {
         music.baseline = music.content.clone();
         Defaults {
             power: true,
+            lan_access: false,
             selected_profile: ProfileId("music".into()),
             profiles: vec![profile("movie", "Movie", &table), music],
             eq_presets: vec![
@@ -1146,6 +1170,31 @@ mod tests {
             .apply(Command::SetPower { on: true }, &defs())
             .unwrap();
         assert!(state.power);
+        assert!(diff.is_empty());
+    }
+
+    /// Issue #70: `set_lan_access` moves the root scalar and nothing
+    /// else — no engine batch, no power; a fresh install starts off.
+    #[test]
+    fn set_lan_access_flips_the_scalar_and_reports_the_change() {
+        let mut state = State::new_from_defaults(&defaults());
+        assert!(!state.lan_access, "shipped default is off");
+        let diff = state
+            .apply(Command::SetLanAccess { on: true }, &defs())
+            .unwrap();
+        assert!(state.lan_access);
+        assert!(!diff.is_empty());
+        assert_eq!(diff.power, None, "the engine hears nothing");
+        assert_eq!(diff.params, None);
+    }
+
+    #[test]
+    fn set_lan_access_to_the_current_value_is_a_no_op() {
+        let mut state = State::new_from_defaults(&defaults());
+        let diff = state
+            .apply(Command::SetLanAccess { on: false }, &defs())
+            .unwrap();
+        assert!(!state.lan_access);
         assert!(diff.is_empty());
     }
 

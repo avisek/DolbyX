@@ -1,7 +1,8 @@
 //! `HttpServer` — exactly two routes: `GET /` (bootstrap-injected HTML)
 //! and `GET /ws` (upgrade; lands with the WS behaviors). No `/api/*`
 //! routes exist (ADR-0006). Same-origin hardening (issue #69,
-//! ADR-0012) fronts them, independent of the LAN access toggle.
+//! ADR-0012) fronts them, independent of the LAN access toggle — whose
+//! listener flip machinery also lives here (issue #70).
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -12,8 +13,87 @@ use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
 use crate::App;
+
+/// The daemon's one HTTP/WS listener: the port fixed at startup (an
+/// ephemeral `--port 0` resolves once, every rebind reuses it) plus
+/// the accept task serving the current bind target.
+pub(crate) struct HttpListener {
+    /// The bound port.
+    pub(crate) port: u16,
+    /// The current accept task — `None` only during startup wiring and
+    /// after shutdown takes it.
+    pub(crate) serve: Option<JoinHandle<()>>,
+}
+
+/// The hardcoded bind target (ADR-0012): loopback while LAN access is
+/// off, all interfaces while on — IPv4-only, no flag, no config field,
+/// no test seam.
+pub(crate) const fn bind_target(lan_access: bool) -> Ipv4Addr {
+    if lan_access {
+        Ipv4Addr::UNSPECIFIED
+    } else {
+        Ipv4Addr::LOCALHOST
+    }
+}
+
+/// Spawns one accept-task epoch: `axum::serve` over `listener` with a
+/// fresh router. Aborting it drops the listener — freeing the port the
+/// moment the FD closes — while established connections keep running
+/// in their own tasks (upgraded WS sessions included), which is
+/// exactly the flip's survival rule (issue #70).
+pub(crate) fn spawn_serve(listener: TcpListener, app: Arc<App>) -> JoinHandle<()> {
+    let router = router(app);
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router).await {
+            tracing::error!(%error, "http server exited");
+        }
+    })
+}
+
+/// Rebinds the listener for a LAN access flip (ADR-0012): await the
+/// old accept task's completion — no retry loop; the port frees when
+/// its FD drops, so a busy port here would only mask a race in our own
+/// shutdown — then bind the new target on the same port. On failure
+/// the previous target is re-bound and the error returned: the daemon
+/// is never left with nothing bound. Should even that fallback fail —
+/// a foreign steal of the port inside the flip's own window; live or
+/// `TIME_WAIT` connection sockets never block a listener bind — the
+/// process exits loudly rather than run unreachable: refuse-to-start's
+/// mid-run twin, and the service manager restarts into the persisted
+/// state.
+pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
+    let mut slot = app.listener.lock().await;
+    let Some(serve) = slot.serve.take() else {
+        // Shutdown took the listener under this lock — a flip racing
+        // it must not resurrect serving. The scalar still moves and
+        // persists; the next startup binds it.
+        return Ok(());
+    };
+    serve.abort();
+    let _ = serve.await;
+    match TcpListener::bind((bind_target(on), slot.port)).await {
+        Ok(listener) => {
+            slot.serve = Some(spawn_serve(listener, app.clone()));
+            Ok(())
+        }
+        Err(error) => {
+            let previous = (bind_target(!on), slot.port);
+            let listener = match TcpListener::bind(previous).await {
+                Ok(listener) => listener,
+                Err(fatal) => {
+                    tracing::error!(%fatal, "rebind fallback failed — no address bindable");
+                    std::process::exit(1);
+                }
+            };
+            slot.serve = Some(spawn_serve(listener, app.clone()));
+            Err(error)
+        }
+    }
+}
 
 /// The placeholder the UI HTML carries; replaced per request.
 const BOOTSTRAP_MARKER: &str = "<!--BOOTSTRAP-->";

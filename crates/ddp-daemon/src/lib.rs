@@ -76,11 +76,12 @@ pub enum StartError {
     /// `defaults.toml` or `config.toml` is malformed.
     #[error(transparent)]
     ParsePersistence(#[from] ddp_persistence::Error),
-    /// The listen socket could not be bound.
-    #[error("bind 127.0.0.1:{port}: {source}")]
+    /// The listen socket could not be bound — the target follows the
+    /// persisted `lan_access` (ADR-0012).
+    #[error("bind {addr}: {source}")]
     Bind {
-        /// The requested port.
-        port: u16,
+        /// The requested bind address.
+        addr: SocketAddr,
         /// The underlying I/O error.
         source: std::io::Error,
     },
@@ -112,6 +113,9 @@ pub(crate) struct App {
     pub(crate) next_conn_id: AtomicU64,
     /// The UI HTML file, re-read on every `GET /`.
     pub(crate) ui_path: PathBuf,
+    /// The one HTTP/WS listener's control slot — LAN access flips
+    /// rebind it live (ADR-0012); shared with [`Daemon::shutdown`].
+    pub(crate) listener: Arc<tokio::sync::Mutex<http_server::HttpListener>>,
 }
 
 impl App {
@@ -181,9 +185,18 @@ impl App {
     /// hand-edit the watcher accepted (issue #27): swap the state,
     /// flush the resolved changes to live engine sessions like any
     /// other mutation, and broadcast a fresh snapshot to every client
-    /// (no originator to suppress — non-WS source).
-    pub(crate) async fn apply_external_reload(&self, reloaded: State) {
+    /// (no originator to suppress — non-WS source). A `lan_access`
+    /// edit rebinds the listener first, exactly like the command path
+    /// (issue #70): a failed rebind keeps the previous address *and*
+    /// the previous scalar, logged, with no reply (ADR-0012).
+    pub(crate) async fn apply_external_reload(self: &Arc<Self>, mut reloaded: State) {
         let mut state = self.state.write().await;
+        if state.lan_access != reloaded.lan_access
+            && let Err(error) = http_server::rebind(self, reloaded.lan_access).await
+        {
+            tracing::error!(%error, "lan_access hand-edit: rebind failed, keeping the previous address");
+            reloaded.lan_access = state.lan_access;
+        }
         let power = (state.power != reloaded.power).then_some(reloaded.power);
         let before = state.resolved_batch(&self.params);
         *state = reloaded;
@@ -253,6 +266,7 @@ impl App {
             .collect();
         serde_json::json!({
             "power": state.power,
+            "lan_access": state.lan_access,
             "selected_profile": state.selected_profile,
             "profiles": profiles,
             "eq_presets": eq_presets,
@@ -266,7 +280,10 @@ pub struct Daemon {
     addr: SocketAddr,
     supervisor: Arc<EngineSupervisor>,
     persistence: Arc<Persistence>,
-    server: JoinHandle<()>,
+    /// The listener control slot, shared with the app — a LAN access
+    /// flip may have swapped the accept task since startup, so
+    /// shutdown takes whatever currently serves (ADR-0012).
+    listener: Arc<tokio::sync::Mutex<http_server::HttpListener>>,
     audio_server: JoinHandle<std::convert::Infallible>,
     vis_bridge: JoinHandle<()>,
     reload_bridge: JoinHandle<()>,
@@ -319,6 +336,17 @@ impl Daemon {
             state.resolved_batch(&params),
             readout_names,
         ));
+        // Startup binds per the persisted `lan_access` (issue #70,
+        // ADR-0012): loopback off, all interfaces on — the target is
+        // hardcoded, resolved from state alone.
+        let bind_addr = SocketAddr::from((http_server::bind_target(state.lan_access), config.port));
+        let bind_error = move |source| StartError::Bind {
+            addr: bind_addr,
+            source,
+        };
+        let listener = TcpListener::bind(bind_addr).await.map_err(bind_error)?;
+        let addr = listener.local_addr().map_err(bind_error)?;
+
         let app = Arc::new(App {
             params_json: serde_json::to_value(&params).expect("defs always serialize"),
             params,
@@ -328,7 +356,16 @@ impl Daemon {
             updates: broadcast::channel(64).0,
             next_conn_id: AtomicU64::new(0),
             ui_path: config.ui_path,
+            listener: Arc::new(tokio::sync::Mutex::new(http_server::HttpListener {
+                port: addr.port(),
+                serve: None,
+            })),
         });
+
+        // The slot fills before any rebind source exists (the watcher
+        // below, WS commands via this very task) — a flip must always
+        // find the accept task it awaits (issue #70).
+        app.listener.lock().await.serve = Some(http_server::spawn_serve(listener, app.clone()));
 
         // The config.toml watcher (issue #27): accepted external
         // reloads land on the app through one channel, so they apply
@@ -344,14 +381,6 @@ impl Daemon {
             }
         });
 
-        let bind_error = |source| StartError::Bind {
-            port: config.port,
-            source,
-        };
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port))
-            .await
-            .map_err(bind_error)?;
-        let addr = listener.local_addr().map_err(bind_error)?;
         let plugins = platform::PluginListener::bind(&config.socket_path).map_err(|source| {
             StartError::BindSocket {
                 path: config.socket_path.clone(),
@@ -362,18 +391,12 @@ impl Daemon {
 
         let audio_server = tokio::spawn(audio_server::accept_loop(plugins, app.clone()));
         let vis_bridge = tokio::spawn(ws_server::vis_bridge(app.clone()));
-        let router = http_server::router(app);
-        let server = tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router).await {
-                tracing::error!(%error, "http server exited");
-            }
-        });
 
         Ok(Self {
             addr,
             supervisor,
             persistence,
-            server,
+            listener: app.listener.clone(),
             audio_server,
             vis_bridge,
             reload_bridge,
@@ -396,11 +419,19 @@ impl Daemon {
     /// Stops serving and flushes any pending `config.toml` write — the
     /// graceful-shutdown path.
     pub async fn shutdown(self) {
-        self.server.abort();
+        // Take *and* stop the accept task under the slot lock, so a
+        // racing LAN access flip either completes first or finds the
+        // empty slot and stands down (never a resurrected listener).
+        {
+            let mut slot = self.listener.lock().await;
+            if let Some(serve) = slot.serve.take() {
+                serve.abort();
+                let _ = serve.await;
+            }
+        }
         self.audio_server.abort();
         self.vis_bridge.abort();
         self.reload_bridge.abort();
-        let _ = self.server.await;
         let _ = self.audio_server.await;
         let _ = self.vis_bridge.await;
         let _ = self.reload_bridge.await;

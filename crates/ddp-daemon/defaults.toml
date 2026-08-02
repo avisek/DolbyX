@@ -5,6 +5,8 @@
 # cascade; anything unstated runs the parameters.toml default.
 
 power = true
+# v2 root scalar (ADR-0012): a fresh install is this-PC-only.
+lan_access = false
 selected_profile = "music"
 
 # Shared operational config — applies to every profile, stated once
