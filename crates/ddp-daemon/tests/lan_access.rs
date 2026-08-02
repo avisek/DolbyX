@@ -22,12 +22,16 @@ use common::{
 
 /// The default-route interface's IPv4 — the address a phone would dial
 /// — or `None` on a routeless host (the UDP connect only picks a
-/// route; no packet leaves).
+/// route; no packet leaves). The independent twin of the daemon's
+/// `lan_url` pick (issue #71), guards aligned so the discovery
+/// expectation agrees with it even on a degenerate routing table.
 fn routable_ipv4() -> Option<Ipv4Addr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect(("8.8.8.8", 80)).ok()?;
     match socket.local_addr().ok()? {
-        SocketAddr::V4(addr) if !addr.ip().is_loopback() => Some(*addr.ip()),
+        SocketAddr::V4(addr) if !addr.ip().is_loopback() && !addr.ip().is_unspecified() => {
+            Some(*addr.ip())
+        }
         _ => None,
     }
 }

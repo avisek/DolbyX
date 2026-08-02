@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from './test/mock-ws'
-import { fixtureBootstrap, fixtureState } from './test/fixture'
+import { FIXTURE_LAN_URL, fixtureBootstrap, fixtureState } from './test/fixture'
 
 // The store hydrates from window.__BOOTSTRAP__ at module init
 // (ADR-0006) — install the fixture before the dynamic imports evaluate.
@@ -148,14 +148,13 @@ it('updates the LAN toggle on a broadcast state event', () => {
 
 const discoveryQr = () =>
   screen.queryByRole('img', { name: 'Scan to open DolbyX on your phone' })
-const fixtureUrl = () => fixtureState().lan_url ?? ''
 
 // Issue #71: the snapshot carries `lan_url` even while off — showing
 // the URL + QR only while on is this UI's policy.
 it('hides the discovery URL and QR while LAN access is off', () => {
   render(() => <App />)
   expect(discoveryQr()).toBeNull()
-  expect(screen.queryByText(fixtureUrl())).toBeNull()
+  expect(screen.queryByText(FIXTURE_LAN_URL)).toBeNull()
 })
 
 // Issue #71: the flipping tab renders the QR from the `lan_url` it
@@ -171,7 +170,7 @@ it('shows the URL and QR beside the toggle on the on-flip ack', async () => {
   socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
   await waitFor(() => {
     expect(discoveryQr()).toBeTruthy()
-    expect(screen.getByText(fixtureUrl())).toBeTruthy()
+    expect(screen.getByText(FIXTURE_LAN_URL)).toBeTruthy()
   })
 })
 
@@ -185,7 +184,7 @@ it('walks the discovery block through broadcast on and off', () => {
     snapshot: fixtureState({ lan_access: true }),
   })
   expect(discoveryQr()).toBeTruthy()
-  expect(screen.getByText(fixtureUrl())).toBeTruthy()
+  expect(screen.getByText(FIXTURE_LAN_URL)).toBeTruthy()
 
   socket.serverMessage({ type: 'state', snapshot: fixtureState() })
   expect(discoveryQr()).toBeNull()
