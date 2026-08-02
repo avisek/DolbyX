@@ -1,6 +1,7 @@
 import type { Component } from 'solid-js'
 import ConnectionBadge from './components/ConnectionBadge'
 import EqPresetPicker from './components/EqPresetPicker'
+import LanToggle from './components/LanToggle'
 import MasterControls from './components/MasterControls'
 import PowerToggle from './components/PowerToggle'
 import ProfileTabs from './components/ProfileTabs'
@@ -9,9 +10,10 @@ import { state } from './store/state'
 import './App.css'
 
 /**
- * Root shell — power, profiles, EQ presets, visualizer, master
- * controls, connection (Slices 05 #13, 10 #18, 14 #22, 15 #23, 16 #24).
- * `app--off` is the whole-UI power marker every skin reads (ADR-0011).
+ * Root shell — power, LAN access, profiles, EQ presets, visualizer,
+ * master controls, connection (Slices 05 #13, 10 #18, 14 #22, 15 #23,
+ * 16 #24; LAN access #70). `app--off` is the whole-UI power marker
+ * every skin reads (ADR-0011).
  */
 const App: Component = () => (
   <main class="app" classList={{ 'app--off': !state.power }}>
@@ -20,6 +22,7 @@ const App: Component = () => (
       <ConnectionBadge />
     </header>
     <PowerToggle />
+    <LanToggle />
     <ProfileTabs />
     <EqPresetPicker />
     <Visualizer />

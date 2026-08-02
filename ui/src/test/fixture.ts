@@ -219,6 +219,7 @@ export function fixtureState(
 ): StateSnapshot {
   return {
     power: true,
+    lan_access: false,
     selected_profile: 'music',
     profiles: [
       factoryProfile('movie', 'Movie', {

@@ -75,6 +75,77 @@ it('sends set_power on click and applies the flip on the ack', async () => {
   })
 })
 
+const lanToggle = () => screen.getByRole('switch', { name: 'LAN access' })
+
+// Issue #70: click → `set_lan_access` on the wire; the flip lands
+// local-first on the daemon's `ack` — by then the listener is already
+// rebound (ADR-0012). The broadcast goes to *other* clients.
+it('sends set_lan_access on click and applies the flip on the ack', async () => {
+  const socket = renderConnected()
+
+  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
+  lanToggle().click()
+  const sent = socket
+    .sentCommands()
+    .filter((frame) => frame.cmd === 'set_lan_access')
+  expect(sent).toEqual([
+    {
+      cmd: 'set_lan_access',
+      request_id: expect.any(String) as string,
+      on: true,
+    },
+  ])
+
+  // Not yet acked — the toggle still shows daemon truth.
+  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
+
+  socket.serverMessage({
+    type: 'ack',
+    request_id: sent[0]?.request_id,
+  })
+  await waitFor(() => {
+    expect(lanToggle().getAttribute('aria-checked')).toBe('true')
+  })
+})
+
+// Issue #70: a refused flip (`LAN_BIND_FAILED`) never moves the toggle
+// — the daemon's store never moved either; the error-path reconcile
+// restores daemon truth. No error surface exists.
+it('leaves the LAN toggle where it was when the flip is refused', async () => {
+  const socket = renderConnected()
+
+  lanToggle().click()
+  const sent = socket
+    .sentCommands()
+    .filter((frame) => frame.cmd === 'set_lan_access')
+  socket.serverMessage({
+    type: 'error',
+    request_id: sent[0]?.request_id,
+    code: 'LAN_BIND_FAILED',
+    message: 'bind failed',
+  })
+  await waitFor(() => {
+    // The rejection triggered the standard reconcile…
+    expect(
+      socket.sentCommands().filter((frame) => frame.cmd === 'get_state'),
+    ).toHaveLength(2)
+  })
+  // …and the switch is exactly where it was.
+  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
+})
+
+// Issue #70: another tab flipped LAN access — its broadcast `state`
+// event reconciles this tab's toggle.
+it('updates the LAN toggle on a broadcast state event', () => {
+  const socket = renderConnected()
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ lan_access: true }),
+  })
+  expect(lanToggle().getAttribute('aria-checked')).toBe('true')
+})
+
 // Behavior 5 (#13): drop → badge reconnecting; reconnect → `get_state`
 // issued, badge connected, state reconciled.
 it('walks the badge through drop and recovery, reconciling state', () => {

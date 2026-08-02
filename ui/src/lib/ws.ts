@@ -60,6 +60,11 @@ export interface EqPreset {
 /** Mirror of the WS `state` event's snapshot. */
 export interface StateSnapshot {
   readonly power: boolean
+  /**
+   * Whether other devices on the network may reach the daemon
+   * (ADR-0012) — off on a fresh install.
+   */
+  readonly lan_access: boolean
   readonly selected_profile: string
   readonly profiles: readonly Profile[]
   readonly eq_presets: readonly EqPreset[]
@@ -83,6 +88,15 @@ export interface VisParams {
 export type Command =
   | { readonly cmd: 'get_state' }
   | { readonly cmd: 'set_power'; readonly on: boolean }
+  | {
+      /**
+       * LAN access toggle (ADR-0012) — root-scalar grammar like
+       * `set_power`; a refused flip errors `LAN_BIND_FAILED` and the
+       * daemon's store never moves.
+       */
+      readonly cmd: 'set_lan_access'
+      readonly on: boolean
+    }
   | { readonly cmd: 'set_profile'; readonly id: string }
   | {
       /**
@@ -196,7 +210,7 @@ export type ServerEvent =
       readonly type: 'error'
       /** `null` when the frame was too malformed to carry one. */
       readonly request_id: string | null
-      readonly code: 'INVALID_REQUEST' | 'ENGINE_REJECTED'
+      readonly code: 'INVALID_REQUEST' | 'ENGINE_REJECTED' | 'LAN_BIND_FAILED'
       readonly message: string
     }
 

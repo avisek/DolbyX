@@ -9,6 +9,7 @@ import {
   applyEqPresetAdded,
   applyEqPresetEdit,
   applyEqPresetRename,
+  applyLanAccess,
   applyPower,
   applyProfile,
   applyProfileAdded,
@@ -99,6 +100,24 @@ export function setPower(on: boolean): void {
     .catch(() => {
       // Rejected or errored — the client's get_state reconcile restores
       // daemon truth; the toggle simply never moved.
+    })
+}
+
+/**
+ * Local-first `set_lan_access`, exactly `set_power`'s shape: applied
+ * on the daemon's ack — by then the listener is already rebound
+ * (ADR-0012). A refused flip (`LAN_BIND_FAILED`) rejects: the toggle
+ * simply never moves, and the error-path reconcile restores daemon
+ * truth — no error surface is invented here.
+ */
+export function setLanAccess(on: boolean): void {
+  void client
+    ?.request({ cmd: 'set_lan_access', on })
+    .then(() => {
+      applyLanAccess(on)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
     })
 }
 

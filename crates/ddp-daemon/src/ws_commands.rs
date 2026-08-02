@@ -26,6 +26,15 @@ pub(crate) enum WsCommand {
         /// The requested power state.
         on: bool,
     },
+    /// LAN access toggle (issue #70, ADR-0012) — root-scalar grammar
+    /// like `set_power`; the daemon rebinds the listener before the
+    /// store moves.
+    SetLanAccess {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The requested LAN access state.
+        on: bool,
+    },
     /// Select the active profile.
     SetProfile {
         /// Correlation id echoed on the reply.
@@ -228,11 +237,17 @@ impl From<&VisFrame> for VisParams {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum ErrorCode {
     /// The daemon rejected the frame up front: malformed JSON, unknown
-    /// cmd, failed validation. The only daemon-side code.
+    /// cmd, failed validation. The daemon's only *validation* code
+    /// (ADR-0005).
     InvalidRequest,
     /// The engine refused or lost the operation after daemon-side
     /// validation passed (ADR-0005).
     EngineRejected,
+    /// A LAN access flip could not bind the new target; the previous
+    /// address is re-bound and the store never moved (ADR-0012). The
+    /// one operational failure with its own code — reporting a busy
+    /// port as `INVALID_REQUEST` would lie.
+    LanBindFailed,
 }
 
 impl WsEvent<'_> {
@@ -258,6 +273,17 @@ pub(crate) fn invalid_request(request_id: Option<&str>, message: String) -> WsEv
         code: ErrorCode::InvalidRequest,
         status: None,
         message,
+    }
+}
+
+/// Builds a `LAN_BIND_FAILED` error reply — the flip's bind failure,
+/// with the previous address re-bound (ADR-0012).
+pub(crate) fn lan_bind_failed<'a>(request_id: &'a str, error: &std::io::Error) -> WsEvent<'a> {
+    WsEvent::Error {
+        request_id: Some(request_id),
+        code: ErrorCode::LanBindFailed,
+        status: None,
+        message: format!("bind failed: {error} (the previous address is re-bound)"),
     }
 }
 
@@ -297,5 +323,22 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&engine_rejected("r2", &crashed).to_text())
                 .unwrap();
         assert!(event.get("status").is_none(), "no status on a crash");
+    }
+
+    /// Issue #70: the third daemon-side code's wire shape — no
+    /// `status` (there is no engine reply behind a bind failure).
+    #[test]
+    fn lan_bind_failed_serializes_without_a_status() {
+        let busy = std::io::Error::new(std::io::ErrorKind::AddrInUse, "address in use");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&lan_bind_failed("r3", &busy).to_text())
+                .unwrap(),
+            serde_json::json!({
+                "type": "error",
+                "request_id": "r3",
+                "code": "LAN_BIND_FAILED",
+                "message": "bind failed: address in use (the previous address is re-bound)",
+            }),
+        );
     }
 }

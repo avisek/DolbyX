@@ -11,7 +11,9 @@ use ddp_state::Command;
 use tokio::sync::broadcast;
 
 use crate::App;
-use crate::ws_commands::{WsCommand, WsEvent, ack, engine_rejected, invalid_request};
+use crate::ws_commands::{
+    WsCommand, WsEvent, ack, engine_rejected, invalid_request, lan_bind_failed,
+};
 
 /// Bridges the supervisor's vis fan-out onto the update channel: each
 /// frame serialized once and queued for every connection — `vis` has
@@ -99,7 +101,7 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
     clippy::too_many_lines,
     reason = "a flat match, one arm per wire command — length tracks the vocabulary"
 )]
-async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
+async fn dispatch(app: &Arc<App>, conn_id: ConnId, text: &str) -> Vec<String> {
     let command = match serde_json::from_str::<WsCommand>(text) {
         Ok(command) => command,
         Err(error) => {
@@ -121,6 +123,9 @@ async fn dispatch(app: &App, conn_id: ConnId, text: &str) -> Vec<String> {
         }
         WsCommand::SetPower { request_id, on } => {
             mutate(app, conn_id, &request_id, Command::SetPower { on }).await
+        }
+        WsCommand::SetLanAccess { request_id, on } => {
+            set_lan_access(app, conn_id, &request_id, on).await
         }
         WsCommand::SetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::SetProfile { id }).await
@@ -253,6 +258,39 @@ async fn mutate(app: &App, conn_id: ConnId, request_id: &str, command: Command) 
         None => ack(request_id, diff.minted.as_deref()).to_text(),
         Some(error) => engine_rejected(request_id, &error).to_text(),
     }]
+}
+
+/// Applies one `set_lan_access` (issue #70, ADR-0012): rebind first,
+/// store second. A redundant set acks without touching the listener; a
+/// failed rebind replies `LAN_BIND_FAILED` with the previous address
+/// re-bound and the store exactly where it was — no flush, no
+/// broadcast. On success the scalar moves, persists per the write law,
+/// and broadcasts to every other connection (the originator's ack is
+/// its only feedback).
+///
+/// # Panics
+///
+/// Never in practice: `SetLanAccess` has nothing to validate.
+async fn set_lan_access(
+    app: &Arc<App>,
+    conn_id: ConnId,
+    request_id: &str,
+    on: bool,
+) -> Vec<String> {
+    let mut state = app.state.write().await;
+    if state.lan_access == on {
+        return vec![ack(request_id, None).to_text()];
+    }
+    if let Err(error) = crate::http_server::rebind(app, on).await {
+        return vec![lan_bind_failed(request_id, &error).to_text()];
+    }
+    let _ = state
+        .apply(Command::SetLanAccess { on }, &app.params)
+        .expect("set_lan_access never fails validation");
+    app.persistence.flush(&state);
+    app.queue_state_broadcast(&state, conn_id);
+    drop(state);
+    vec![ack(request_id, None).to_text()]
 }
 
 /// The full-snapshot `state` event as wire text — `request_id` only
