@@ -40,8 +40,11 @@ drag) from a round-trip-lagged snapshot; *C*'s `ack` is its
 authoritative confirmation. `vis` broadcasts unconditionally.
 
 **Asymmetric validation.** The daemon owns all value validation up front
-and rejects with `INVALID_REQUEST` (its only rejection code); engine
-status errors surface as `ENGINE_REJECTED`. The engine never rejects an
+and rejects with `INVALID_REQUEST` (its only validation code); engine
+status errors surface as `ENGINE_REJECTED`; the one operational failure
+with its own code is `LAN_BIND_FAILED`
+([ADR-0012](0012-lan-access-opt-in-app-owned-gate-no-auth.md)). The
+engine never rejects an
 out-of-range value — it **silently clamps** to its own registry bounds,
 which can differ from published tables
 ([`tools/ddp_probe/`](../../tools/ddp_probe/README.md) §7) — so the
