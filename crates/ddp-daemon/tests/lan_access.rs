@@ -82,6 +82,15 @@ async fn connected_via(ip: Ipv4Addr, port: u16) -> (WsClient, serde_json::Value)
     (ws, hello)
 }
 
+/// Opens a fresh loopback connection and returns its hello snapshot —
+/// proof loopback (still) serves, and of what it says.
+async fn loopback_snapshot(addr: SocketAddr) -> serde_json::Value {
+    let mut ws = ws_connect(addr).await;
+    let hello = recv_json(&mut ws).await;
+    assert_eq!(hello["type"], "state");
+    hello["snapshot"].clone()
+}
+
 /// The tracer bullet: flip on ⇒ the routable address serves HTTP and
 /// WS (a genuinely non-loopback accepted connection — the production
 /// `0.0.0.0` target, no firewall rule, no fake alias); flip off ⇒ the
@@ -114,16 +123,7 @@ async fn the_toggle_opens_and_closes_the_lan() {
 
     assert_refused(lan).await;
     // Loopback serves as ever — a fresh connection, not a survivor.
-    let mut fresh = connected(daemon.addr()).await;
-    common::send_json(
-        &mut fresh,
-        &serde_json::json!({ "cmd": "get_state", "request_id": "rq-still" }),
-    )
-    .await;
-    assert_eq!(
-        recv_state(&mut fresh).await["snapshot"]["lan_access"],
-        false
-    );
+    assert_eq!(loopback_snapshot(daemon.addr()).await["lan_access"], false);
 }
 
 /// Established connections survive a flip in both directions — the
@@ -292,16 +292,7 @@ async fn a_failed_rebind_replies_lan_bind_failed_and_nothing_moves() {
     );
     // The previous address is re-bound: loopback serves a fresh
     // connection, and its snapshot still says off.
-    let mut fresh = connected(daemon.addr()).await;
-    common::send_json(
-        &mut fresh,
-        &serde_json::json!({ "cmd": "get_state", "request_id": "rq-after" }),
-    )
-    .await;
-    assert_eq!(
-        recv_state(&mut fresh).await["snapshot"]["lan_access"],
-        false
-    );
+    assert_eq!(loopback_snapshot(daemon.addr()).await["lan_access"], false);
     let config = daemon.dir.path().join("data").join("config.toml");
     assert_eq!(
         std::fs::read_to_string(config).expect("config readable"),
@@ -405,15 +396,6 @@ async fn a_hand_edit_flips_the_listener_live() {
         false,
         "a failed watcher rebind keeps the scalar where it was"
     );
-    let mut fresh = connected(daemon.addr()).await;
-    common::send_json(
-        &mut fresh,
-        &serde_json::json!({ "cmd": "get_state", "request_id": "rq-still" }),
-    )
-    .await;
-    assert_eq!(
-        recv_state(&mut fresh).await["snapshot"]["lan_access"],
-        false
-    );
+    assert_eq!(loopback_snapshot(daemon.addr()).await["lan_access"], false);
     drop(holder);
 }

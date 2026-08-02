@@ -83,10 +83,8 @@ pub(crate) struct Namespace {
 #[serde(deny_unknown_fields)]
 struct DefaultsFile {
     power: bool,
-    selected_profile: ProfileId,
-    // Declared after selected_profile so serde's missing-field report
-    // walks the file's own root order.
     lan_access: bool,
+    selected_profile: ProfileId,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
     #[serde(default)]
@@ -100,8 +98,8 @@ struct DefaultsFile {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     power: Option<bool>,
-    selected_profile: Option<ProfileId>,
     lan_access: Option<bool>,
+    selected_profile: Option<ProfileId>,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
     #[serde(default)]
@@ -114,8 +112,8 @@ struct ConfigFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigOverlay {
     pub(crate) power: Option<bool>,
-    pub(crate) selected_profile: Option<ProfileId>,
     pub(crate) lan_access: Option<bool>,
+    pub(crate) selected_profile: Option<ProfileId>,
     pub(crate) profile: Namespace,
     pub(crate) eq_preset: Namespace,
 }
@@ -1010,7 +1008,11 @@ iebt = [67, 95]
     #[test]
     fn rejects_malformed_or_invalid_defaults() {
         let cases = [
-            ("power = true\n".to_string(), "selected_profile"),
+            ("power = true\n".to_string(), "lan_access"),
+            (
+                "power = true\nlan_access = false\n".to_string(),
+                "selected_profile",
+            ),
             // Issue #70: the strict root — lan_access must be stated.
             (DEFAULTS.replace("lan_access = false\n", ""), "lan_access"),
             ("power = tru".to_string(), "expected"),

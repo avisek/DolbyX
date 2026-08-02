@@ -59,18 +59,18 @@ pub(crate) fn spawn_serve(listener: TcpListener, app: Arc<App>) -> JoinHandle<()
 /// its FD drops, so a busy port here would only mask a race in our own
 /// shutdown — then bind the new target on the same port. On failure
 /// the previous target is re-bound and the error returned: the daemon
-/// is never left with nothing bound.
-///
-/// # Panics
-///
-/// Never in practice: the fallback re-binds the address this daemon
-/// freed a moment ago — live or `TIME_WAIT` connection sockets never
-/// block a listener bind (ADR-0012).
+/// is never left with nothing bound. Should even that fallback fail —
+/// a foreign steal of the port inside the flip's own window; live or
+/// `TIME_WAIT` connection sockets never block a listener bind — the
+/// process exits loudly rather than run unreachable: refuse-to-start's
+/// mid-run twin, and the service manager restarts into the persisted
+/// state.
 pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
     let mut slot = app.listener.lock().await;
     let Some(serve) = slot.serve.take() else {
         // Shutdown took the listener under this lock — a flip racing
-        // it must not resurrect serving.
+        // it must not resurrect serving. The scalar still moves and
+        // persists; the next startup binds it.
         return Ok(());
     };
     serve.abort();
@@ -81,9 +81,14 @@ pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
             Ok(())
         }
         Err(error) => {
-            let listener = TcpListener::bind((bind_target(!on), slot.port))
-                .await
-                .expect("re-bind the address this daemon just freed");
+            let previous = (bind_target(!on), slot.port);
+            let listener = match TcpListener::bind(previous).await {
+                Ok(listener) => listener,
+                Err(fatal) => {
+                    tracing::error!(%fatal, "rebind fallback failed — no address bindable");
+                    std::process::exit(1);
+                }
+            };
             slot.serve = Some(spawn_serve(listener, app.clone()));
             Err(error)
         }
