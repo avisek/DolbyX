@@ -146,6 +146,64 @@ it('updates the LAN toggle on a broadcast state event', () => {
   expect(lanToggle().getAttribute('aria-checked')).toBe('true')
 })
 
+const discoveryQr = () =>
+  screen.queryByRole('img', { name: 'Scan to open DolbyX on your phone' })
+const fixtureUrl = () => fixtureState().lan_url ?? ''
+
+// Issue #71: the snapshot carries `lan_url` even while off — showing
+// the URL + QR only while on is this UI's policy.
+it('hides the discovery URL and QR while LAN access is off', () => {
+  render(() => <App />)
+  expect(discoveryQr()).toBeNull()
+  expect(screen.queryByText(fixtureUrl())).toBeNull()
+})
+
+// Issue #71: the flipping tab renders the QR from the `lan_url` it
+// already holds — the ack alone reveals it; originator suppression
+// means no snapshot follows for this tab (ADR-0005).
+it('shows the URL and QR beside the toggle on the on-flip ack', async () => {
+  const socket = renderConnected()
+
+  lanToggle().click()
+  const sent = socket
+    .sentCommands()
+    .filter((frame) => frame.cmd === 'set_lan_access')
+  socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
+  await waitFor(() => {
+    expect(discoveryQr()).toBeTruthy()
+    expect(screen.getByText(fixtureUrl())).toBeTruthy()
+  })
+})
+
+// Issue #71: another tab flipped on — the broadcast reveals the
+// discovery block here too; a later off-flip hides it again.
+it('walks the discovery block through broadcast on and off', () => {
+  const socket = renderConnected()
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ lan_access: true }),
+  })
+  expect(discoveryQr()).toBeTruthy()
+  expect(screen.getByText(fixtureUrl())).toBeTruthy()
+
+  socket.serverMessage({ type: 'state', snapshot: fixtureState() })
+  expect(discoveryQr()).toBeNull()
+})
+
+// Issue #71: a routeless host snapshots `lan_url: null` — the toggle
+// stands alone; there is nothing to render.
+it('shows no discovery block when lan_url is null', () => {
+  const socket = renderConnected()
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ lan_access: true, lan_url: null }),
+  })
+  expect(lanToggle().getAttribute('aria-checked')).toBe('true')
+  expect(discoveryQr()).toBeNull()
+})
+
 // Behavior 5 (#13): drop → badge reconnecting; reconnect → `get_state`
 // issued, badge connected, state reconciled.
 it('walks the badge through drop and recovery, reconciling state', () => {

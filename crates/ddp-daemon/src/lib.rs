@@ -113,6 +113,10 @@ pub(crate) struct App {
     pub(crate) next_conn_id: AtomicU64,
     /// The UI HTML file, re-read on every `GET /`.
     pub(crate) ui_path: PathBuf,
+    /// The bound port — fixed at startup (an ephemeral `--port 0`
+    /// resolves once, every rebind reuses it); what `lan_url` stamps
+    /// into snapshots (issue #71).
+    pub(crate) port: u16,
     /// The one HTTP/WS listener's control slot — LAN access flips
     /// rebind it live (ADR-0012); shared with [`Daemon::shutdown`].
     pub(crate) listener: Arc<tokio::sync::Mutex<http_server::HttpListener>>,
@@ -225,7 +229,10 @@ impl App {
     /// complete, params keyed by 4-CC) + the `readouts` map — the 8
     /// ReadOnly-Static values live from the main session,
     /// `ParameterDef.default` while zero sessions (or for a dead ref
-    /// the engine reads empty).
+    /// the engine reads empty) — + the discovery `lan_url` (issue #71,
+    /// ADR-0012), derived here like the readouts: recomputed per
+    /// serialization, populated regardless of the toggle, never a
+    /// `State` field.
     pub(crate) fn snapshot_json_of(&self, state: &State) -> serde_json::Value {
         let live = self.supervisor.readouts();
         let readouts: serde_json::Map<String, serde_json::Value> = self
@@ -272,6 +279,7 @@ impl App {
         serde_json::json!({
             "power": state.power,
             "lan_access": state.lan_access,
+            "lan_url": http_server::lan_url(self.port),
             "selected_profile": state.selected_profile,
             "profiles": profiles,
             "eq_presets": eq_presets,
@@ -363,8 +371,8 @@ impl Daemon {
             updates: broadcast::channel(64).0,
             next_conn_id: AtomicU64::new(0),
             ui_path: config.ui_path,
+            port: addr.port(),
             listener: Arc::new(tokio::sync::Mutex::new(http_server::HttpListener {
-                port: addr.port(),
                 serve: None,
             })),
             lan_gate,

@@ -5,7 +5,7 @@
 //! listener flip machinery also lives here (issue #70).
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -27,12 +27,9 @@ use tower::ServiceExt as _;
 
 use crate::App;
 
-/// The daemon's one HTTP/WS listener: the port fixed at startup (an
-/// ephemeral `--port 0` resolves once, every rebind reuses it) plus
-/// the accept task serving the current bind target.
+/// The daemon's one HTTP/WS listener — the accept task serving the
+/// current bind target (the port it binds lives in [`App::port`]).
 pub(crate) struct HttpListener {
-    /// The bound port.
-    pub(crate) port: u16,
     /// The current accept task — `None` only during startup wiring and
     /// after shutdown takes it.
     pub(crate) serve: Option<JoinHandle<()>>,
@@ -46,6 +43,26 @@ pub(crate) const fn bind_target(lan_access: bool) -> Ipv4Addr {
         Ipv4Addr::UNSPECIFIED
     } else {
         Ipv4Addr::LOCALHOST
+    }
+}
+
+/// The discovery URL a phone would dial (issue #71, ADR-0012):
+/// `http://<ip>:<port>` over the default-route interface's IPv4. The
+/// UDP connect only asks the routing table which source address would
+/// serve — no packet leaves, so this works offline and never picks a
+/// VM/virtual adapter (those don't carry the default route). `None` on
+/// a routeless host. Recomputed per call: an IP change needs no
+/// restart, and an idle tab's stale window is accepted over an
+/// interface poller.
+pub(crate) fn lan_url(port: u16) -> Option<String> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // Any public address works as the route probe; nothing is sent.
+    socket.connect((Ipv4Addr::new(8, 8, 8, 8), 80)).ok()?;
+    match socket.local_addr().ok()? {
+        SocketAddr::V4(local) if !local.ip().is_loopback() && !local.ip().is_unspecified() => {
+            Some(format!("http://{}:{port}", local.ip()))
+        }
+        _ => None,
     }
 }
 
@@ -204,7 +221,7 @@ pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
     };
     serve.abort();
     let _ = serve.await;
-    match TcpListener::bind((bind_target(on), slot.port)).await {
+    match TcpListener::bind((bind_target(on), app.port)).await {
         Ok(listener) => {
             slot.serve = Some(spawn_serve(listener, app.clone()));
             // Rebind first, sever second (ADR-0012): publishing off
@@ -214,7 +231,7 @@ pub(crate) async fn rebind(app: &Arc<App>, on: bool) -> std::io::Result<()> {
             Ok(())
         }
         Err(error) => {
-            let previous = (bind_target(!on), slot.port);
+            let previous = (bind_target(!on), app.port);
             let listener = match TcpListener::bind(previous).await {
                 Ok(listener) => listener,
                 Err(fatal) => {

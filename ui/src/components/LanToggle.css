@@ -1,3 +1,9 @@
+.lan-access {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .lan-toggle {
   display: flex;
   align-items: center;
@@ -40,4 +46,23 @@
 .lan-toggle[aria-checked='true'] .lan-toggle__thumb {
   transform: translateX(1.25rem);
   background: var(--color-bg);
+}
+
+.lan-discovery {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.lan-discovery__qr {
+  width: 6.5rem;
+  height: 6.5rem;
+  border-radius: 0.25rem;
+}
+
+.lan-discovery__url {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  user-select: all;
 }

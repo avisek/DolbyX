@@ -16,6 +16,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 const inert: StateSnapshot = {
   power: false,
   lan_access: false,
+  lan_url: null,
   selected_profile: '',
   profiles: [],
   eq_presets: [],

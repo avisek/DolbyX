@@ -220,6 +220,9 @@ export function fixtureState(
   return {
     power: true,
     lan_access: false,
+    // Populated while off — daemon truth carries it regardless of the
+    // toggle (issue #71); hiding it while off is the UI's policy.
+    lan_url: 'http://192.168.1.23:9876',
     selected_profile: 'music',
     profiles: [
       factoryProfile('movie', 'Movie', {
