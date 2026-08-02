@@ -23,15 +23,20 @@ function assertBootstrapPlaceholder(): PluginOption {
   }
 }
 
-// Backend-integration mode: the browser always visits the daemon at
-// :9876; Vite serves modules + HMR straight from :5173 — no proxies
-// (no /api exists and /ws is same-origin with the page).
+// Backend-integration mode: the browser visits the daemon (:9876); Vite
+// serves modules + HMR from :5173 on the same host — no proxies (no
+// /api exists and /ws is same-origin with the page). No `origin`, no
+// `hmr.host`: both would pin `localhost` and break `just dev-lan` —
+// dev.html derives module URLs from the page hostname, and the HMR
+// client falls back to its own module URL's host (issue #72). The day
+// the first static asset appears this stops sufficing: Vite renders
+// asset URLs root-relative, the page origin is the daemon, and the
+// daemon serves exactly two routes — whoever adds that asset owns the
+// dev-origin story.
 export default defineConfig({
   plugins: [solid(), viteSingleFile(), assertBootstrapPlaceholder()],
   server: {
-    strictPort: true, // dev.html + origin hardcode :5173 — never drift
+    strictPort: true, // dev.html hardcodes :5173 — never drift
     cors: true,
-    origin: 'http://localhost:5173',
-    hmr: { host: 'localhost', port: 5173, protocol: 'ws' },
   },
 })

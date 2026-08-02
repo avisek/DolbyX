@@ -52,6 +52,7 @@ just lint           # cargo fmt --check + clippy (-D warnings) + UI lint
 just test           # cargo test --workspace + UI tests
 just qemu-test      # engine shim vs real libdseffect.so under qemu
 just dev            # daemon + UI dev loop with hot reload
+just dev-lan        # dev, phone-reachable — flip LAN access on in the UI
 just windows-build  # native Windows daemon staged in target/windows/
 ```
 

@@ -1,10 +1,19 @@
 # DolbyX dev commands — `just --list` for a summary.
 
 # Daemon + UI dev loop with hot reload, against the real engine
-dev: _ui-deps stage-engine
+dev: (_dev "")
+
+# Vite serves all interfaces (issue #72); the daemon side stays gated on
+# the UI's LAN access toggle (ADR-0012) — no special-casing. While up,
+# :5173 serves workspace source to the whole LAN. WSL2 needs a
+# Windows-side bridge — docs/windows.md.
+# `dev`, phone-reachable — flip LAN access on in the UI
+dev-lan: (_dev "--host 0.0.0.0")
+
+_dev vite_flags: _ui-deps stage-engine
     ui/node_modules/.bin/concurrently --kill-others --names daemon,ui --prefix-colors auto \
         "cargo watch -w crates -w Cargo.toml -w Cargo.lock -x 'run -p ddp-daemon -- --ui ui/dev.html --socket-path target/debug/dolbyx.sock'" \
-        "pnpm -C ui dev"
+        "pnpm -C ui dev {{vite_flags}}"
 
 # Stage the ARM engine (shim + libdseffect.so + stubs) beside the debug daemon binary
 stage-engine:
