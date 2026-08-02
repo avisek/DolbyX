@@ -1,9 +1,11 @@
-//! Behaviors (issues #70 + #75): the LAN access toggle — `lan_access`
-//! rides the Cascade, `set_lan_access` follows the root-scalar grammar
-//! and the reply law, each real flip rebinds the one listener between
-//! `127.0.0.1` and `0.0.0.0` live, and off severs every established
-//! non-loopback connection after the rebind — loopback never, the
-//! originator's ack first (ADR-0012). Tests bind the production target
+//! Behaviors (issues #70 + #75 + #71): the LAN access toggle —
+//! `lan_access` rides the Cascade, `set_lan_access` follows the
+//! root-scalar grammar and the reply law, each real flip rebinds the
+//! one listener between `127.0.0.1` and `0.0.0.0` live, off severs
+//! every established non-loopback connection after the rebind —
+//! loopback never, the originator's ack first — and every snapshot
+//! carries the discovery `lan_url` (ADR-0012). Tests bind the
+//! production target
 //! and reach it through the machine's own routable address — same-host
 //! traffic bypasses inbound firewall filtering — so the accepted
 //! connection is genuinely non-loopback; routable tests skip at
@@ -20,12 +22,16 @@ use common::{
 
 /// The default-route interface's IPv4 — the address a phone would dial
 /// — or `None` on a routeless host (the UDP connect only picks a
-/// route; no packet leaves).
+/// route; no packet leaves). The independent twin of the daemon's
+/// `lan_url` pick (issue #71), guards aligned so the discovery
+/// expectation agrees with it even on a degenerate routing table.
 fn routable_ipv4() -> Option<Ipv4Addr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect(("8.8.8.8", 80)).ok()?;
     match socket.local_addr().ok()? {
-        SocketAddr::V4(addr) if !addr.ip().is_loopback() => Some(*addr.ip()),
+        SocketAddr::V4(addr) if !addr.ip().is_loopback() && !addr.ip().is_unspecified() => {
+            Some(*addr.ip())
+        }
         _ => None,
     }
 }
@@ -546,6 +552,48 @@ async fn a_hand_edit_to_off_severs_lan_connections_too() {
         "the hand-edit closes lingering keep-alive sockets too"
     );
     assert_refused(lan).await;
+}
+
+/// Discovery (issue #71, ADR-0012): every snapshot carries a root
+/// `lan_url` — `http://<default-route IPv4>:<bound port>`, `null` on a
+/// routeless host — populated regardless of the toggle: the WS hello
+/// and the injected bootstrap carry it while off (the flipping tab
+/// must already hold the URL it shows on enable — originator
+/// suppression starves it of its own flip's snapshot), and the
+/// broadcast carries the same URL while on. The daemon runs `--port 0`,
+/// so the URL's port is the ephemeral resolution — the *actual* bound
+/// port, not a flag value.
+#[tokio::test]
+async fn every_snapshot_carries_the_lan_url_regardless_of_the_toggle() {
+    let daemon = start_daemon().await;
+    let port = daemon.addr().port();
+    let expected = match routable_ipv4() {
+        Some(ip) => serde_json::json!(format!("http://{ip}:{port}")),
+        None => serde_json::Value::Null,
+    };
+
+    assert_eq!(
+        loopback_snapshot(daemon.addr()).await["lan_url"],
+        expected,
+        "the hello snapshot carries the URL while off"
+    );
+    let (status, body) = http_get(daemon.addr(), "/").await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        bootstrap_json(&body)["state"]["lan_url"],
+        expected,
+        "the bootstrap carries the URL while off"
+    );
+
+    let mut originator = connected(daemon.addr()).await;
+    let mut observer = connected(daemon.addr()).await;
+    let reply = set_lan_access(&mut originator, true, "rq-on").await;
+    assert_eq!(reply["type"], "ack");
+    assert_eq!(
+        recv_state(&mut observer).await["snapshot"]["lan_url"],
+        expected,
+        "the on-flip broadcast carries the same URL"
+    );
 }
 
 /// The config watcher path (ADR-0007): a hand-edited `lan_access`

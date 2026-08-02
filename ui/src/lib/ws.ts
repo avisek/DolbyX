@@ -65,6 +65,14 @@ export interface StateSnapshot {
    * (ADR-0012) — off on a fresh install.
    */
   readonly lan_access: boolean
+  /**
+   * The LAN discovery URL — `http://<ip>:<port>` on the default-route
+   * interface, `null` on a routeless host — derived per snapshot
+   * daemon-side like `readouts`, populated regardless of the toggle
+   * (issue #71, ADR-0012): the flipping tab renders the QR from the
+   * value it already holds. Showing it only while on is UI policy.
+   */
+  readonly lan_url: string | null
   readonly selected_profile: string
   readonly profiles: readonly Profile[]
   readonly eq_presets: readonly EqPreset[]

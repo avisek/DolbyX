@@ -142,6 +142,15 @@ the flip (ADR-0012). A root scalar resolved through the Cascade like
 _Avoid_: remote access (implies internet), bind address (the mechanism,
 not the concept).
 
+**`lan_url`**:
+The snapshot's root discovery URL — `http://<ip>:<port>` from the
+default-route interface pick plus the actual bound port, `null` when
+routeless — derived at serialization like `readouts`, recomputed per
+snapshot: never a `State` field, never persisted, no set command;
+populated regardless of the toggle — showing it only while on is UI
+policy (ADR-0012).
+_Avoid_: LAN address (the bind mechanism), QR URL (the QR encodes it).
+
 **`vis` event**:
 The per-block visualizer broadcast — the vis tail's four arrays keyed by
 4-CC; a pure event stream (no audio → no events, no client-side

@@ -211,6 +211,13 @@ function factoryPreset(id: string, name: string): EqPreset {
 }
 
 /**
+ * The `lan_url` every fixture snapshot carries (issue #71) — populated
+ * while `lan_access` is off, as daemon truth is regardless of the
+ * toggle; hiding it while off is the UI's policy.
+ */
+export const FIXTURE_LAN_URL = 'http://192.168.1.23:9876'
+
+/**
  * A daemon-truthful state snapshot: the master-control values each
  * factory profile resolves to (`defaults.toml` over table defaults).
  */
@@ -220,6 +227,7 @@ export function fixtureState(
   return {
     power: true,
     lan_access: false,
+    lan_url: FIXTURE_LAN_URL,
     selected_profile: 'music',
     profiles: [
       factoryProfile('movie', 'Movie', {
