@@ -84,6 +84,9 @@ async fn connection(mut socket: WebSocket, peer: SocketAddr, app: Arc<App>) {
             // even when the reply severs the replier). Returning drops
             // the socket; a task busy in a branch below severs one
             // iteration later, since `wait_for` re-checks the value.
+            // Even a send wedged on a stalled peer only defers the
+            // close, never grants control: the wedged task dispatches
+            // nothing, and the send's resolution runs into the gate.
             biased;
             // (The async block drops `wait_for`'s non-Send lock guard
             // before the select resumes.)
