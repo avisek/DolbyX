@@ -6,9 +6,9 @@ import { createSignal } from 'solid-js'
 export type VariantId = 'a' | 'b' | 'c'
 
 export const VARIANTS: readonly { id: VariantId; label: string }[] = [
-  { id: 'a', label: 'A — Flat grid' },
-  { id: 'b', label: 'B — Category accordions' },
-  { id: 'c', label: 'C — Rail + single category' },
+  { id: 'a', label: 'A — Param cards + bar strips' },
+  { id: 'b', label: 'B — Category cards + cell grids' },
+  { id: 'c', label: 'C — Category cards + composite plots' },
 ]
 
 function readUrl(): VariantId {
