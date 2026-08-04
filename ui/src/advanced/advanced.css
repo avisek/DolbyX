@@ -1,0 +1,467 @@
+/* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
+
+/* — Panel shell — */
+
+.advanced {
+  width: min(96vw, 1100px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.advanced__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.advanced__chevron {
+  color: var(--color-accent);
+}
+
+/* — Card (shared internals) — */
+
+.adv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-surface);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+}
+
+.adv-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.adv-card__code {
+  flex-shrink: 0;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.adv-card__label {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adv-card__badge {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.5rem;
+  background: #5a3f14;
+  color: #f0b429;
+  font-size: 0.6rem;
+}
+
+.adv-card__badge--preset {
+  background: #1d3a52;
+  color: var(--color-accent);
+}
+
+/* Divergence dot — hidden until the card carries the modifier. */
+.adv-card__dot {
+  flex-shrink: 0;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: auto;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.adv-card--diverged .adv-card__dot {
+  background: var(--color-accent);
+}
+
+.adv-card__reset,
+.adv-card__expand {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--color-text-muted);
+  border-radius: 0.25rem;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.adv-card__reset:hover,
+.adv-card__expand:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.adv-card__body {
+  min-width: 0;
+}
+
+/* Row shape (variant C): head left, control right. */
+.adv-card--row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+  column-gap: 1rem;
+}
+
+.adv-card--row .adv-card__head {
+  flex-wrap: wrap;
+}
+
+.adv-card--row .adv-card__label {
+  white-space: normal;
+}
+
+/* — Widgets — */
+
+.adv-toggle {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.adv-toggle__track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.25rem;
+  height: 1.25rem;
+  padding: 0.1875rem;
+  border-radius: 0.625rem;
+  background: var(--color-bg);
+}
+
+.adv-toggle__thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.adv-toggle[aria-checked='true'] .adv-toggle__track {
+  background: var(--color-accent);
+}
+
+.adv-toggle[aria-checked='true'] .adv-toggle__thumb {
+  transform: translateX(1rem);
+  background: var(--color-bg);
+}
+
+.adv-tristate {
+  display: inline-flex;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.adv-tristate__seg {
+  padding: 0.2rem 0.6rem;
+  border: none;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.adv-tristate__seg--active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.adv-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.adv-slider__input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--color-accent);
+}
+
+.adv-slider__value {
+  flex-shrink: 0;
+  min-width: 4rem;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.adv-number {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.adv-number__input {
+  width: 6rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+.adv-number__unit {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.adv-bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.adv-bands__input {
+  width: 3.4rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.7rem;
+}
+
+.adv-bands__meta {
+  margin-left: 0.4rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.adv-aobg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.adv-aobg__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.adv-aobg__chan {
+  flex-shrink: 0;
+  min-width: 2.6rem;
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.adv-aobg__empty,
+.adv-dyn__idle {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.adv-readout {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+/* Dynamic vis bands — height from the published `--db` (range ≈ −12…36). */
+.adv-dyn {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 2.25rem;
+}
+
+.adv-dyn__bar {
+  width: 0.45rem;
+  height: calc((clamp(-12, var(--db), 36) + 12) / 48 * 100%);
+  min-height: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+}
+
+/* — Variant A: flat grid — */
+
+.adv-flat {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+
+.adv-flat__divider {
+  grid-column: 1 / -1;
+  margin: 0.6rem 0 0;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.adv-flat .adv-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* — Variant B: accordions — */
+
+.adv-acc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.adv-acc__header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-surface);
+  border-radius: 0.375rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.adv-acc__chevron {
+  color: var(--color-accent);
+}
+
+.adv-acc__count {
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.6rem;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.adv-acc__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.adv-acc .adv-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* — Variant C: rail + single category — */
+
+.adv-rail {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.adv-rail__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.adv-rail__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.adv-rail__item--active {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.adv-rail__count {
+  margin-left: auto;
+  font-size: 0.7rem;
+}
+
+.adv-rail__page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.adv-rail__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+@media (width <= 720px) {
+  .adv-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .adv-rail__nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* — Switcher pill: deliberately not part of the design — */
+
+.proto-switcher {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.8rem;
+  transform: translateX(-50%);
+  border: 2px dashed #ff4dd2;
+  border-radius: 2rem;
+  background: rgb(12 20 32 / 92%);
+  color: #ff4dd2;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.proto-switcher__arrow {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid #ff4dd2;
+  border-radius: 1rem;
+  background: none;
+  color: #ff4dd2;
+  cursor: pointer;
+}
+
+.proto-switcher__label {
+  min-width: 12rem;
+  text-align: center;
+}

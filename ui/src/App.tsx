@@ -1,4 +1,6 @@
 import type { Component } from 'solid-js'
+// PROTOTYPE import — throwaway (Slice 20 spec exploration)
+import AdvancedPanel from './advanced/AdvancedPanel'
 import ConnectionBadge from './components/ConnectionBadge'
 import EqPresetPicker from './components/EqPresetPicker'
 import LanToggle from './components/LanToggle'
@@ -27,6 +29,7 @@ const App: Component = () => (
     <EqPresetPicker />
     <Visualizer />
     <MasterControls />
+    <AdvancedPanel />
   </main>
 )
 
