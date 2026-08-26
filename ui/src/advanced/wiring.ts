@@ -133,62 +133,6 @@ export function resetCategory(params: readonly string[]): void {
   if (profile && ccs.length > 0) resetProfile(profile.id, ccs)
 }
 
-// — Composite grouping (variant C) —
-
-export interface CompositeGroup {
-  readonly axis: string
-  readonly rows: readonly string[]
-}
-
-export type CategoryItem =
-  | { readonly param: string }
-  | { readonly composite: CompositeGroup }
-
-/**
- * A category's params with band-array siblings merged into composite
- * plots — mechanically, by the same 2-char-prefix mechanism as `*nb`
- * gating: arrays (`length > 1`) group by prefix; a prefix owning
- * exactly one frequency array plus ≥ 1 sibling arrays becomes one
- * composite (axis = the frequency array), placed at its first member's
- * slot. Everything else stays a plain param, in category order.
- */
-export function compositeItems(
-  params: readonly string[],
-): readonly CategoryItem[] {
-  const groups = new Map<string, { axis?: string; rows: string[] }>()
-  for (const name of params) {
-    const def = paramDef(name)
-    if (def.length <= 1) continue
-    const prefix = name.slice(0, 2)
-    const group = groups.get(prefix) ?? { rows: [] }
-    if (def.kind === 'frequency_hz' && group.axis === undefined) {
-      group.axis = name
-    } else {
-      group.rows.push(name)
-    }
-    groups.set(prefix, group)
-  }
-  const items: CategoryItem[] = []
-  const placed = new Set<string>()
-  for (const name of params) {
-    const prefix = name.slice(0, 2)
-    const group = groups.get(prefix)
-    if (
-      group?.axis !== undefined &&
-      group.rows.length > 0 &&
-      (group.axis === name || group.rows.includes(name))
-    ) {
-      if (!placed.has(prefix)) {
-        placed.add(prefix)
-        items.push({ composite: { axis: group.axis, rows: group.rows } })
-      }
-      continue
-    }
-    items.push({ param: name })
-  }
-  return items
-}
-
 /** The effective band count for a band array — the group's resolved
  * `*nb` value, clamped to the allocation; full length when ungated. */
 export function effectiveCount(def: ParameterDef): number {

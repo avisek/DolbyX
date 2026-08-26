@@ -1,5 +1,10 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
+/* Base layer shared by all three skins: the panel shell, functional
+ * chrome resets (bare buttons/inputs the skins paint), and interaction
+ * plumbing (cursors, touch-action, the label-box input fill). Anything
+ * a skin might want different lives in skin-{a,b,c}.css. */
+
 /* — Panel shell — */
 
 .advanced {
@@ -25,191 +30,55 @@
   color: var(--color-accent);
 }
 
-/* — Badges (Exp / RO / preset) — quiet outline, small — */
-
-.adv-badge {
-  flex-shrink: 0;
-  padding: 0 0.25rem;
-  border: 1px solid var(--color-text-muted);
-  border-radius: 0.25rem;
-  color: var(--color-text-muted);
-  font-size: 0.55rem;
-  line-height: 1.4;
+.advanced__chevron::before {
+  content: '▸';
 }
 
-.adv-badge--preset {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+.advanced__header[aria-expanded='true'] .advanced__chevron::before {
+  content: '▾';
 }
 
-/* — Category header (A divider content; B/C card header) — */
+/* — Bare chrome resets (skins paint these) — */
 
-.adv-cathead {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.adv-cathead__label {
-  overflow: hidden;
-  color: var(--color-text);
-  font-size: 0.85rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.adv-cathead__dot {
-  flex-shrink: 0;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.adv-cathead--diverged .adv-cathead__dot {
-  background: var(--color-accent);
-}
-
-.adv-cathead__reset {
-  flex-shrink: 0;
-  margin-left: auto;
-  padding: 0.05rem 0.35rem;
-  border: 1px solid var(--color-text-muted);
-  border-radius: 0.25rem;
-  background: none;
-  color: var(--color-text-muted);
-  font-size: 0.65rem;
-  cursor: pointer;
-}
-
-.adv-cathead__reset:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-/* — Param card (shared internals) — */
-
-.adv-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-width: 0;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-surface);
-  border-radius: 0.5rem;
-  background: var(--color-surface);
-}
-
-.adv-card__head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.adv-card__code {
-  flex-shrink: 0;
-  padding: 0.1rem 0.3rem;
-  border-radius: 0.25rem;
-  background: var(--color-bg);
-  color: var(--color-accent);
-  font-size: 0.7rem;
-}
-
-.adv-card__label {
-  overflow: hidden;
-  color: var(--color-text);
-  font-size: 0.8rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Divergence dot — hidden until the card carries the modifier. */
-.adv-card__dot {
-  flex-shrink: 0;
-  width: 0.4rem;
-  height: 0.4rem;
-  margin-left: auto;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.adv-card--diverged .adv-card__dot {
-  background: var(--color-accent);
-}
-
-.adv-card__reset {
-  flex-shrink: 0;
-  padding: 0.05rem 0.3rem;
-  border: 1px solid var(--color-text-muted);
-  border-radius: 0.25rem;
-  background: none;
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
-  cursor: pointer;
-}
-
-.adv-card__reset:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.adv-card__body {
-  min-width: 0;
-}
-
-/* Compact row shape (B/C category-card rows): head left, scalar widget
- * right; array bodies drop to their own full-width line. */
-.adv-card--row {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.6rem;
-  padding: 0.25rem 0;
+.adv-cat__toggle,
+.adv-cat__reset,
+.adv-card__reset,
+.adv-toggle,
+.adv-tristate__seg {
+  padding: 0;
   border: none;
-  border-radius: 0;
   background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
-.adv-card--row .adv-card__head {
-  flex: 1;
-  min-width: 9rem;
+.adv-cat__reset:disabled,
+.adv-card__reset:disabled {
+  cursor: default;
 }
 
-.adv-card--row .adv-card__body--block {
-  flex-basis: 100%;
-}
-
-/* — Scrub/type input: unit INSIDE the box — */
+/* — Scrub input: the LABEL is the box — clicks anywhere (unit
+ * included) focus the field; no dead zones. — */
 
 .adv-input {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  padding: 0.2rem 0.35rem;
-  border: 1px solid var(--color-bg);
-  border-radius: 0.25rem;
-  background: var(--color-bg);
-}
-
-.adv-input:focus-within {
-  border-color: var(--color-text-muted);
-}
-
-.adv-input--scrubbing {
-  border-color: var(--color-accent);
+  cursor: ns-resize;
+  touch-action: none;
 }
 
 .adv-input__field {
+  flex: 1;
   width: 3.6rem;
   min-width: 0;
   border: none;
   background: none;
-  color: var(--color-text);
-  font-size: 0.75rem;
+  color: inherit;
+  font: inherit;
   text-align: right;
-  cursor: ew-resize;
+  cursor: inherit;
 }
 
 .adv-input__field:focus {
@@ -219,331 +88,59 @@
 
 .adv-input__unit {
   flex-shrink: 0;
-  color: var(--color-text-muted);
-  font-size: 0.65rem;
-}
-
-/* Compact cell shape (variant B grids). */
-.adv-input--compact {
-  padding: 0.1rem 0.2rem;
-}
-
-.adv-input--compact .adv-input__field {
-  width: 2.6rem;
-  font-family: monospace;
-  font-size: 0.65rem;
-}
-
-/* — Scalar widgets — */
-
-.adv-toggle {
-  display: inline-flex;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.adv-toggle__track {
-  display: inline-flex;
-  align-items: center;
-  width: 2.25rem;
-  height: 1.25rem;
-  padding: 0.1875rem;
-  border-radius: 0.625rem;
-  background: var(--color-bg);
-}
-
-.adv-toggle__thumb {
-  width: 0.875rem;
-  height: 0.875rem;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  transition: transform 0.15s ease;
-}
-
-.adv-toggle[aria-checked='true'] .adv-toggle__track {
-  background: var(--color-accent);
-}
-
-.adv-toggle[aria-checked='true'] .adv-toggle__thumb {
-  transform: translateX(1rem);
-  background: var(--color-bg);
-}
-
-.adv-tristate {
-  display: inline-flex;
-  border: 1px solid var(--color-bg);
-  border-radius: 0.375rem;
-  overflow: hidden;
-}
-
-.adv-tristate__seg {
-  padding: 0.2rem 0.6rem;
-  border: none;
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.adv-tristate__seg--active {
-  background: var(--color-accent);
-  color: var(--color-bg);
-}
-
-.adv-slider {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.adv-slider__input {
-  flex: 1;
-  min-width: 4rem;
-  accent-color: var(--color-accent);
-}
-
-.adv-readout {
-  overflow-wrap: anywhere;
-  color: var(--color-text);
-  font-size: 0.8rem;
-}
-
-/* — Bar strip (variant A + composite rows): height from `--v` (0–1) — */
-
-.adv-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.adv-strip__bars {
-  display: flex;
-  gap: 2px;
-  align-items: flex-end;
-  height: 3rem;
-  cursor: ns-resize;
-  touch-action: none;
-}
-
-.adv-strip--static .adv-strip__bars {
-  cursor: default;
-}
-
-.adv-strip__bar {
-  flex: 1;
-  min-width: 2px;
-  height: calc(max(var(--v), 0.02) * 100%);
-  border-radius: 1px 1px 0 0;
-  background: var(--color-accent);
-  opacity: 0.85;
   pointer-events: none;
 }
 
-.adv-strip__meta {
-  color: var(--color-text-muted);
-  font-size: 0.65rem;
-}
+/* — Custom slider: functional geometry; skins size and paint — */
 
-/* — Cell grid (variant B) — */
-
-.adv-cells {
+.adv-slider {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
   align-items: center;
-}
-
-.adv-cells__meta {
-  margin-left: 0.3rem;
-  color: var(--color-text-muted);
-  font-size: 0.65rem;
-}
-
-/* — Dynamic vis plot: height from the published `--db` (≈ −12…36) — */
-
-.adv-plot {
-  display: flex;
-  gap: 2px;
-  align-items: flex-end;
-  height: 2.5rem;
-  min-width: 0;
-}
-
-.adv-plot__bar {
   flex: 1;
-  min-width: 2px;
-  height: calc((clamp(-12, var(--db), 36) + 12) / 48 * 100%);
-  min-height: 2px;
-  border-radius: 1px 1px 0 0;
-  background: var(--color-accent);
+  min-width: 4rem;
+  height: 1.1rem;
+  cursor: pointer;
+  touch-action: none;
 }
 
-.adv-plot__idle,
-.adv-chans__empty,
-.adv-comp__empty {
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-}
-
-/* — Channel-major rows (`aobg`, variants A/B) — */
-
-.adv-chans {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.adv-chans__row {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-}
-
-.adv-chans__row > .adv-strip,
-.adv-chans__row > .adv-cells {
+.adv-slider__track {
+  position: relative;
   flex: 1;
-  min-width: 0;
 }
 
-.adv-chans__id {
-  flex-shrink: 0;
-  min-width: 2.6rem;
-  color: var(--color-accent);
-  font-size: 0.7rem;
+.adv-slider__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(clamp(0, var(--norm, 0), 1) * 100%);
 }
 
-/* — Variant A: flat grid, category dividers — */
-
-.adv-flat {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 0.6rem;
+.adv-slider__thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(clamp(0, var(--norm, 0), 1) * 100%);
 }
 
-.adv-flat__divider {
-  grid-column: 1 / -1;
-  margin-top: 0.6rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--color-surface);
-}
+/* — Bands container: functional column flow (strip layout per skin) — */
 
-.adv-flat .adv-card--wide {
-  grid-column: 1 / -1;
-}
-
-/* — Variants B/C: category-card masonry (CSS columns) — */
-
-.adv-cats {
-  columns: 21rem;
-  column-gap: 0.7rem;
-}
-
-.adv-cats--composite {
-  columns: 30rem;
-}
-
-.adv-cat {
+.adv-bands {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  margin-bottom: 0.7rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--color-surface);
-  border-radius: 0.5rem;
-  background: var(--color-surface);
-  break-inside: avoid;
-}
-
-.adv-cat > .adv-cathead {
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--color-bg);
-}
-
-.adv-cat__body {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* — Variant C: composite plots — fixed gutter + 1fr plot per row, one
- * shared axis; equal flex bars/ticks keep the columns aligned. — */
-
-.adv-comp {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.3rem 0;
-}
-
-.adv-comp__row {
-  display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr);
-  column-gap: 0.5rem;
-  align-items: end;
-}
-
-.adv-comp__gutter {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-}
-
-.adv-comp__id {
-  display: flex;
-  align-items: center;
+  flex: 1;
   gap: 0.25rem;
   min-width: 0;
 }
 
-.adv-comp__dot {
-  flex-shrink: 0;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.adv-comp__gutter--diverged .adv-comp__dot {
-  background: var(--color-accent);
-}
-
-.adv-comp__label {
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: 0.6rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.adv-comp__chanhead {
+.adv-bands__row {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
+  gap: 0.4rem;
   min-width: 0;
 }
 
-.adv-comp .adv-strip__bars,
-.adv-comp .adv-plot {
-  height: 2.5rem;
-}
-
-.adv-comp__axis {
-  display: flex;
-  gap: 2px;
-}
-
-.adv-comp__tick {
+.adv-bands__strip {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: 0.55rem;
-  text-align: center;
-  white-space: nowrap;
 }
 
 /* — Switcher pill: deliberately not part of the design — */

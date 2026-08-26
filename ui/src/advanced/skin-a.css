@@ -1,0 +1,408 @@
+/* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
+
+/* Skin A — flat grid. `display: contents` dissolves category sections
+ * AND their body wrappers, so every param card flows in ONE continuous
+ * outer grid; category headers span full width as dividers. Long
+ * arrays paint as bar strips: the band element carries the fill (a
+ * bottom-anchored gradient sized by --norm); the input inside hides
+ * with opacity (NEVER display/visibility — it must stay focusable,
+ * ADR-0011) and reveals on focus. */
+
+/* — Outer grid — */
+
+.advanced--skin-a .advanced__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.6rem;
+}
+
+/* Categories dissolve; their cards join the outer grid. */
+.advanced--skin-a .adv-cat,
+.advanced--skin-a .adv-cat__body {
+  display: contents;
+}
+
+/* Collapse: the body (and its cards) leaves the grid entirely. */
+.advanced--skin-a .adv-cat--collapsed .adv-cat__body {
+  display: none;
+}
+
+/* — Category header = full-width divider — */
+
+.advanced--skin-a .adv-cat__head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  grid-column: 1 / -1;
+  margin-top: 0.6rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-surface);
+}
+
+.advanced--skin-a .adv-cat__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.advanced--skin-a .adv-cat__chevron::before {
+  content: '▾';
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-a .adv-cat--collapsed .adv-cat__chevron::before {
+  content: '▸';
+}
+
+.advanced--skin-a .adv-cat__title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced--skin-a .adv-cat__count {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.advanced--skin-a .adv-cat__count::before {
+  content: '(';
+}
+
+.advanced--skin-a .adv-cat__count::after {
+  content: ')';
+}
+
+.advanced--skin-a .adv-cat__dot {
+  flex-shrink: 0;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.advanced--skin-a .adv-cat--diverged .adv-cat__dot {
+  background: var(--color-accent);
+}
+
+.advanced--skin-a .adv-cat__reset {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--color-text-muted);
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.advanced--skin-a .adv-cat__reset::before {
+  content: '↺ reset';
+}
+
+.advanced--skin-a .adv-cat__reset:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.advanced--skin-a .adv-cat__reset:disabled {
+  opacity: 0;
+}
+
+/* — Param card — */
+
+.advanced--skin-a .adv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-surface);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+}
+
+.advanced--skin-a .adv-card--array {
+  grid-column: 1 / -1;
+}
+
+.advanced--skin-a .adv-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.advanced--skin-a .adv-card__code {
+  flex-shrink: 0;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-a .adv-card__label {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced--skin-a .adv-card__dot {
+  flex-shrink: 0;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: auto;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.advanced--skin-a .adv-card--diverged .adv-card__dot {
+  background: var(--color-accent);
+}
+
+.advanced--skin-a .adv-card__reset {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--color-text-muted);
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-a .adv-card__reset::before {
+  content: '↺';
+}
+
+.advanced--skin-a .adv-card__reset:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.advanced--skin-a .adv-card__reset:disabled {
+  opacity: 0;
+}
+
+.advanced--skin-a .adv-card__control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* — Badges: filled tinted pills, no borders; text via ::before — */
+
+.advanced--skin-a .adv-badge {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.5rem;
+  font-size: 0.55rem;
+  line-height: 1.5;
+}
+
+.advanced--skin-a .adv-badge--exp {
+  background: rgb(224 163 54 / 16%);
+  color: #dcae5e;
+}
+
+.advanced--skin-a .adv-badge--exp::before {
+  content: 'Exp';
+}
+
+.advanced--skin-a .adv-badge--ro {
+  background: rgb(143 161 179 / 14%);
+  color: var(--color-text-muted);
+}
+
+.advanced--skin-a .adv-badge--ro::before {
+  content: 'RO';
+}
+
+.advanced--skin-a .adv-badge--preset {
+  background: rgb(0 180 255 / 14%);
+  color: var(--color-accent);
+}
+
+.advanced--skin-a .adv-badge--preset::before {
+  content: 'preset';
+}
+
+/* — Scrub input box — */
+
+.advanced--skin-a .adv-input {
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+}
+
+.advanced--skin-a .adv-input:focus-within {
+  border-color: var(--color-text-muted);
+}
+
+.advanced--skin-a .adv-input--scrubbing {
+  border-color: var(--color-accent);
+}
+
+.advanced--skin-a .adv-input__field {
+  font-size: 0.75rem;
+}
+
+.advanced--skin-a .adv-input__unit {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+/* — Toggle / tristate — */
+
+.advanced--skin-a .adv-toggle__track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.25rem;
+  height: 1.25rem;
+  padding: 0.1875rem;
+  border-radius: 0.625rem;
+  background: var(--color-bg);
+}
+
+.advanced--skin-a .adv-toggle__thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.advanced--skin-a .adv-toggle[aria-checked='true'] .adv-toggle__track {
+  background: var(--color-accent);
+}
+
+.advanced--skin-a .adv-toggle[aria-checked='true'] .adv-toggle__thumb {
+  transform: translateX(1rem);
+  background: var(--color-bg);
+}
+
+.advanced--skin-a .adv-tristate {
+  display: inline-flex;
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.advanced--skin-a .adv-tristate__seg {
+  padding: 0.2rem 0.6rem;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.advanced--skin-a .adv-tristate__seg--active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* — Slider paint — */
+
+.advanced--skin-a .adv-slider__track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-bg);
+}
+
+.advanced--skin-a .adv-slider__fill {
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+
+.advanced--skin-a .adv-slider__thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.advanced--skin-a .adv-slider:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* — Readout — */
+
+.advanced--skin-a .adv-readout {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+/* — Bands: bar strips — */
+
+.advanced--skin-a .adv-bands__strip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 3rem;
+}
+
+.advanced--skin-a .adv-bands__band {
+  --bar-color: var(--color-accent);
+
+  position: relative;
+  flex: 1;
+  min-width: 2px;
+  background: linear-gradient(var(--bar-color), var(--bar-color)) bottom / 100%
+    calc(clamp(0.02, var(--norm, 0), 1) * 100%) no-repeat;
+  opacity: 0.85;
+  cursor: ns-resize;
+}
+
+.advanced--skin-a .adv-bands--ro .adv-bands__band {
+  --bar-color: var(--color-text-muted);
+
+  cursor: default;
+}
+
+/* The band's input: invisible but focusable (opacity, per contract);
+ * reveals on focus for keyboard editing. */
+.advanced--skin-a .adv-bands__band .adv-input {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.advanced--skin-a .adv-bands__band .adv-input:focus-within {
+  border: 1px solid var(--color-accent);
+  background: rgb(12 20 32 / 92%);
+  opacity: 1;
+}
+
+.advanced--skin-a .adv-bands__band .adv-input__field {
+  width: 100%;
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+.advanced--skin-a .adv-bands__value {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.advanced--skin-a .adv-bands__chan {
+  flex-shrink: 0;
+  min-width: 2.4rem;
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-a .adv-bands__meta,
+.advanced--skin-a .adv-bands__empty {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}

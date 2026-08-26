@@ -1,0 +1,420 @@
+/* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
+
+/* Skin C — roomy category cards. Same card structure as B but wider
+ * columns, looser spacing, two-column label/control rows, long badge
+ * text. Long arrays render as plot-styled band strips: a framed field
+ * with quarter grid lines; bands are slim rounded bars filled from
+ * --norm; the input inside hides with opacity (focusable per contract)
+ * and reveals on focus. */
+
+/* — Roomy masonry — */
+
+.advanced--skin-c .advanced__body {
+  columns: 30rem;
+  column-gap: 0.9rem;
+}
+
+.advanced--skin-c .adv-cat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--color-surface);
+  border-radius: 0.6rem;
+  background: var(--color-surface);
+  break-inside: avoid;
+}
+
+.advanced--skin-c .adv-cat--collapsed .adv-cat__body {
+  display: none;
+}
+
+/* — Category header — */
+
+.advanced--skin-c .adv-cat__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-bg);
+}
+
+.advanced--skin-c .adv-cat__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.advanced--skin-c .adv-cat__chevron::before {
+  content: '▾';
+  color: var(--color-accent);
+  font-size: 0.75rem;
+}
+
+.advanced--skin-c .adv-cat--collapsed .adv-cat__chevron::before {
+  content: '▸';
+}
+
+.advanced--skin-c .adv-cat__title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced--skin-c .adv-cat__count {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.advanced--skin-c .adv-cat__count::after {
+  content: ' params';
+}
+
+.advanced--skin-c .adv-cat__dot {
+  flex-shrink: 0;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.advanced--skin-c .adv-cat--diverged .adv-cat__dot {
+  background: var(--color-accent);
+}
+
+.advanced--skin-c .adv-cat__reset {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--color-text-muted);
+  border-radius: 0.3rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-c .adv-cat__reset::before {
+  content: '↺ Reset';
+}
+
+.advanced--skin-c .adv-cat__reset:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.advanced--skin-c .adv-cat__reset:disabled {
+  opacity: 0;
+}
+
+/* — Param rows: label column + control column — */
+
+.advanced--skin-c .adv-card {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  gap: 0.3rem 0.9rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.35rem 0;
+}
+
+/* Arrays: head above, strip below, full width. */
+.advanced--skin-c .adv-card--array {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.advanced--skin-c .adv-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.advanced--skin-c .adv-card__code {
+  flex-shrink: 0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-c .adv-card__label {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced--skin-c .adv-card__dot {
+  flex-shrink: 0;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: auto;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.advanced--skin-c .adv-card--diverged .adv-card__dot {
+  background: var(--color-accent);
+}
+
+.advanced--skin-c .adv-card__reset {
+  flex-shrink: 0;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--color-text-muted);
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-c .adv-card__reset::before {
+  content: '↺';
+}
+
+.advanced--skin-c .adv-card__reset:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.advanced--skin-c .adv-card__reset:disabled {
+  opacity: 0;
+}
+
+.advanced--skin-c .adv-card__control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* — Badges: long text, tinted pills — */
+
+.advanced--skin-c .adv-badge {
+  flex-shrink: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.6rem;
+  font-size: 0.6rem;
+  line-height: 1.5;
+}
+
+.advanced--skin-c .adv-badge--exp {
+  background: rgb(224 163 54 / 16%);
+  color: #dcae5e;
+}
+
+.advanced--skin-c .adv-badge--exp::before {
+  content: 'Experimental';
+}
+
+.advanced--skin-c .adv-badge--ro {
+  background: rgb(143 161 179 / 14%);
+  color: var(--color-text-muted);
+}
+
+.advanced--skin-c .adv-badge--ro::before {
+  content: 'Read-only';
+}
+
+.advanced--skin-c .adv-badge--preset {
+  background: rgb(0 180 255 / 14%);
+  color: var(--color-accent);
+}
+
+.advanced--skin-c .adv-badge--preset::before {
+  content: 'EQ preset';
+}
+
+/* — Scrub input box — */
+
+.advanced--skin-c .adv-input {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.3rem;
+  background: var(--color-bg);
+}
+
+.advanced--skin-c .adv-input:focus-within {
+  border-color: var(--color-text-muted);
+}
+
+.advanced--skin-c .adv-input--scrubbing {
+  border-color: var(--color-accent);
+}
+
+.advanced--skin-c .adv-input__field {
+  font-size: 0.8rem;
+}
+
+.advanced--skin-c .adv-input__unit {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+/* — Toggle / tristate — */
+
+.advanced--skin-c .adv-toggle__track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.5rem;
+  height: 1.35rem;
+  padding: 0.2rem;
+  border-radius: 0.675rem;
+  background: var(--color-bg);
+}
+
+.advanced--skin-c .adv-toggle__thumb {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.advanced--skin-c .adv-toggle[aria-checked='true'] .adv-toggle__track {
+  background: var(--color-accent);
+}
+
+.advanced--skin-c .adv-toggle[aria-checked='true'] .adv-toggle__thumb {
+  transform: translateX(1.15rem);
+  background: var(--color-bg);
+}
+
+.advanced--skin-c .adv-tristate {
+  display: inline-flex;
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.advanced--skin-c .adv-tristate__seg {
+  padding: 0.25rem 0.7rem;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.advanced--skin-c .adv-tristate__seg--active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* — Slider paint — */
+
+.advanced--skin-c .adv-slider__track {
+  height: 5px;
+  border-radius: 2.5px;
+  background: var(--color-bg);
+}
+
+.advanced--skin-c .adv-slider__fill {
+  border-radius: 2.5px;
+  background: var(--color-accent);
+}
+
+.advanced--skin-c .adv-slider__thumb {
+  width: 0.85rem;
+  height: 0.85rem;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--color-bg);
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.advanced--skin-c .adv-slider:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* — Readout — */
+
+.advanced--skin-c .adv-readout {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+/* — Bands: plot-styled strips — */
+
+.advanced--skin-c .adv-bands__strip {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 4.5rem;
+  padding: 0.3rem 0.3rem 0;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.375rem;
+  background: repeating-linear-gradient(
+      to top,
+      rgb(255 255 255 / 4%) 0 1px,
+      transparent 1px 25%
+    )
+    var(--color-bg);
+}
+
+.advanced--skin-c .adv-bands__band {
+  --bar-color: var(--color-accent);
+
+  position: relative;
+  flex: 1;
+  min-width: 2px;
+  background: linear-gradient(
+      color-mix(in srgb, var(--bar-color) 85%, transparent),
+      var(--bar-color)
+    )
+    bottom / 100% calc(clamp(0.02, var(--norm, 0), 1) * 100%) no-repeat;
+  border-radius: 2px 2px 0 0;
+  cursor: ns-resize;
+}
+
+.advanced--skin-c .adv-bands--ro .adv-bands__band {
+  --bar-color: var(--color-text-muted);
+
+  cursor: default;
+}
+
+.advanced--skin-c .adv-bands--live .adv-bands__band {
+  --bar-color: color-mix(in srgb, var(--color-accent) 70%, #ffffff);
+}
+
+/* The band's input: invisible but focusable; reveals on focus. */
+.advanced--skin-c .adv-bands__band .adv-input {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.advanced--skin-c .adv-bands__band .adv-input:focus-within {
+  border: 1px solid var(--color-accent);
+  background: rgb(12 20 32 / 92%);
+  opacity: 1;
+}
+
+.advanced--skin-c .adv-bands__band .adv-input__field {
+  width: 100%;
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+.advanced--skin-c .adv-bands__value {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.advanced--skin-c .adv-bands__chan {
+  flex-shrink: 0;
+  min-width: 2.6rem;
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+
+.advanced--skin-c .adv-bands__meta,
+.advanced--skin-c .adv-bands__empty {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}

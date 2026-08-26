@@ -1,14 +1,16 @@
 // PROTOTYPE — throwaway (Slice 20 spec exploration), do not review
 
-/** The `?variant=` layout switch — reload-stable, replaceState on set. */
+/** The `?variant=` SKIN switch — reload-stable, replaceState on set.
+ * v3: the id only picks a modifier class on the panel root
+ * (`advanced--skin-a|b|c`); the DOM is identical across skins. */
 import { createSignal } from 'solid-js'
 
 export type VariantId = 'a' | 'b' | 'c'
 
 export const VARIANTS: readonly { id: VariantId; label: string }[] = [
-  { id: 'a', label: 'A — Param cards + bar strips' },
-  { id: 'b', label: 'B — Category cards + cell grids' },
-  { id: 'c', label: 'C — Category cards + composite plots' },
+  { id: 'a', label: 'Skin A — flat grid' },
+  { id: 'b', label: 'Skin B — dense category cards' },
+  { id: 'c', label: 'Skin C — roomy category cards' },
 ]
 
 function readUrl(): VariantId {
