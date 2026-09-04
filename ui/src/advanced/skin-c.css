@@ -1,33 +1,63 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
-/* Skin C — roomy category cards. Same card structure as B but wider
- * columns, looser spacing, two-column label/control rows, long badge
- * text. Long arrays render as plot-styled band strips: a framed field
- * with quarter grid lines; bands are slim rounded bars filled from
- * --norm; the input inside hides with opacity (focusable per contract)
- * and reveals on focus. */
+/* Skin C — roomy category cards (the default). Every category is one
+ * full-width surface; its params are FORM ROWS on the outer grid's
+ * tracks (code | label | control | reset) through three subgrid
+ * levels (body → section → category body → card), two rows side by
+ * side once the panel is wide enough. Labels wrap, never truncate:
+ * the label track is `auto` (never narrower than its longest word),
+ * the control track flexes. The reset button is the divergence
+ * marker — a dot at rest that morphs into ↺ on row hover / focus.
+ * Access is color-coded on the 4-CC chip (accent / amber / muted);
+ * a preset-seated category is captioned "EQ preset". Long arrays
+ * span the whole row as paintable plot-styled strips. */
 
-/* — Roomy masonry — */
+.advanced--skin-c {
+  --control-h: 1.7rem;
+  --adv-fold: 240ms;
+  --amber: #dcae5e;
+  --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  --focus-line: var(--color-text-muted);
+  --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+/* — Outer tracks: (code | label | control | reset) × columns — */
 
 .advanced--skin-c .advanced__body {
-  columns: 30rem;
-  column-gap: 0.9rem;
+  --cols: 1;
+  --ctl-min: 11rem;
+
+  grid-template-columns: repeat(
+    var(--cols),
+    max-content auto minmax(var(--ctl-min), 1fr) max-content
+  );
+  gap: 0.8rem 0.6rem;
 }
+
+/* Phone widths: the control track's floor (box + slider) shrinks so
+ * the four tracks still fit; labels wrap harder. */
+@container (max-width: 30rem) {
+  .advanced--skin-c .advanced__body {
+    --ctl-min: 9rem;
+  }
+}
+
+@container (min-width: 46rem) {
+  .advanced--skin-c .advanced__body {
+    --cols: 2;
+  }
+}
+
+/* — Category surface — */
 
 .advanced--skin-c .adv-cat {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  margin-bottom: 0.9rem;
-  padding: 0.8rem 1rem;
-  border: 1px solid var(--color-surface);
+  padding: 0.7rem 0.6rem 0.8rem;
   border-radius: 0.6rem;
   background: var(--color-surface);
-  break-inside: avoid;
 }
 
-.advanced--skin-c .adv-cat--collapsed .adv-cat__body {
-  display: none;
+.advanced--skin-c .adv-cat__body {
+  row-gap: 0.1rem;
 }
 
 /* — Category header — */
@@ -36,33 +66,52 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding-bottom: 0.4rem;
+  margin: 0 0.4rem 0.4rem;
+  padding-bottom: 0.45rem;
   border-bottom: 1px solid var(--color-bg);
+  transition:
+    margin var(--adv-fold) ease,
+    padding var(--adv-fold) ease;
+}
+
+.advanced--skin-c .adv-cat--collapsed .adv-cat__head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom-color: transparent;
 }
 
 .advanced--skin-c .adv-cat__toggle {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.5rem;
   min-width: 0;
+}
+
+.advanced--skin-c .adv-cat__chevron {
+  display: inline-block;
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  transition: transform var(--adv-fold) ease;
 }
 
 .advanced--skin-c .adv-cat__chevron::before {
   content: '▾';
-  color: var(--color-accent);
-  font-size: 0.75rem;
 }
 
-.advanced--skin-c .adv-cat--collapsed .adv-cat__chevron::before {
-  content: '▸';
+.advanced--skin-c .adv-cat--collapsed .adv-cat__chevron {
+  transform: rotate(-90deg);
 }
 
 .advanced--skin-c .adv-cat__title {
-  overflow: hidden;
   color: var(--color-text);
   font-size: 0.95rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.advanced--skin-c .adv-cat--preset .adv-cat__title::after {
+  content: ' · EQ preset';
+  color: var(--color-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
 }
 
 .advanced--skin-c .adv-cat__count {
@@ -74,269 +123,359 @@
   content: ' params';
 }
 
-.advanced--skin-c .adv-cat__dot {
-  flex-shrink: 0;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 50%;
-  background: transparent;
-}
+/* — Reset = divergence marker: dot at rest, ↺ on hover / focus — */
 
-.advanced--skin-c .adv-cat--diverged .adv-cat__dot {
-  background: var(--color-accent);
+.advanced--skin-c .adv-card__reset,
+.advanced--skin-c .adv-cat__reset {
+  position: relative;
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    opacity 0.18s ease;
 }
 
 .advanced--skin-c .adv-cat__reset {
-  flex-shrink: 0;
   margin-left: auto;
-  padding: 0.1rem 0.45rem;
-  border: 1px solid var(--color-text-muted);
-  border-radius: 0.3rem;
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
 }
 
+/* The dot. */
+.advanced--skin-c .adv-card__reset::before,
 .advanced--skin-c .adv-cat__reset::before {
-  content: '↺ Reset';
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+  transform: translate(-50%, -50%);
+  transition: transform 0.18s ease;
 }
 
-.advanced--skin-c .adv-cat__reset:hover:not(:disabled) {
-  border-color: var(--color-accent);
+/* The glyph. */
+.advanced--skin-c .adv-card__reset::after,
+.advanced--skin-c .adv-cat__reset::after {
+  content: '↺';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   color: var(--color-accent);
+  font-size: 0.9rem;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
 }
 
+.advanced--skin-c .adv-card:hover .adv-card__reset::before,
+.advanced--skin-c .adv-card__reset:focus-visible::before,
+.advanced--skin-c .adv-cat__head:hover .adv-cat__reset::before,
+.advanced--skin-c .adv-cat__reset:focus-visible::before {
+  transform: translate(-50%, -50%) scale(0);
+}
+
+.advanced--skin-c .adv-card:hover .adv-card__reset::after,
+.advanced--skin-c .adv-card__reset:focus-visible::after,
+.advanced--skin-c .adv-cat__head:hover .adv-cat__reset::after,
+.advanced--skin-c .adv-cat__reset:focus-visible::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.advanced--skin-c .adv-card:hover .adv-card__reset,
+.advanced--skin-c .adv-cat__head:hover .adv-cat__reset {
+  border-color: var(--hover-line);
+}
+
+.advanced--skin-c .adv-card__reset:hover,
+.advanced--skin-c .adv-cat__reset:hover,
+.advanced--skin-c .adv-card__reset:focus-visible,
+.advanced--skin-c .adv-cat__reset:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+/* Clean: the marker vanishes (the slot stays, rows never shift). */
+.advanced--skin-c .adv-card__reset:disabled,
 .advanced--skin-c .adv-cat__reset:disabled {
   opacity: 0;
+  pointer-events: none;
 }
 
-/* — Param rows: label column + control column — */
+/* — Param rows: a subgrid over the four tracks — */
 
 .advanced--skin-c .adv-card {
   display: grid;
-  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
-  gap: 0.3rem 0.9rem;
+  grid-column: span 4;
+  grid-template-columns: subgrid;
   align-items: center;
-  min-width: 0;
-  padding: 0.35rem 0;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.4rem;
+  transition: background 0.12s ease;
 }
 
-/* Arrays: head above, strip below, full width. */
-.advanced--skin-c .adv-card--array {
-  grid-template-columns: minmax(0, 1fr);
+/* One row: DOM order is code, label, reset, control — sparse
+ * auto-placement would wrap the control (column 3) under the reset
+ * (column 4), so every child is pinned to row 1. */
+.advanced--skin-c .adv-card:not(.adv-card--array) > * {
+  grid-row: 1;
 }
 
-.advanced--skin-c .adv-card__head {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
+.advanced--skin-c .adv-card:hover {
+  background: rgb(255 255 255 / 3%);
+}
+
+.advanced--skin-c .adv-card:has(:focus-visible) {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
 
 .advanced--skin-c .adv-card__code {
-  flex-shrink: 0;
-  padding: 0.1rem 0.35rem;
+  grid-column: 1;
+  justify-self: start;
+  padding: 0.12rem 0.38rem;
   border-radius: 0.25rem;
   background: var(--color-bg);
   color: var(--color-accent);
-  font-size: 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+/* Access, color-coded on the chip: settable accent / experimental
+ * amber / read-only muted. */
+.advanced--skin-c .adv-card--exp .adv-card__code {
+  color: var(--amber);
+}
+
+.advanced--skin-c .adv-card--ro .adv-card__code {
+  color: var(--color-text-muted);
 }
 
 .advanced--skin-c .adv-card__label {
-  overflow: hidden;
+  grid-column: 2;
   color: var(--color-text);
   font-size: 0.8rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
 }
 
-.advanced--skin-c .adv-card__dot {
-  flex-shrink: 0;
-  width: 0.4rem;
-  height: 0.4rem;
-  margin-left: auto;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.advanced--skin-c .adv-card--diverged .adv-card__dot {
-  background: var(--color-accent);
-}
-
-.advanced--skin-c .adv-card__reset {
-  flex-shrink: 0;
-  padding: 0.05rem 0.35rem;
-  border: 1px solid var(--color-text-muted);
-  border-radius: 0.25rem;
+.advanced--skin-c .adv-card--ro .adv-card__label {
   color: var(--color-text-muted);
-  font-size: 0.7rem;
-}
-
-.advanced--skin-c .adv-card__reset::before {
-  content: '↺';
-}
-
-.advanced--skin-c .adv-card__reset:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.advanced--skin-c .adv-card__reset:disabled {
-  opacity: 0;
 }
 
 .advanced--skin-c .adv-card__control {
   display: flex;
+  grid-column: 3;
   align-items: center;
   gap: 0.6rem;
   min-width: 0;
 }
 
-/* — Badges: long text, tinted pills — */
-
-.advanced--skin-c .adv-badge {
-  flex-shrink: 0;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.6rem;
-  font-size: 0.6rem;
-  line-height: 1.5;
+.advanced--skin-c .adv-card__reset {
+  grid-column: 4;
 }
 
-.advanced--skin-c .adv-badge--exp {
-  background: rgb(224 163 54 / 16%);
-  color: #dcae5e;
+/* Arrays: head across the top, strip across the whole row. */
+.advanced--skin-c .adv-card--array {
+  grid-column: 1 / -1;
+  grid-template-rows: auto auto;
+  row-gap: 0.45rem;
 }
 
-.advanced--skin-c .adv-badge--exp::before {
-  content: 'Experimental';
+.advanced--skin-c .adv-card--array .adv-card__code {
+  grid-row: 1;
 }
 
-.advanced--skin-c .adv-badge--ro {
-  background: rgb(143 161 179 / 14%);
-  color: var(--color-text-muted);
+.advanced--skin-c .adv-card--array .adv-card__label {
+  grid-column: 2 / -2;
+  grid-row: 1;
 }
 
-.advanced--skin-c .adv-badge--ro::before {
-  content: 'Read-only';
+.advanced--skin-c .adv-card--array .adv-card__reset {
+  grid-column: -2;
+  grid-row: 1;
 }
 
-.advanced--skin-c .adv-badge--preset {
-  background: rgb(0 180 255 / 14%);
-  color: var(--color-accent);
+.advanced--skin-c .adv-card--array .adv-card__control {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
-.advanced--skin-c .adv-badge--preset::before {
-  content: 'EQ preset';
-}
-
-/* — Scrub input box — */
+/* — Numeric box — */
 
 .advanced--skin-c .adv-input {
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--color-bg);
-  border-radius: 0.3rem;
-  background: var(--color-bg);
-}
+  --adv-pad-x: 0.5em;
 
-.advanced--skin-c .adv-input:focus-within {
-  border-color: var(--color-text-muted);
-}
-
-.advanced--skin-c .adv-input--scrubbing {
-  border-color: var(--color-accent);
+  font-size: 0.8rem;
 }
 
 .advanced--skin-c .adv-input__field {
-  font-size: 0.8rem;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.35rem;
+  background: var(--color-bg);
+  transition: border-color 0.12s ease;
+}
+
+.advanced--skin-c .adv-card:hover .adv-input__field:read-write {
+  border-color: var(--hover-line);
+}
+
+.advanced--skin-c .adv-input__field:focus {
+  border-color: var(--focus-line);
+  outline: none;
+}
+
+.advanced--skin-c .adv-input--scrubbing .adv-input__field {
+  border-color: var(--color-accent);
+}
+
+.advanced--skin-c .adv-input__field:read-only {
+  color: var(--color-text-muted);
 }
 
 .advanced--skin-c .adv-input__unit {
   color: var(--color-text-muted);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
 }
 
-/* — Toggle / tristate — */
+/* — Switch (native checkbox) — */
 
-.advanced--skin-c .adv-toggle__track {
-  display: inline-flex;
-  align-items: center;
-  width: 2.5rem;
-  height: 1.35rem;
-  padding: 0.2rem;
-  border-radius: 0.675rem;
+.advanced--skin-c .adv-toggle {
+  position: relative;
+  width: calc(var(--control-h) * 1.75);
+  height: var(--control-h);
+  border-radius: 999px;
   background: var(--color-bg);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.12s ease;
 }
 
-.advanced--skin-c .adv-toggle__thumb {
-  width: 0.95rem;
-  height: 0.95rem;
+.advanced--skin-c .adv-toggle::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(var(--control-h) - 6px);
+  height: calc(var(--control-h) - 6px);
   border-radius: 50%;
   background: var(--color-text-muted);
-  transition: transform 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
-.advanced--skin-c .adv-toggle[aria-checked='true'] .adv-toggle__track {
+.advanced--skin-c .adv-toggle:checked {
   background: var(--color-accent);
 }
 
-.advanced--skin-c .adv-toggle[aria-checked='true'] .adv-toggle__thumb {
-  transform: translateX(1.15rem);
+.advanced--skin-c .adv-toggle:checked::before {
   background: var(--color-bg);
+  transform: translateX(calc(var(--control-h) * 0.75));
 }
 
-.advanced--skin-c .adv-tristate {
-  display: inline-flex;
-  border-radius: 0.4rem;
-  overflow: hidden;
+.advanced--skin-c .adv-card:hover .adv-toggle {
+  box-shadow: inset 0 0 0 1px var(--hover-line);
 }
 
-.advanced--skin-c .adv-tristate__seg {
-  padding: 0.25rem 0.7rem;
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-}
-
-.advanced--skin-c .adv-tristate__seg--active {
-  background: var(--color-accent);
-  color: var(--color-bg);
-}
-
-/* — Slider paint — */
-
-.advanced--skin-c .adv-slider__track {
-  height: 5px;
-  border-radius: 2.5px;
-  background: var(--color-bg);
-}
-
-.advanced--skin-c .adv-slider__fill {
-  border-radius: 2.5px;
-  background: var(--color-accent);
-}
-
-.advanced--skin-c .adv-slider__thumb {
-  width: 0.85rem;
-  height: 0.85rem;
-  transform: translate(-50%, -50%);
-  border: 2px solid var(--color-bg);
-  border-radius: 50%;
-  background: var(--color-accent);
-}
-
-.advanced--skin-c .adv-slider:focus-visible {
+.advanced--skin-c .adv-toggle:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/* — Readout — */
+/* — Tristate (native radios + labels) — */
 
-.advanced--skin-c .adv-readout {
-  overflow-wrap: anywhere;
-  color: var(--color-text);
-  font-size: 0.8rem;
+.advanced--skin-c .adv-tristate {
+  height: var(--control-h);
+  overflow: hidden;
+  border: 1px solid var(--color-bg);
+  border-radius: 0.35rem;
+  background: var(--color-bg);
+  transition: border-color 0.12s ease;
 }
 
-/* — Bands: plot-styled strips — */
+.advanced--skin-c .adv-card:hover .adv-tristate {
+  border-color: var(--hover-line);
+}
+
+.advanced--skin-c .adv-tristate__seg {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.advanced--skin-c .adv-tristate__seg:hover {
+  color: var(--color-text);
+}
+
+.advanced--skin-c .adv-tristate__radio:checked + .adv-tristate__seg {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.advanced--skin-c .adv-tristate__radio:focus-visible + .adv-tristate__seg {
+  box-shadow: inset 0 0 0 1px var(--color-text);
+}
+
+/* — Slider paint — */
+
+.advanced--skin-c .adv-slider {
+  height: var(--control-h);
+}
+
+.advanced--skin-c .adv-slider__track {
+  height: 4px;
+  margin: 0 0.45rem;
+  border-radius: 2px;
+  background: var(--color-bg);
+}
+
+.advanced--skin-c .adv-slider__fill {
+  border-radius: 2px;
+  background: var(--color-accent);
+  opacity: 0.8;
+}
+
+.advanced--skin-c .adv-slider__thumb {
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--color-accent);
+  transform: translate(-50%, -50%);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.advanced--skin-c .adv-card:hover .adv-slider__thumb {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.advanced--skin-c .adv-slider:focus-visible {
+  outline: none;
+}
+
+.advanced--skin-c .adv-slider:focus-visible .adv-slider__thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* — Bands: plot-styled, paintable strips — */
 
 .advanced--skin-c .adv-bands__strip {
   display: flex;
@@ -352,6 +491,19 @@
       transparent 1px 25%
     )
     var(--color-bg);
+  cursor: crosshair;
+  transition: border-color 0.12s ease;
+}
+
+.advanced--skin-c .adv-bands--ro .adv-bands__strip {
+  cursor: default;
+}
+
+.advanced--skin-c
+  .adv-card:hover
+  .adv-bands:not(.adv-bands--ro)
+  .adv-bands__strip {
+  border-color: var(--hover-line);
 }
 
 .advanced--skin-c .adv-bands__band {
@@ -366,44 +518,44 @@
     )
     bottom / 100% calc(clamp(0.02, var(--norm, 0), 1) * 100%) no-repeat;
   border-radius: 2px 2px 0 0;
-  cursor: ns-resize;
+  transition: filter 0.12s ease;
+}
+
+.advanced--skin-c .adv-bands:not(.adv-bands--ro) .adv-bands__band:hover {
+  filter: brightness(1.3);
 }
 
 .advanced--skin-c .adv-bands--ro .adv-bands__band {
   --bar-color: var(--color-text-muted);
-
-  cursor: default;
 }
 
 .advanced--skin-c .adv-bands--live .adv-bands__band {
   --bar-color: color-mix(in srgb, var(--color-accent) 70%, #ffffff);
 }
 
-/* The band's input: invisible but focusable; reveals on focus. */
+/* The band's box: invisible but focusable; reveals on focus. */
 .advanced--skin-c .adv-bands__band .adv-input {
+  --adv-pad-x: 0px;
+  --adv-unit-w: 0px;
+
   position: absolute;
   inset: 0;
-  padding: 0;
+  width: auto;
+  font-size: 0.6rem;
   opacity: 0;
 }
 
 .advanced--skin-c .adv-bands__band .adv-input:focus-within {
-  border: 1px solid var(--color-accent);
-  background: rgb(12 20 32 / 92%);
   opacity: 1;
 }
 
 .advanced--skin-c .adv-bands__band .adv-input__field {
-  width: 100%;
-  font-size: 0.6rem;
+  height: 100%;
+  border: 1px solid var(--color-accent);
+  border-radius: 2px;
+  background: rgb(12 20 32 / 92%);
+  color: var(--color-text);
   text-align: center;
-}
-
-.advanced--skin-c .adv-bands__value {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  opacity: 0;
 }
 
 .advanced--skin-c .adv-bands__chan {

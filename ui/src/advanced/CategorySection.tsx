@@ -2,26 +2,30 @@
 
 /**
  * One category as one semantic section — the SAME DOM in every skin:
- * header (collapse toggle wrapping chevron + title, param count,
- * divergence marker, scoped reset) + body wrapper > param cards.
- * Collapsible via the header toggle; expanded by default; collapsed is
- * a BEM modifier on the section — the hide itself is skin CSS. Reset =
- * `resetProfile(id, ccs)`; see wiring's `categoryCcs` for the
- * preset-shadowing edge.
+ * header (collapse toggle wrapping chevron + title, param count, the
+ * scoped reset that doubles as the divergence marker) + body wrapper
+ * > param cards. Collapsed is a BEM modifier on the section; the
+ * fold animation and the delayed `visibility: hidden` that drops the
+ * body out of the tab order are skin CSS. Expanded by default.
+ * `adv-cat--preset` marks a category whose live truth sits on the
+ * selected EQ preset (the skin captions it); divergence and reset
+ * follow that seat (wiring's `categorySeats`).
  */
 import { For, createSignal, type Component } from 'solid-js'
 import type { AdvancedCategory } from './categories'
 import ParamCard from './ParamCard'
-import { categoryDiverged, resetCategory } from './wiring'
+import { categoryDiverged, categoryOnPreset, resetCategory } from './wiring'
 
 const CategorySection: Component<{ category: AdvancedCategory }> = (props) => {
   const [open, setOpen] = createSignal(true)
+  const params = (): readonly string[] => props.category.params
   return (
     <section
       class="adv-cat"
       classList={{
         'adv-cat--collapsed': !open(),
-        'adv-cat--diverged': categoryDiverged(props.category.params),
+        'adv-cat--diverged': categoryDiverged(params()),
+        'adv-cat--preset': categoryOnPreset(params()),
       }}
       aria-label={props.category.label}
     >
@@ -35,24 +39,23 @@ const CategorySection: Component<{ category: AdvancedCategory }> = (props) => {
           <span class="adv-cat__chevron" aria-hidden="true" />
           <span class="adv-cat__title">{props.category.label}</span>
         </button>
-        <span class="adv-cat__count">
-          {String(props.category.params.length)}
-        </span>
-        <span class="adv-cat__dot" aria-hidden="true" />
+        <span class="adv-cat__count">{String(params().length)}</span>
         <button
           type="button"
           class="adv-cat__reset"
-          disabled={!categoryDiverged(props.category.params)}
+          disabled={!categoryDiverged(params())}
           aria-label={`Reset ${props.category.label}`}
           title={`Reset ${props.category.label}`}
           onClick={() => {
-            resetCategory(props.category.params)
+            resetCategory(params())
           }}
         />
       </header>
       <div class="adv-cat__body">
-        <For each={props.category.params}>
-          {(name) => <ParamCard name={name} />}
+        <For each={params()}>
+          {(name) => (
+            <ParamCard name={name} categoryLabel={props.category.label} />
+          )}
         </For>
       </div>
     </section>

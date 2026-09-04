@@ -1,9 +1,14 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
-/* Base layer shared by all three skins: the panel shell, functional
- * chrome resets (bare buttons/inputs the skins paint), and interaction
- * plumbing (cursors, touch-action, the label-box input fill). Anything
- * a skin might want different lives in skin-{a,b,c}.css. */
+/* Base layer shared by all three skins: the panel shell, the layout
+ * PLUMBING every skin builds on (the body is THE grid; each category
+ * section spans it and subgrids it, its body subgrids again, so cards
+ * land on the outer tracks in every skin; the accordion fold), bare
+ * chrome resets (native checkbox / radios / text fields the skins
+ * paint), and interaction plumbing (cursors, touch-action, the numeric
+ * box geometry). Skins set tracks, colors, sizes and durations —
+ * `--control-h` (one height for box / tristate / toggle), `--adv-fold`
+ * (accordion duration), `--adv-pad-x` (box padding). */
 
 /* — Panel shell — */
 
@@ -12,6 +17,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  /* Skins pick their column count from the panel's width. */
+  container-type: inline-size;
 }
 
 .advanced__header {
@@ -38,18 +45,60 @@
   content: '▾';
 }
 
+/* — Layout plumbing: one grid, subgridded twice. Skins own the
+ * tracks and gaps of `.advanced__body`; sections inherit them. — */
+
+.advanced__body {
+  display: grid;
+}
+
+.adv-cat {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  /* The fold: the body row goes 1fr ↔ 0fr, animated by the skin's
+   * `--adv-fold`; the body clips itself meanwhile. */
+  grid-template-rows: auto 1fr;
+  transition: grid-template-rows var(--adv-fold, 0s) ease;
+}
+
+.adv-cat--collapsed {
+  grid-template-rows: auto 0fr;
+}
+
+.adv-cat__head {
+  grid-column: 1 / -1;
+}
+
+.adv-cat__body {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  min-height: 0;
+  overflow: clip;
+  /* Room for focus rings / thumb overhang at the body's edges. */
+  overflow-clip-margin: 3px;
+  transition: visibility 0s linear 0s;
+}
+
+/* Collapsed content leaves the tab order — after the fold, so the
+ * animation never runs over an already-vanished body. */
+.adv-cat--collapsed .adv-cat__body {
+  visibility: hidden;
+  transition-delay: var(--adv-fold, 0s);
+}
+
 /* — Bare chrome resets (skins paint these) — */
 
 .adv-cat__toggle,
 .adv-cat__reset,
-.adv-card__reset,
-.adv-toggle,
-.adv-tristate__seg {
+.adv-card__reset {
   padding: 0;
   border: none;
   background: none;
   color: inherit;
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
@@ -58,21 +107,80 @@
   cursor: default;
 }
 
-/* — Scrub input: the LABEL is the box — clicks anywhere (unit
- * included) focus the field; no dead zones. — */
+/* The card is a LABEL: no text cursor over it. */
+.adv-card {
+  cursor: default;
+}
+
+/* Native checkbox as a switch surface; skins paint via `:checked`. */
+.adv-toggle {
+  flex: none;
+  margin: 0;
+  appearance: none;
+  cursor: pointer;
+}
+
+/* Native radios as a segmented control: each radio stays focusable
+ * but collapses behind its label (opacity, never display —
+ * ADR-0011); skins paint `:checked + label`. */
+.adv-tristate {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.adv-tristate__radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adv-tristate__seg {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* — Numeric box: the field fills the wrapper; the unit is an inert
+ * overlay the field pads for. Every box is the same width, unit or
+ * not: 5ch of digits + 4ch of unit + padding. The two lengths are
+ * REGISTERED so `ch`/`em` resolve on the wrapper once and inherit as
+ * absolute lengths — the unit may use a smaller font. — */
+
+@property --adv-unit-w {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --adv-pad-x {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
 
 .adv-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  cursor: ns-resize;
+  --adv-unit-w: 4ch;
+  --adv-pad-x: 0.45em;
+
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: calc(5ch + var(--adv-unit-w) + 2 * var(--adv-pad-x));
   touch-action: none;
 }
 
+.adv-input--scrub {
+  cursor: ns-resize;
+}
+
 .adv-input__field {
-  flex: 1;
-  width: 3.6rem;
-  min-width: 0;
+  display: block;
+  width: 100%;
+  height: var(--control-h, auto);
+  padding: 0 calc(var(--adv-unit-w) + var(--adv-pad-x)) 0 var(--adv-pad-x);
   border: none;
   background: none;
   color: inherit;
@@ -82,12 +190,18 @@
 }
 
 .adv-input__field:focus {
-  outline: none;
   cursor: text;
 }
 
 .adv-input__unit {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  right: var(--adv-pad-x);
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  width: var(--adv-unit-w);
+  padding-left: 0.35em;
   pointer-events: none;
 }
 
@@ -121,7 +235,8 @@
   left: calc(clamp(0, var(--norm, 0), 1) * 100%);
 }
 
-/* — Bands container: functional column flow (strip layout per skin) — */
+/* — Bands container: functional column flow; the strip is the paint
+ * surface (no text selection mid-stroke) — */
 
 .adv-bands {
   display: flex;
@@ -141,6 +256,8 @@
 .adv-bands__strip {
   flex: 1;
   min-width: 0;
+  touch-action: none;
+  user-select: none;
 }
 
 /* — Switcher pill: deliberately not part of the design — */
@@ -172,6 +289,6 @@
 }
 
 .proto-switcher__label {
-  min-width: 14rem;
+  min-width: 16rem;
   text-align: center;
 }

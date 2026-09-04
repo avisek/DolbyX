@@ -2,10 +2,13 @@
 
 /**
  * The read/write wiring every widget shares — EqCurve's source rule
- * generalized: a preset-carried param with a preset selected reads and
- * writes the PRESET; everything else the profile.
+ * generalized: a preset-carried param with a preset selected reads,
+ * writes, diverges against and resets the PRESET; everything else the
+ * profile. Category-level divergence/reset splits a category's ccs
+ * across those two seats and touches each with its own command.
  */
 import { paramDef, presetCarried, type ParameterDef } from '../lib/parameters'
+import type { EqPreset, Profile } from '../lib/ws'
 import {
   paramsDiverge,
   resolvedEqParam,
@@ -17,6 +20,7 @@ import {
   editEqPresetLive,
   editProfile,
   editProfileLive,
+  resetEqPreset,
   resetProfile,
 } from '../store/ws'
 
@@ -71,7 +75,8 @@ export function commitParam(
   if (profile) editProfile(profile.id, { [def.name]: values })
 }
 
-/** Continuous drag step — optimistic live edit. */
+/** Continuous step (drag / scrub / typing / painting) — optimistic
+ * live edit. */
 export function liveParam(def: ParameterDef, values: readonly number[]): void {
   const preset = selectedEqPreset()
   if (carried(def.name) && preset) {
@@ -91,46 +96,73 @@ export function paramDiverged(def: ParameterDef): boolean {
   return profile ? paramsDiverge(profile, [def.name]) : false
 }
 
-/** Per-param reset — profile path only: the wire's `reset_eq_preset`
- * carries `only` (lib/ws.ts Command) but store/ws's `resetEqPreset`
- * doesn't expose it, so preset-path cards omit the affordance. */
-export function canResetParam(def: ParameterDef): boolean {
-  return isWritable(def) && !writesToPreset(def)
-}
-
+/** Per-param reset — scoped `reset_eq_preset` / `reset_profile` on
+ * whichever seat the card writes. */
 export function resetParam(def: ParameterDef): void {
+  if (!isWritable(def)) return
+  const preset = selectedEqPreset()
+  if (carried(def.name) && preset) {
+    resetEqPreset(preset.id, [def.name])
+    return
+  }
   const profile = selectedProfile()
   if (profile) resetProfile(profile.id, [def.name])
 }
 
 // — Per-category divergence + reset —
 
-/** The 4-CCs a category-level reset targets: the category's writable
- * params, minus preset-shadowed ones while a preset is selected — those
- * params' live truth sits on the preset, so a profile-scoped reset
- * would touch stale profile copies underneath. EDGE (rough): the geq /
- * ieq categories therefore lose their reset (and divergence marker)
- * entirely while a preset is selected, even if the preset diverges. */
-export function categoryCcs(params: readonly string[]): readonly string[] {
-  return params.filter((name) => {
-    const def = paramDef(name)
-    return isWritable(def) && !writesToPreset(def)
-  })
+/** A category's writable ccs split by seat: the preset-carried ones
+ * sit on the selected preset (while one is selected), the rest on the
+ * profile. Categories are seat-pure in practice (ieq / geq are the
+ * carried nine), but the split keeps the rule general. */
+interface CategorySeats {
+  readonly preset: EqPreset | undefined
+  readonly profile: Profile | undefined
+  readonly presetCcs: readonly string[]
+  readonly profileCcs: readonly string[]
 }
 
-/** Category-level divergence — any profile-path writable param off its
- * baseline (same ccs the reset targets). */
+function categorySeats(params: readonly string[]): CategorySeats {
+  const preset = selectedEqPreset()
+  const presetCcs: string[] = []
+  const profileCcs: string[] = []
+  for (const name of params) {
+    if (!isWritable(paramDef(name))) continue
+    if (preset && carried(name)) presetCcs.push(name)
+    else profileCcs.push(name)
+  }
+  return { preset, profile: selectedProfile(), presetCcs, profileCcs }
+}
+
+/** Whether the category's live truth sits (partly) on the selected EQ
+ * preset — the `adv-cat--preset` modifier. */
+export function categoryOnPreset(params: readonly string[]): boolean {
+  return categorySeats(params).presetCcs.length > 0
+}
+
+/** Category-level divergence — any writable param off its seat's
+ * baseline (exactly the ccs the category reset targets). */
 export function categoryDiverged(params: readonly string[]): boolean {
-  const profile = selectedProfile()
-  if (!profile) return false
-  const ccs = categoryCcs(params)
-  return ccs.length > 0 && paramsDiverge(profile, ccs)
+  const seats = categorySeats(params)
+  const onPreset =
+    seats.preset !== undefined &&
+    seats.presetCcs.length > 0 &&
+    paramsDiverge(seats.preset, seats.presetCcs)
+  const onProfile =
+    seats.profile !== undefined &&
+    seats.profileCcs.length > 0 &&
+    paramsDiverge(seats.profile, seats.profileCcs)
+  return onPreset || onProfile
 }
 
 export function resetCategory(params: readonly string[]): void {
-  const profile = selectedProfile()
-  const ccs = categoryCcs(params)
-  if (profile && ccs.length > 0) resetProfile(profile.id, ccs)
+  const seats = categorySeats(params)
+  if (seats.preset && seats.presetCcs.length > 0) {
+    resetEqPreset(seats.preset.id, seats.presetCcs)
+  }
+  if (seats.profile && seats.profileCcs.length > 0) {
+    resetProfile(seats.profile.id, seats.profileCcs)
+  }
 }
 
 /** The effective band count for a band array — the group's resolved

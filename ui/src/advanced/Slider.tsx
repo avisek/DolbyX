@@ -7,12 +7,16 @@
  * mapping absolute x → value. Publishes `--value` (display units) and
  * `--norm` (0–1); the skin paints track / fill / thumb entirely in
  * CSS. Drag = optimistic live per step, commit on release (the panel's
- * shared write discipline).
+ * shared write discipline). Lives inside the card LABEL: a div with
+ * tabindex is not "interactive content", so the label would forward
+ * its clicks to the card's text field — `click` is cancelled here to
+ * keep focus on the slider.
  */
 import type { Component } from 'solid-js'
 
 const Slider: Component<{
-  label: string
+  /** Accessible name. */
+  name: string
   value: () => number
   min: number
   max: number
@@ -20,7 +24,7 @@ const Slider: Component<{
   fine: number
   /** Display units per PageUp/Down step. */
   coarse: number
-  unit?: string | undefined
+  unit: string
   onLive?: ((value: number) => void) | undefined
   onCommit: (value: number) => void
 }> = (props) => {
@@ -49,20 +53,25 @@ const Slider: Component<{
     props.onCommit(clamp(props.value() + delta))
   }
 
+  const end = (event: PointerEvent): void => {
+    if (!dragging) return
+    dragging = false
+    root.releasePointerCapture(event.pointerId)
+    if (last !== undefined) props.onCommit(last)
+  }
+
   return (
     <div
       ref={root}
       class="adv-slider"
       role="slider"
       tabindex="0"
-      aria-label={props.label}
+      aria-label={props.name}
       aria-valuemin={props.min}
       aria-valuemax={props.max}
       aria-valuenow={props.value()}
       aria-valuetext={
-        props.unit === undefined || props.unit === ''
-          ? undefined
-          : `${String(props.value())} ${props.unit}`
+        props.unit === '' ? undefined : `${String(props.value())} ${props.unit}`
       }
       style={{
         '--value': String(props.value()),
@@ -85,11 +94,11 @@ const Slider: Component<{
           ;(props.onLive ?? props.onCommit)(value)
         }
       }}
-      onPointerUp={(event) => {
-        if (!dragging) return
-        dragging = false
-        root.releasePointerCapture(event.pointerId)
-        if (last !== undefined) props.onCommit(last)
+      onPointerUp={end}
+      onPointerCancel={end}
+      onClick={(event) => {
+        // Not interactive content: cancel the card label's forwarding.
+        event.preventDefault()
       }}
       onKeyDown={(event) => {
         const key = event.key
