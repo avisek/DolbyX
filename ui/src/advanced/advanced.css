@@ -56,14 +56,21 @@
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  /* The fold: the body row goes 1fr ↔ 0fr, animated by the skin's
-   * `--adv-fold`; the body clips itself meanwhile. */
-  grid-template-rows: auto 1fr;
+  /* The fold: body row 1fr ↔ 0fr, timed by the skin's `--adv-fold`.
+   *   minmax(0, …)         row may shrink to nothing
+   *   align-content: start leftover space stays empty, head never grows
+   *   align-items: start   body keeps full height, spills past its row
+   *   overflow             this box clips the spill
+   * Mid-fold the row is undersized; only this box's height is right. */
+  grid-template-rows: auto minmax(0, 1fr);
   transition: grid-template-rows var(--adv-fold, 0s) ease;
+  align-content: start;
+  align-items: start;
+  overflow: hidden;
 }
 
 .adv-cat--collapsed {
-  grid-template-rows: auto 0fr;
+  grid-template-rows: auto minmax(0, 0fr);
 }
 
 .adv-cat__head {
@@ -74,10 +81,6 @@
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  min-height: 0;
-  overflow: clip;
-  /* Room for focus rings / thumb overhang at the body's edges. */
-  overflow-clip-margin: 3px;
   transition: visibility 0s linear 0s;
 }
 
