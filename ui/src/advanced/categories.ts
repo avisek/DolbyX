@@ -22,12 +22,12 @@ export const CATEGORIES: readonly AdvancedCategory[] = [
   },
   {
     name: 'ieq',
-    label: 'Intelligent EQ',
+    label: 'Intelligent Equalizer',
     params: ['ienb', 'iebf', 'iebt', 'ieon', 'iea'],
   },
   {
     name: 'geq',
-    label: 'Graphic EQ',
+    label: 'Graphic Equalizer',
     params: ['geon', 'genb', 'gebf', 'gebg'],
   },
   {

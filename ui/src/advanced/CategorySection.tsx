@@ -2,14 +2,16 @@
 
 /**
  * One category as one semantic section — the SAME DOM in every skin:
- * header (collapse toggle wrapping chevron + title, param count, the
- * scoped reset that doubles as the divergence marker) + body wrapper
- * > param cards. Collapsed is a BEM modifier on the section; the
- * fold animation and the delayed `visibility: hidden` that drops the
- * body out of the tab order are skin CSS. Expanded by default.
- * `adv-cat--preset` marks a category whose live truth sits on the
- * selected EQ preset (the skin captions it); divergence and reset
- * follow that seat (wiring's `categorySeats`).
+ * header (the scoped reset that doubles as the divergence marker,
+ * FIRST — then the collapse toggle, a button that fills the whole
+ * header with title / count / chevron inside it, no nested
+ * interactive content; the skin lays the reset over it in its own
+ * spot) + body wrapper > param cards. Collapsed is a BEM modifier on
+ * the section; the fold animation and the delayed `visibility:
+ * hidden` that drops the body out of the tab order are skin CSS.
+ * Expanded by default. `adv-cat--preset` marks a category whose live
+ * truth sits on the selected EQ preset (the skin captions it);
+ * divergence and reset follow that seat (wiring's `categorySeats`).
  */
 import { For, createSignal, type Component } from 'solid-js'
 import type { AdvancedCategory } from './categories'
@@ -32,16 +34,6 @@ const CategorySection: Component<{ category: AdvancedCategory }> = (props) => {
       <header class="adv-cat__head">
         <button
           type="button"
-          class="adv-cat__toggle"
-          aria-expanded={open()}
-          onClick={() => setOpen(!open())}
-        >
-          <span class="adv-cat__chevron" aria-hidden="true" />
-          <span class="adv-cat__title">{props.category.label}</span>
-        </button>
-        <span class="adv-cat__count">{String(params().length)}</span>
-        <button
-          type="button"
           class="adv-cat__reset"
           disabled={!categoryDiverged(params())}
           aria-label={`Reset ${props.category.label}`}
@@ -50,6 +42,16 @@ const CategorySection: Component<{ category: AdvancedCategory }> = (props) => {
             resetCategory(params())
           }}
         />
+        <button
+          type="button"
+          class="adv-cat__toggle"
+          aria-expanded={open()}
+          onClick={() => setOpen(!open())}
+        >
+          <span class="adv-cat__title">{props.category.label}</span>
+          <span class="adv-cat__count">{String(params().length)}</span>
+          <span class="adv-cat__chevron" aria-hidden="true" />
+        </button>
       </header>
       <div class="adv-cat__body">
         <For each={params()}>

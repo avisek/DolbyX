@@ -2,25 +2,28 @@
 
 /**
  * The one numeric box every number in the panel uses — scalars, band
- * cells, read-only readouts. The real `<input>` fills the wrapper edge
+ * editors, read-only readouts. The real `<input>` fills the wrapper edge
  * to edge; the unit is an inert overlay (`pointer-events: none`) the
  * field reserves padding for — no label hack, the unit never
- * selectable. Typing commits INSTANTLY: every `input` event whose text
- * is a complete number inside [min, max] is a live optimistic write;
- * partials ("-", "1.") and out-of-range text are ignored until blur,
- * which clamps + commits and normalizes the text to store truth. The
- * field is uncontrolled while focused (store updates never clobber
- * typing) and mirrors the store otherwise.
+ * selectable. Typing commits INSTANTLY, no debounce: every `input`
+ * event whose text is a complete number is a live optimistic write of
+ * that number CLAMPED to [min, max] — the text stays exactly as typed
+ * ("500" in a 0–10 box writes 10 and keeps reading "500"); blur or
+ * Enter re-syncs the field to the committed value. Partials ("-",
+ * "1.") are ignored. The field is uncontrolled while focused (store
+ * updates never clobber typing) and mirrors the store otherwise
+ * (read-only fields always — live arrays keep ticking in an open
+ * editor).
  *
- * `scrub` adds the vertical pointer-lock scrub (scalars only — bands
- * paint instead): pointerdown arms; > 3 px of vertical movement
- * engages `requestPointerLock`, then every 4 css px steps one `coarse`
- * display unit (Shift = one `fine` step — rebased on flip so the value
- * never jumps); release exits the lock and commits. Locked `movementY`
- * arrives in device px, so deltas divide by `devicePixelRatio`
- * (DPI-agnostic; the rare no-lock fallback under-scales on hiDPI).
- * Clamp re-baselining: pinning at a bound resets the accumulator, so
- * reversal bites immediately. A plain click falls through to typing.
+ * `scrub` adds the vertical pointer-lock scrub (scalars AND band cells
+ * — a gesture that starts on the box is never a paint): pointerdown
+ * arms; > 3 px of vertical movement engages `requestPointerLock`, then
+ * every 4 css px steps one `coarse` display unit (Shift = one `fine`
+ * step — rebased on flip so the value never jumps); release exits the
+ * lock and commits. Locked `movementY` arrives in device px, so deltas
+ * divide by `devicePixelRatio`. Clamp re-baselining: pinning at a
+ * bound resets the accumulator, so reversal bites immediately. A plain
+ * click falls through to typing.
  */
 import { Show, createEffect, createSignal, on, type Component } from 'solid-js'
 
@@ -44,6 +47,10 @@ const NumberInput: Component<{
   unit: string
   readOnly?: boolean | undefined
   scrub?: boolean | undefined
+  /** Roving-tabindex members (band editors) pass -1. */
+  tabIndex?: number | undefined
+  /** The field element, for composites that focus it programmatically. */
+  ref?: ((input: HTMLInputElement) => void) | undefined
   onLive?: ((value: number) => void) | undefined
   onCommit?: ((value: number) => void) | undefined
 }> = (props) => {
@@ -64,11 +71,16 @@ const NumberInput: Component<{
     return NUMBER.test(text) ? Number(text) : undefined
   }
 
+  /** Re-syncs the text to store truth. */
+  const sync = (): void => {
+    input.value = String(props.value())
+  }
+
   // Mirror the store whenever the field isn't being typed in (a scrub
   // blurs the field first, so live steps flow through here too).
   createEffect(
-    on(props.value, (value) => {
-      if (document.activeElement !== input) input.value = String(value)
+    on(props.value, () => {
+      if (props.readOnly === true || document.activeElement !== input) sync()
     }),
   )
 
@@ -161,19 +173,21 @@ const NumberInput: Component<{
       }}
     >
       <input
-        ref={input}
+        ref={(element) => {
+          input = element
+          props.ref?.(element)
+        }}
         id={props.id}
         class="adv-input__field"
         type="text"
         inputmode="decimal"
         aria-label={props.name}
         readonly={props.readOnly === true}
+        tabindex={props.tabIndex}
         onInput={() => {
+          // Instant, clamped: the text stays as typed.
           const value = parsed()
-          if (value === undefined || value < props.min || value > props.max) {
-            return
-          }
-          live(round(value))
+          if (value !== undefined) live(clamp(value))
         }}
         onBlur={() => {
           const value = parsed()
@@ -181,12 +195,12 @@ const NumberInput: Component<{
             const clamped = clamp(value)
             if (clamped !== props.value()) props.onCommit?.(clamped)
           }
-          input.value = String(props.value())
+          sync()
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') input.blur()
           else if (event.key === 'Escape') {
-            input.value = String(props.value())
+            sync()
             input.blur()
           }
         }}

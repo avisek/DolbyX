@@ -1,11 +1,16 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
-/* Skin B — dense category cards (concept only). Full-width category
- * surfaces holding up to three compact rows side by side on the outer
- * tracks (code | label | control | reset) × columns, sliders hidden
- * (the box is the whole control), long arrays as value-cell grids —
- * the SAME band DOM as A/C with the input text as the visible thing.
- * Painting a wrapped cell grid is meaningless here; type instead. */
+/* Skin B — dense category cards (concept only). Category cards flow
+ * in a tight multi-column masonry (`columns: 21rem`; native masonry
+ * when the browser has it); each card is its own four-track grid —
+ * code | label | reset | control — with fixed code / reset tracks, a
+ * flexing label and a shrink-wrapped control track (as wide as the
+ * category's widest control), so controls right-align across cards.
+ * Sliders hidden (the box is the whole control); long arrays are
+ * value-cell grids — the SAME band DOM as A/C with no bars, the input
+ * text as the visible cell, filling the control track (`contain:
+ * inline-size` keeps a 40-cell grid from inflating it). Painting a
+ * wrapped cell grid is meaningless; cells scrub and type instead. */
 
 .advanced--skin-b {
   --control-h: 1.35rem;
@@ -13,95 +18,90 @@
   --amber: #dcae5e;
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
   --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --code-w: 2.7rem;
+  --reset-w: 1.1rem;
+  /* Subgrid rows inset the control track by their edge padding; the
+   * floor keeps two 3.3rem cells (+ gap) on one line after that. */
+  --ctl-min: 7.5rem;
+  --chev-w: 1rem;
+  --adv-reset-right: calc(0.25rem + var(--chev-w) + 0.2rem);
 }
 
-/* — Outer tracks: (code | label | control | reset) × columns. The
- * control track is flexible with a FIXED floor on purpose: the
- * full-row array cards' children span every track, and spanning items
- * crossing a flex track are excluded from intrinsic sizing — four
- * intrinsic tracks let their max-content balloon the code / reset
- * tracks and starve the `auto` label (measured 159 | 76 | 218 | 135),
- * while a `max-content` floor pulls that max-content into the flex
- * tracks' base sizes instead (measured 45 | 76 | 448 | 21 — 90 px of
- * overflow). — */
+/* — Masonry of category cards — */
 
 .advanced--skin-b .advanced__body {
-  --cols: 1;
-
-  grid-template-columns: repeat(
-    var(--cols),
-    max-content auto minmax(8rem, 1fr) max-content
-  );
-  gap: 0.6rem 0.5rem;
+  columns: 21rem;
+  column-gap: 0.7rem;
 }
 
-@container (min-width: 40rem) {
+@supports (grid-template-rows: masonry) {
   .advanced--skin-b .advanced__body {
-    --cols: 2;
+    display: grid;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+    grid-template-rows: masonry;
+    gap: 0.7rem;
+  }
+
+  .advanced--skin-b .adv-cat {
+    margin-bottom: 0;
   }
 }
 
-@container (min-width: 72rem) {
+@supports (display: masonry) {
   .advanced--skin-b .advanced__body {
-    --cols: 3;
+    display: masonry;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+    gap: 0.7rem;
+  }
+
+  .advanced--skin-b .adv-cat {
+    margin-bottom: 0;
   }
 }
 
-/* — Category surface — */
+/* — Category card: its own four tracks — */
 
 .advanced--skin-b .adv-cat {
-  padding: 0.5rem 0.4rem 0.55rem;
+  grid-template-columns:
+    var(--code-w) minmax(0, 1fr) var(--reset-w)
+    minmax(var(--ctl-min), max-content);
+  column-gap: 0.35rem;
+  margin-bottom: 0.7rem;
+  padding: 0.35rem 0.4rem 0;
   border-radius: 0.5rem;
   background: var(--color-surface);
+  break-inside: avoid;
 }
 
 .advanced--skin-b .adv-cat__body {
   row-gap: 0;
+  margin-top: 0.2rem;
+  padding: 0.2rem 0 0.4rem;
+  border-top: 1px solid var(--color-bg);
 }
 
 /* — Category header — */
 
-.advanced--skin-b .adv-cat__head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0 0.3rem 0.3rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--color-bg);
-  transition:
-    margin var(--adv-fold) ease,
-    padding var(--adv-fold) ease;
-}
-
-.advanced--skin-b .adv-cat--collapsed .adv-cat__head {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom-color: transparent;
-}
-
 .advanced--skin-b .adv-cat__toggle {
-  display: flex;
-  align-items: center;
   gap: 0.35rem;
-  min-width: 0;
+  padding: 0.2rem 0.25rem 0.2rem 0.3rem;
+  border-radius: 0.3rem;
+  transition: background 0.12s ease;
 }
 
-.advanced--skin-b .adv-cat__chevron {
-  display: inline-block;
-  color: var(--color-accent);
-  font-size: 0.65rem;
-  transition: transform var(--adv-fold) ease;
+.advanced--skin-b .adv-cat__head:hover .adv-cat__toggle {
+  background: rgb(255 255 255 / 4%);
 }
 
-.advanced--skin-b .adv-cat__chevron::before {
-  content: '▾';
-}
-
-.advanced--skin-b .adv-cat--collapsed .adv-cat__chevron {
-  transform: rotate(-90deg);
+.advanced--skin-b .adv-cat__toggle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .advanced--skin-b .adv-cat__title {
+  min-width: 0;
   color: var(--color-text);
   font-size: 0.85rem;
 }
@@ -121,11 +121,34 @@
   content: '×';
 }
 
-.advanced--skin-b .adv-cat__reset {
-  flex-shrink: 0;
-  width: 1.1rem;
-  height: 1.1rem;
+.advanced--skin-b .adv-cat__chevron {
+  flex: none;
+  box-sizing: content-box;
+  width: var(--chev-w);
   margin-left: auto;
+  padding-left: calc(var(--reset-w) + 0.4rem);
+  color: var(--color-accent);
+  font-size: 1.05rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.advanced--skin-b .adv-cat__chevron::before {
+  content: '▾';
+  display: inline-block;
+  transition: transform var(--adv-fold) ease;
+}
+
+.advanced--skin-b .adv-cat--collapsed .adv-cat__chevron::before {
+  transform: rotate(-90deg);
+}
+
+/* — Reset = ↺, hidden when clean — */
+
+.advanced--skin-b .adv-cat__reset,
+.advanced--skin-b .adv-card__reset {
+  width: var(--reset-w);
+  height: var(--reset-w);
   border: 1px solid transparent;
   border-radius: 0.25rem;
   color: var(--color-accent);
@@ -134,17 +157,21 @@
   transition: opacity 0.15s ease;
 }
 
-.advanced--skin-b .adv-cat__reset::before {
+.advanced--skin-b .adv-cat__reset::before,
+.advanced--skin-b .adv-card__reset::before {
   content: '↺';
 }
 
 .advanced--skin-b .adv-cat__reset:hover,
-.advanced--skin-b .adv-cat__reset:focus-visible {
+.advanced--skin-b .adv-cat__reset:focus-visible,
+.advanced--skin-b .adv-card__reset:hover,
+.advanced--skin-b .adv-card__reset:focus-visible {
   border-color: var(--color-accent);
   outline: none;
 }
 
-.advanced--skin-b .adv-cat__reset:disabled {
+.advanced--skin-b .adv-cat__reset:disabled,
+.advanced--skin-b .adv-card__reset:disabled {
   opacity: 0;
   pointer-events: none;
 }
@@ -153,19 +180,12 @@
 
 .advanced--skin-b .adv-card {
   display: grid;
-  grid-column: span 4;
+  grid-column: 1 / -1;
   grid-template-columns: subgrid;
   align-items: center;
   padding: 0.15rem 0.3rem;
   border-radius: 0.3rem;
   transition: background 0.12s ease;
-}
-
-/* One row: DOM order is code, label, reset, control — sparse
- * auto-placement would wrap the control (column 3) under the reset
- * (column 4), so every child is pinned to row 1. */
-.advanced--skin-b .adv-card:not(.adv-card--array) > * {
-  grid-row: 1;
 }
 
 .advanced--skin-b .adv-card:hover {
@@ -202,66 +222,21 @@
   color: var(--color-text-muted);
 }
 
+.advanced--skin-b .adv-card__reset {
+  grid-column: 3;
+}
+
 .advanced--skin-b .adv-card__control {
   display: flex;
-  grid-column: 3;
+  grid-column: 4;
   justify-self: end;
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
 }
 
-.advanced--skin-b .adv-card__reset {
-  grid-column: 4;
-  width: 1rem;
-  height: 1rem;
-  border: 1px solid transparent;
-  border-radius: 0.25rem;
-  color: var(--color-accent);
-  font-size: 0.7rem;
-  text-align: center;
-  transition: opacity 0.15s ease;
-}
-
-.advanced--skin-b .adv-card__reset::before {
-  content: '↺';
-}
-
-.advanced--skin-b .adv-card__reset:hover,
-.advanced--skin-b .adv-card__reset:focus-visible {
-  border-color: var(--color-accent);
-  outline: none;
-}
-
-.advanced--skin-b .adv-card__reset:disabled {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Arrays: head across the top, cells across the whole row. */
-.advanced--skin-b .adv-card--array {
-  grid-column: 1 / -1;
-  grid-template-rows: auto auto;
-  row-gap: 0.25rem;
-}
-
-.advanced--skin-b .adv-card--array .adv-card__code {
-  grid-row: 1;
-}
-
-.advanced--skin-b .adv-card--array .adv-card__label {
-  grid-column: 2 / -2;
-  grid-row: 1;
-}
-
-.advanced--skin-b .adv-card--array .adv-card__reset {
-  grid-column: -2;
-  grid-row: 1;
-}
-
+/* Arrays fill the control track (cells wrap inside it). */
 .advanced--skin-b .adv-card--array .adv-card__control {
-  grid-column: 1 / -1;
-  grid-row: 2;
   justify-self: stretch;
 }
 
@@ -382,18 +357,29 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
+  contain: inline-size;
+  border-radius: 0.25rem;
   cursor: text;
+}
+
+.advanced--skin-b .adv-bands__strip:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .advanced--skin-b .adv-bands__band {
   min-width: 0;
 }
 
+.advanced--skin-b .adv-bands__bar {
+  display: none;
+}
+
 .advanced--skin-b .adv-bands__band .adv-input {
   --adv-pad-x: 0.3em;
   --adv-unit-w: 0px;
 
-  width: 3.4rem;
+  width: 3.3rem;
   font-family: var(--mono);
   font-size: 0.62rem;
 }
@@ -404,6 +390,19 @@
 
 .advanced--skin-b .adv-bands--live .adv-bands__band .adv-input__field {
   color: var(--color-accent);
+}
+
+/* The keyboard's band: a lit cell. */
+.advanced--skin-b
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-input__field,
+.advanced--skin-b .adv-bands__band--editing .adv-input__field {
+  border-color: var(--color-accent);
+}
+
+.advanced--skin-b .adv-bands__band--hover .adv-input__field {
+  border-color: var(--hover-line);
 }
 
 .advanced--skin-b .adv-bands__chan {

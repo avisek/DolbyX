@@ -3,12 +3,14 @@
 /* Skin A — flat card grid. The outer grid is up to three equal card
  * columns (`minmax(320px, 1fr)`, capped at 3); every category section
  * spans it and subgrids it, so its cards fall onto the same columns
- * as every other category's — no `display: contents`, sections keep
- * their boxes (a full-width divider header + a body row that folds).
+ * as every other category's — sections keep their boxes (a full-width
+ * header bar + a body row that folds under its own top border).
  * Cards are two-row surfaces (code | label | reset over the control);
- * arrays live INSIDE a normal card, never spanning the grid. The
- * reset button is the divergence marker: a ↺ that simply hides when
- * clean. */
+ * arrays live INSIDE a normal card, never spanning the grid — thin
+ * bars in a bare strip, a band's editor popping up above its column.
+ * The reset button is the divergence marker: a ↺ that simply hides
+ * when clean; the header's is a "↺ reset" pill at the far right of
+ * the bar (the bar is one button, chevron first). */
 
 .advanced--skin-a {
   --control-h: 1.5rem;
@@ -17,11 +19,13 @@
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
   --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
   --gap: 0.6rem;
+  --adv-reset-right: 0.2rem;
 }
 
 /* — Outer tracks: ≤ 3 equal card columns — */
 
 .advanced--skin-a .advanced__body {
+  display: grid;
   grid-template-columns: repeat(
     auto-fill,
     minmax(max(320px, calc((100% - 2 * var(--gap)) / 3)), 1fr)
@@ -29,49 +33,59 @@
   gap: 0.9rem var(--gap);
 }
 
+.advanced--skin-a .adv-cat {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+/* The divider is the body's top border: it folds with the body. */
 .advanced--skin-a .adv-cat__body {
   row-gap: var(--gap);
+  margin-top: 0.25rem;
+  padding-top: var(--gap);
+  border-top: 1px solid var(--color-surface);
 }
 
-/* — Category header = full-width divider — */
-
-.advanced--skin-a .adv-cat__head {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: var(--gap);
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--color-surface);
-  transition: margin var(--adv-fold) ease;
-}
-
-.advanced--skin-a .adv-cat--collapsed .adv-cat__head {
-  margin-bottom: 0;
-}
+/* — Category header = one button bar — */
 
 .advanced--skin-a .adv-cat__toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
+  gap: 0.45rem;
+  padding: 0.25rem 4.8rem 0.25rem 0.3rem;
+  border-radius: 0.35rem;
+  transition: background 0.12s ease;
+}
+
+.advanced--skin-a .adv-cat__head:hover .adv-cat__toggle {
+  background: rgb(255 255 255 / 3%);
+}
+
+.advanced--skin-a .adv-cat__toggle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .advanced--skin-a .adv-cat__chevron {
-  display: inline-block;
+  flex: none;
+  order: -1;
+  width: 1.1rem;
   color: var(--color-accent);
-  font-size: 0.7rem;
-  transition: transform var(--adv-fold) ease;
+  font-size: 1.1rem;
+  line-height: 1;
+  text-align: center;
 }
 
 .advanced--skin-a .adv-cat__chevron::before {
   content: '▾';
+  display: inline-block;
+  transition: transform var(--adv-fold) ease;
 }
 
-.advanced--skin-a .adv-cat--collapsed .adv-cat__chevron {
+.advanced--skin-a .adv-cat--collapsed .adv-cat__chevron::before {
   transform: rotate(-90deg);
 }
 
 .advanced--skin-a .adv-cat__title {
+  min-width: 0;
   color: var(--color-text);
   font-size: 0.85rem;
 }
@@ -96,8 +110,6 @@
 }
 
 .advanced--skin-a .adv-cat__reset {
-  flex-shrink: 0;
-  margin-left: auto;
   padding: 0.05rem 0.4rem;
   border: 1px solid var(--color-accent);
   border-radius: 0.25rem;
@@ -148,6 +160,7 @@
 
 .advanced--skin-a .adv-card__code {
   grid-column: 1;
+  grid-row: 1;
   padding: 0.1rem 0.3rem;
   border-radius: 0.25rem;
   background: var(--color-bg);
@@ -166,6 +179,7 @@
 
 .advanced--skin-a .adv-card__label {
   grid-column: 2;
+  grid-row: 1;
   color: var(--color-text);
   font-size: 0.8rem;
   line-height: 1.25;
@@ -177,6 +191,7 @@
 
 .advanced--skin-a .adv-card__reset {
   grid-column: 3;
+  grid-row: 1;
   width: 1.2rem;
   height: 1.2rem;
   border: 1px solid transparent;
@@ -360,7 +375,10 @@
   transition: transform 0.12s ease;
 }
 
-.advanced--skin-a .adv-card:hover .adv-slider__thumb {
+.advanced--skin-a
+  .adv-card:hover
+  .adv-slider:not(.adv-slider--disabled)
+  .adv-slider__thumb {
   transform: translate(-50%, -50%) scale(1.2);
 }
 
@@ -369,13 +387,25 @@
   outline-offset: 2px;
 }
 
-/* — Bands: bar strips inside the card — */
+.advanced--skin-a .adv-slider--disabled .adv-slider__fill {
+  background: var(--color-text-muted);
+  opacity: 0.35;
+}
+
+.advanced--skin-a .adv-slider--disabled .adv-slider__thumb {
+  width: 0.55rem;
+  height: 0.55rem;
+  background: var(--color-text-muted);
+}
+
+/* — Bands: bare strips inside the card — */
 
 .advanced--skin-a .adv-bands__strip {
   display: flex;
   align-items: stretch;
   gap: 2px;
   height: 3rem;
+  border-radius: 0.25rem;
   cursor: crosshair;
 }
 
@@ -383,53 +413,151 @@
   cursor: default;
 }
 
-.advanced--skin-a .adv-bands__band {
-  --bar-color: var(--color-accent);
+.advanced--skin-a .adv-bands__strip:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 3px;
+}
 
-  position: relative;
+.advanced--skin-a .adv-bands__band {
   flex: 1;
   min-width: 2px;
-  background: linear-gradient(var(--bar-color), var(--bar-color)) bottom / 100%
-    calc(clamp(0.02, var(--norm, 0), 1) * 100%) no-repeat;
-  opacity: 0.85;
+  border-radius: 2px 2px 0 0;
+  transition: background 0.1s ease;
 }
 
-.advanced--skin-a .adv-bands:not(.adv-bands--ro) .adv-bands__band:hover {
+.advanced--skin-a .adv-bands__band--hover {
+  background: rgb(255 255 255 / 7%);
+}
+
+.advanced--skin-a .adv-bands__strip:focus-visible .adv-bands__band--active,
+.advanced--skin-a .adv-bands__band--editing {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.advanced--skin-a .adv-bands__bar {
+  --bar-color: color-mix(
+    in srgb,
+    var(--color-text-muted) 70%,
+    var(--color-accent)
+  );
+
+  height: calc(clamp(0.03, var(--norm, 0), 1) * 100%);
+  margin: 0 25%;
+  border-radius: 2px 2px 0 0;
+  background: var(--bar-color);
+}
+
+.advanced--skin-a .adv-bands--ro .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
+
+.advanced--skin-a .adv-bands--live .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--color-accent) 75%, #ffffff);
+}
+
+.advanced--skin-a .adv-bands__band--hover .adv-bands__bar,
+.advanced--skin-a
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-bands__bar,
+.advanced--skin-a .adv-bands__band--editing .adv-bands__bar {
+  --bar-color: var(--color-accent);
+}
+
+/* The editor: a popover anchored above its column. */
+.advanced--skin-a .adv-bands__editor {
+  position: absolute;
+  z-index: 2;
+  position-anchor: --adv-band;
+  bottom: anchor(top);
+  justify-self: anchor-center;
+  margin-bottom: 0.15rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.advanced--skin-a .adv-bands__band--editing .adv-bands__editor,
+.advanced--skin-a .adv-bands__editor:focus-within {
   opacity: 1;
+  pointer-events: auto;
 }
 
-.advanced--skin-a .adv-bands--ro .adv-bands__band {
-  --bar-color: var(--color-text-muted);
-}
-
-/* The band's box: invisible but focusable (opacity, per contract);
- * reveals on focus for keyboard editing. */
-.advanced--skin-a .adv-bands__band .adv-input {
-  --adv-pad-x: 0px;
+.advanced--skin-a .adv-bands__editor .adv-input {
+  --adv-pad-x: 0.3em;
   --adv-unit-w: 0px;
 
-  position: absolute;
-  inset: 0;
+  display: block;
   width: auto;
-  font-size: 0.6rem;
-  opacity: 0;
+  font-size: 0.65rem;
 }
 
-.advanced--skin-a .adv-bands__band .adv-input:focus-within {
-  opacity: 1;
-}
-
-.advanced--skin-a .adv-bands__band .adv-input__field {
-  height: 100%;
+.advanced--skin-a .adv-bands__editor .adv-input__field {
+  width: auto;
+  min-width: 5ch;
+  height: 1.25rem;
+  field-sizing: content;
   border: 1px solid var(--color-accent);
-  background: rgb(12 20 32 / 92%);
+  border-radius: 3px;
+  background: rgb(12 20 32 / 96%);
   color: var(--color-text);
   text-align: center;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.advanced--skin-a .adv-bands--ro .adv-bands__editor .adv-input__field {
+  border-color: var(--hover-line);
+}
+
+/* Opaque readouts: cells, no bars. */
+.advanced--skin-a .adv-bands--opaque .adv-bands__strip {
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  height: auto;
+  cursor: default;
+}
+
+.advanced--skin-a .adv-bands--opaque .adv-bands__band {
+  flex: none;
+  background: none;
+}
+
+.advanced--skin-a .adv-bands--opaque .adv-bands__bar {
+  display: none;
+}
+
+.advanced--skin-a .adv-bands--opaque .adv-bands__editor {
+  position: static;
+  margin: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.advanced--skin-a .adv-bands--opaque .adv-bands__editor .adv-input__field {
+  min-width: 4ch;
+  height: var(--control-h);
+  border-color: var(--color-bg);
+  background: var(--color-bg);
+  font-family: var(--mono);
+  text-align: right;
+  box-shadow: none;
+}
+
+.advanced--skin-a
+  .adv-bands--opaque
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-input__field,
+.advanced--skin-a
+  .adv-bands--opaque
+  .adv-bands__band--editing
+  .adv-input__field {
+  border-color: var(--color-accent);
 }
 
 .advanced--skin-a .adv-bands__chan {
   flex-shrink: 0;
-  min-width: 2.4rem;
+  min-width: 2.2rem;
   color: var(--color-accent);
   font-size: 0.7rem;
 }

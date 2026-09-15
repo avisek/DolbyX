@@ -1,14 +1,18 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
 /* Base layer shared by all three skins: the panel shell, the layout
- * PLUMBING every skin builds on (the body is THE grid; each category
- * section spans it and subgrids it, its body subgrids again, so cards
- * land on the outer tracks in every skin; the accordion fold), bare
- * chrome resets (native checkbox / radios / text fields the skins
- * paint), and interaction plumbing (cursors, touch-action, the numeric
- * box geometry). Skins set tracks, colors, sizes and durations —
- * `--control-h` (one height for box / tristate / toggle), `--adv-fold`
- * (accordion duration), `--adv-pad-x` (box padding). */
+ * PLUMBING every skin builds on (a category section is a two-row grid
+ * — head over a folding body — whose COLUMNS the skin defines: its own
+ * tracks, or a subgrid of an outer grid; the body subgrids them, so
+ * cards land on the section's tracks in every skin; the accordion
+ * fold; the header = one toggle button filling the whole bar with the
+ * reset laid over it), bare chrome resets (native checkbox / radios /
+ * text fields the skins paint), and interaction plumbing (cursors,
+ * touch-action, the numeric box geometry, the band strip's anchors).
+ * Skins set tracks, colors, sizes and durations — `--control-h` (one
+ * height for box / tristate / toggle), `--adv-fold` (accordion
+ * duration), `--adv-pad-x` (box padding), `--adv-reset-right` (where
+ * the header reset sits). */
 
 /* — Panel shell — */
 
@@ -45,23 +49,18 @@
   content: '▾';
 }
 
-/* — Layout plumbing: one grid, subgridded twice. Skins own the
- * tracks and gaps of `.advanced__body`; sections inherit them. — */
-
-.advanced__body {
-  display: grid;
-}
+/* — Category: two rows, the second folds — */
 
 .adv-cat {
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
   /* The fold: body row 1fr ↔ 0fr, timed by the skin's `--adv-fold`.
    *   minmax(0, …)         row may shrink to nothing
    *   align-content: start leftover space stays empty, head never grows
    *   align-items: start   body keeps full height, spills past its row
    *   overflow             this box clips the spill
-   * Mid-fold the row is undersized; only this box's height is right. */
+   * Mid-fold the row is undersized; only this box's height is right.
+   * Skins keep the section's bottom padding ON THE BODY, so the clip
+   * edge is the head's bottom once folded — nothing peeks through. */
   grid-template-rows: auto minmax(0, 1fr);
   transition: grid-template-rows var(--adv-fold, 0s) ease;
   align-content: start;
@@ -73,8 +72,26 @@
   grid-template-rows: auto minmax(0, 0fr);
 }
 
+/* — Header: the toggle IS the bar; the reset floats over it — */
+
 .adv-cat__head {
+  position: relative;
   grid-column: 1 / -1;
+}
+
+.adv-cat__toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.adv-cat__reset {
+  position: absolute;
+  top: 50%;
+  right: var(--adv-reset-right, 0px);
+  z-index: 1;
+  translate: 0 -50%;
 }
 
 .adv-cat__body {
@@ -150,7 +167,8 @@
  * overlay the field pads for. Every box is the same width, unit or
  * not: 5ch of digits + 4ch of unit + padding. The two lengths are
  * REGISTERED so `ch`/`em` resolve on the wrapper once and inherit as
- * absolute lengths — the unit may use a smaller font. — */
+ * absolute lengths — the unit may use a smaller font. The `--text`
+ * variant (a version tuple) is a wider unit-less box. — */
 
 @property --adv-unit-w {
   syntax: '<length>';
@@ -173,6 +191,12 @@
   flex: none;
   width: calc(5ch + var(--adv-unit-w) + 2 * var(--adv-pad-x));
   touch-action: none;
+}
+
+.adv-input--text {
+  --adv-unit-w: 0px;
+
+  width: calc(9ch + 2 * var(--adv-pad-x));
 }
 
 .adv-input--scrub {
@@ -221,6 +245,10 @@
   touch-action: none;
 }
 
+.adv-slider--disabled {
+  cursor: default;
+}
+
 .adv-slider__track {
   position: relative;
   flex: 1;
@@ -238,8 +266,13 @@
   left: calc(clamp(0, var(--norm, 0), 1) * 100%);
 }
 
-/* — Bands container: functional column flow; the strip is the paint
- * surface (no text selection mid-stroke) — */
+/* — Bands: functional column flow. The strip is the composite's focus
+ * target and paint surface (no text selection mid-stroke) and the
+ * editors' containing block; each band is a bottom-aligned column
+ * (the bar grows up from its floor) that anchors its own editor —
+ * one anchor name, scoped per band, so a skin's popover resolves to
+ * its own column. The band is NOT positioned: an anchor can't be the
+ * anchored box's containing block. — */
 
 .adv-bands {
   display: flex;
@@ -257,10 +290,23 @@
 }
 
 .adv-bands__strip {
+  position: relative;
   flex: 1;
   min-width: 0;
   touch-action: none;
   user-select: none;
+}
+
+.adv-bands__band {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  anchor-name: --adv-band;
+  anchor-scope: --adv-band;
+}
+
+.adv-bands__editor {
+  display: block;
 }
 
 /* — Switcher pill: deliberately not part of the design — */

@@ -1,16 +1,21 @@
 /* PROTOTYPE — throwaway (Slice 20 spec exploration), do not review */
 
-/* Skin C — roomy category cards (the default). Every category is one
- * full-width surface; its params are FORM ROWS on the outer grid's
- * tracks (code | label | control | reset) through three subgrid
- * levels (body → section → category body → card), two rows side by
- * side once the panel is wide enough. Labels wrap, never truncate:
- * the label track is `auto` (never narrower than its longest word),
- * the control track flexes. The reset button is the divergence
- * marker — a dot at rest that morphs into ↺ on row hover / focus.
- * Access is color-coded on the 4-CC chip (accent / amber / muted);
- * a preset-seated category is captioned "EQ preset". Long arrays
- * span the whole row as paintable plot-styled strips. */
+/* Skin C — roomy category cards (the default). Category cards flow in
+ * a multi-column masonry (`columns: 30rem`; native masonry when the
+ * browser has it). Each card is its own four-track grid — code |
+ * label | reset | control — with FIXED shared track sizes, so rows
+ * align across cards; params are form rows subgridded onto those
+ * tracks. The reset button is the divergence marker (a dot at rest
+ * that morphs into ↺ on row hover / focus) and sits LEFT of the
+ * control it resets. The header is one button — title · count, a big
+ * chevron at the far right — with the reset laid over it just left of
+ * the chevron; the divider is the body's top border, so it folds with
+ * the body. Access is color-coded on the 4-CC chip (accent / amber /
+ * muted); a preset-seated category is captioned "EQ preset". Long
+ * arrays are plot-styled paintable strips in the control track (thin
+ * neutral bars, the whole column lights on hover); a band's editor is
+ * a popover anchored above its column (CSS anchor positioning).
+ * Opaque readouts are cell rows. */
 
 .advanced--skin-c {
   --control-h: 1.7rem;
@@ -19,90 +24,103 @@
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
   --focus-line: var(--color-text-muted);
   --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --code-w: 3.3rem;
+  --label-w: 8.5rem;
+  --reset-w: 1.4rem;
+  --ctl-min: 11rem;
+  --chev-w: 1.3rem;
+  --adv-reset-right: calc(0.35rem + var(--chev-w) + 0.25rem);
 }
 
-/* — Outer tracks: (code | label | control | reset) × columns — */
+/* — Masonry of category cards — */
 
 .advanced--skin-c .advanced__body {
-  --cols: 1;
-  --ctl-min: 11rem;
-
-  grid-template-columns: repeat(
-    var(--cols),
-    max-content auto minmax(var(--ctl-min), 1fr) max-content
-  );
-  gap: 0.8rem 0.6rem;
+  columns: 30rem;
+  column-gap: 0.9rem;
 }
 
-/* Phone widths: the control track's floor (box + slider) shrinks so
- * the four tracks still fit; labels wrap harder. */
+/* Progressive enhancement: real masonry keeps DOM order left-to-right
+ * and never reflows a card into another column mid-fold. Dormant in
+ * Chromium 149 (neither syntax parses); untested. */
+@supports (grid-template-rows: masonry) {
+  .advanced--skin-c .advanced__body {
+    display: grid;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+    grid-template-rows: masonry;
+    gap: 0.9rem;
+  }
+
+  .advanced--skin-c .adv-cat {
+    margin-bottom: 0;
+  }
+}
+
+@supports (display: masonry) {
+  .advanced--skin-c .advanced__body {
+    display: masonry;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+    gap: 0.9rem;
+  }
+
+  .advanced--skin-c .adv-cat {
+    margin-bottom: 0;
+  }
+}
+
+/* Phone widths: narrower label / control floors so four tracks fit. */
 @container (max-width: 30rem) {
-  .advanced--skin-c .advanced__body {
-    --ctl-min: 9rem;
+  .advanced--skin-c {
+    --label-w: 6.5rem;
+    --ctl-min: 7.5rem;
   }
 }
 
-@container (min-width: 46rem) {
-  .advanced--skin-c .advanced__body {
-    --cols: 2;
-  }
-}
-
-/* — Category surface — */
+/* — Category card: its own four tracks; bottom padding on the body so
+ * the fold clips flush under the head — */
 
 .advanced--skin-c .adv-cat {
-  padding: 0.7rem 0.6rem 0.8rem;
+  grid-template-columns:
+    var(--code-w) var(--label-w) var(--reset-w)
+    minmax(var(--ctl-min), 1fr);
+  column-gap: 0.55rem;
+  margin-bottom: 0.9rem;
+  padding: 0.5rem 0.6rem 0;
   border-radius: 0.6rem;
   background: var(--color-surface);
+  break-inside: avoid;
 }
 
+/* The head is exactly the toggle (the reset centres on it); the gap
+ * under it and the divider belong to the body, so both fold with it. */
 .advanced--skin-c .adv-cat__body {
   row-gap: 0.1rem;
+  margin-top: 0.3rem;
+  padding: 0.3rem 0 0.55rem;
+  border-top: 1px solid var(--color-bg);
 }
 
 /* — Category header — */
 
-.advanced--skin-c .adv-cat__head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 0.4rem 0.4rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid var(--color-bg);
-  transition:
-    margin var(--adv-fold) ease,
-    padding var(--adv-fold) ease;
-}
-
-.advanced--skin-c .adv-cat--collapsed .adv-cat__head {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom-color: transparent;
-}
-
 .advanced--skin-c .adv-cat__toggle {
-  display: flex;
-  align-items: center;
   gap: 0.5rem;
-  min-width: 0;
+  padding: 0.3rem 0.35rem 0.3rem 0.4rem;
+  border-radius: 0.4rem;
+  transition: background 0.12s ease;
 }
 
-.advanced--skin-c .adv-cat__chevron {
-  display: inline-block;
-  color: var(--color-accent);
-  font-size: 0.75rem;
-  transition: transform var(--adv-fold) ease;
+.advanced--skin-c .adv-cat__head:hover .adv-cat__toggle {
+  background: rgb(255 255 255 / 4%);
 }
 
-.advanced--skin-c .adv-cat__chevron::before {
-  content: '▾';
-}
-
-.advanced--skin-c .adv-cat--collapsed .adv-cat__chevron {
-  transform: rotate(-90deg);
+.advanced--skin-c .adv-cat__toggle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .advanced--skin-c .adv-cat__title {
+  min-width: 0;
   color: var(--color-text);
   font-size: 0.95rem;
 }
@@ -123,14 +141,36 @@
   content: ' params';
 }
 
+/* The chevron: far right, big; its left padding keeps the reset's spot
+ * clear of the title. */
+.advanced--skin-c .adv-cat__chevron {
+  flex: none;
+  box-sizing: content-box;
+  width: var(--chev-w);
+  margin-left: auto;
+  padding-left: calc(var(--reset-w) + 0.5rem);
+  color: var(--color-accent);
+  font-size: 1.3rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.advanced--skin-c .adv-cat__chevron::before {
+  content: '▾';
+  display: inline-block;
+  transition: transform var(--adv-fold) ease;
+}
+
+.advanced--skin-c .adv-cat--collapsed .adv-cat__chevron::before {
+  transform: rotate(-90deg);
+}
+
 /* — Reset = divergence marker: dot at rest, ↺ on hover / focus — */
 
 .advanced--skin-c .adv-card__reset,
 .advanced--skin-c .adv-cat__reset {
-  position: relative;
-  flex: none;
-  width: 1.4rem;
-  height: 1.4rem;
+  width: var(--reset-w);
+  height: var(--reset-w);
   border: 1px solid transparent;
   border-radius: 50%;
   transition:
@@ -139,8 +179,8 @@
     opacity 0.18s ease;
 }
 
-.advanced--skin-c .adv-cat__reset {
-  margin-left: auto;
+.advanced--skin-c .adv-card__reset {
+  position: relative;
 }
 
 /* The dot. */
@@ -216,19 +256,12 @@
 
 .advanced--skin-c .adv-card {
   display: grid;
-  grid-column: span 4;
+  grid-column: 1 / -1;
   grid-template-columns: subgrid;
   align-items: center;
   padding: 0.3rem 0.4rem;
   border-radius: 0.4rem;
   transition: background 0.12s ease;
-}
-
-/* One row: DOM order is code, label, reset, control — sparse
- * auto-placement would wrap the control (column 3) under the reset
- * (column 4), so every child is pinned to row 1. */
-.advanced--skin-c .adv-card:not(.adv-card--array) > * {
-  grid-row: 1;
 }
 
 .advanced--skin-c .adv-card:hover {
@@ -272,42 +305,17 @@
   color: var(--color-text-muted);
 }
 
+.advanced--skin-c .adv-card__reset {
+  grid-column: 3;
+  justify-self: center;
+}
+
 .advanced--skin-c .adv-card__control {
   display: flex;
-  grid-column: 3;
+  grid-column: 4;
   align-items: center;
   gap: 0.6rem;
   min-width: 0;
-}
-
-.advanced--skin-c .adv-card__reset {
-  grid-column: 4;
-}
-
-/* Arrays: head across the top, strip across the whole row. */
-.advanced--skin-c .adv-card--array {
-  grid-column: 1 / -1;
-  grid-template-rows: auto auto;
-  row-gap: 0.45rem;
-}
-
-.advanced--skin-c .adv-card--array .adv-card__code {
-  grid-row: 1;
-}
-
-.advanced--skin-c .adv-card--array .adv-card__label {
-  grid-column: 2 / -2;
-  grid-row: 1;
-}
-
-.advanced--skin-c .adv-card--array .adv-card__reset {
-  grid-column: -2;
-  grid-row: 1;
-}
-
-.advanced--skin-c .adv-card--array .adv-card__control {
-  grid-column: 1 / -1;
-  grid-row: 2;
 }
 
 /* — Numeric box — */
@@ -463,7 +471,10 @@
     box-shadow 0.12s ease;
 }
 
-.advanced--skin-c .adv-card:hover .adv-slider__thumb {
+.advanced--skin-c
+  .adv-card:hover
+  .adv-slider:not(.adv-slider--disabled)
+  .adv-slider__thumb {
   transform: translate(-50%, -50%) scale(1.2);
 }
 
@@ -475,14 +486,27 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
-/* — Bands: plot-styled, paintable strips — */
+/* Read-only twin: muted, inert. */
+.advanced--skin-c .adv-slider--disabled .adv-slider__fill {
+  background: var(--color-text-muted);
+  opacity: 0.35;
+}
+
+.advanced--skin-c .adv-slider--disabled .adv-slider__thumb {
+  width: 0.6rem;
+  height: 0.6rem;
+  background: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+/* — Bands: plot-styled, paintable strips in the control track — */
 
 .advanced--skin-c .adv-bands__strip {
   display: flex;
   align-items: stretch;
-  gap: 3px;
-  height: 4.5rem;
-  padding: 0.3rem 0.3rem 0;
+  gap: 2px;
+  height: 3.4rem;
+  padding: 0.25rem 0.25rem 0;
   border: 1px solid var(--color-bg);
   border-radius: 0.375rem;
   background: repeating-linear-gradient(
@@ -506,61 +530,169 @@
   border-color: var(--hover-line);
 }
 
-.advanced--skin-c .adv-bands__band {
-  --bar-color: var(--color-accent);
+.advanced--skin-c .adv-bands__strip:focus-within {
+  border-color: var(--focus-line);
+}
 
-  position: relative;
+.advanced--skin-c .adv-bands__strip:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* The band column: the whole column lights on hover / keyboard focus /
+ * editing, so low bars feel like their tall neighbours. */
+.advanced--skin-c .adv-bands__band {
   flex: 1;
   min-width: 2px;
-  background: linear-gradient(
-      color-mix(in srgb, var(--bar-color) 85%, transparent),
-      var(--bar-color)
-    )
-    bottom / 100% calc(clamp(0.02, var(--norm, 0), 1) * 100%) no-repeat;
+  border-radius: 3px 3px 0 0;
+  transition: background 0.1s ease;
+}
+
+.advanced--skin-c .adv-bands__band--hover {
+  background: rgb(255 255 255 / 7%);
+}
+
+.advanced--skin-c .adv-bands__strip:focus-visible .adv-bands__band--active,
+.advanced--skin-c .adv-bands__band--editing {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* The bar: a thin neutral pillar from the column's floor. */
+.advanced--skin-c .adv-bands__bar {
+  --bar-color: color-mix(
+    in srgb,
+    var(--color-text-muted) 70%,
+    var(--color-accent)
+  );
+
+  height: calc(clamp(0.03, var(--norm, 0), 1) * 100%);
+  margin: 0 28%;
   border-radius: 2px 2px 0 0;
-  transition: filter 0.12s ease;
+  background: var(--bar-color);
 }
 
-.advanced--skin-c .adv-bands:not(.adv-bands--ro) .adv-bands__band:hover {
-  filter: brightness(1.3);
+.advanced--skin-c .adv-bands--ro .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
 }
 
-.advanced--skin-c .adv-bands--ro .adv-bands__band {
-  --bar-color: var(--color-text-muted);
+.advanced--skin-c .adv-bands--live .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--color-accent) 75%, #ffffff);
 }
 
-.advanced--skin-c .adv-bands--live .adv-bands__band {
-  --bar-color: color-mix(in srgb, var(--color-accent) 70%, #ffffff);
+.advanced--skin-c .adv-bands__band--hover .adv-bands__bar,
+.advanced--skin-c
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-bands__bar,
+.advanced--skin-c .adv-bands__band--editing .adv-bands__bar {
+  --bar-color: var(--color-accent);
 }
 
-/* The band's box: invisible but focusable; reveals on focus. */
-.advanced--skin-c .adv-bands__band .adv-input {
-  --adv-pad-x: 0px;
+/* The editor: a popover anchored above its column (CSS anchor
+ * positioning — the band is the anchor, the strip the containing
+ * block, `anchor-center` keeps it inside the strip), hidden via
+ * opacity until the band is being edited. */
+.advanced--skin-c .adv-bands__editor {
+  position: absolute;
+  z-index: 2;
+  position-anchor: --adv-band;
+  bottom: anchor(top);
+  justify-self: anchor-center;
+  margin-bottom: 0.2rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.advanced--skin-c .adv-bands__band--editing .adv-bands__editor,
+.advanced--skin-c .adv-bands__editor:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.advanced--skin-c .adv-bands__editor .adv-input {
+  --adv-pad-x: 0.3em;
   --adv-unit-w: 0px;
 
-  position: absolute;
-  inset: 0;
+  display: block;
   width: auto;
-  font-size: 0.6rem;
-  opacity: 0;
+  font-size: 0.68rem;
 }
 
-.advanced--skin-c .adv-bands__band .adv-input:focus-within {
-  opacity: 1;
-}
-
-.advanced--skin-c .adv-bands__band .adv-input__field {
-  height: 100%;
+.advanced--skin-c .adv-bands__editor .adv-input__field {
+  width: auto;
+  min-width: 5ch;
+  height: 1.35rem;
+  field-sizing: content;
   border: 1px solid var(--color-accent);
-  border-radius: 2px;
-  background: rgb(12 20 32 / 92%);
+  border-radius: 3px;
+  background: rgb(12 20 32 / 96%);
   color: var(--color-text);
   text-align: center;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.advanced--skin-c .adv-bands--ro .adv-bands__editor .adv-input__field {
+  border-color: var(--hover-line);
+}
+
+/* Opaque readouts: no bars — the boxes ARE the cells. */
+.advanced--skin-c .adv-bands--opaque .adv-bands__strip {
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: default;
+}
+
+.advanced--skin-c .adv-bands--opaque .adv-bands__strip:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.advanced--skin-c .adv-bands--opaque .adv-bands__band {
+  flex: none;
+  background: none;
+}
+
+.advanced--skin-c .adv-bands--opaque .adv-bands__bar {
+  display: none;
+}
+
+.advanced--skin-c .adv-bands--opaque .adv-bands__editor {
+  position: static;
+  margin: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.advanced--skin-c .adv-bands--opaque .adv-bands__editor .adv-input__field {
+  min-width: 4ch;
+  height: var(--control-h);
+  border-color: var(--color-bg);
+  background: var(--color-bg);
+  font-family: var(--mono);
+  text-align: right;
+  box-shadow: none;
+}
+
+.advanced--skin-c
+  .adv-bands--opaque
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-input__field,
+.advanced--skin-c
+  .adv-bands--opaque
+  .adv-bands__band--editing
+  .adv-input__field {
+  border-color: var(--color-accent);
 }
 
 .advanced--skin-c .adv-bands__chan {
   flex-shrink: 0;
-  min-width: 2.6rem;
+  min-width: 2.2rem;
   color: var(--color-accent);
   font-size: 0.7rem;
 }

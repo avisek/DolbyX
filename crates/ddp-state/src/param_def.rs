@@ -73,6 +73,8 @@ pub enum ParamKind {
     AobgChannelMajor,
     /// License blobs etc. — render as `int[]`.
     Opaque,
+    /// Dotted version tuple, read-only display `a.b.c.d`.
+    Version,
 }
 
 /// Settability bucket — DSP semantics + UI presentation, not engine

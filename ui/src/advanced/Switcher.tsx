@@ -3,7 +3,7 @@
 /** The variant switcher — fixed bottom-center pill, deliberately
  * obviously-not-part-of-the-design. ← / → buttons + keyboard arrows
  * (skipped while an input / textarea / select / contenteditable /
- * ARIA slider is focused — the GEQ thumbs eat arrows too). */
+ * ARIA slider / band strip is focused — those own their arrows). */
 import { onCleanup, onMount, type Component } from 'solid-js'
 import { cycleVariant, variantLabel } from './variant'
 
@@ -18,7 +18,8 @@ const Switcher: Component = () => {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
           target.isContentEditable ||
-          target.getAttribute('role') === 'slider')
+          target.getAttribute('role') === 'slider' ||
+          target.classList.contains('adv-bands__strip'))
       ) {
         return
       }
