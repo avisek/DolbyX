@@ -233,6 +233,7 @@ const NumberInput: Component<{
         id={props.id}
         class="adv-input__field"
         type="text"
+        onDragStart={(event) => event.preventDefault()}
         inputmode="decimal"
         aria-label={props.name}
         readonly={!editable}
