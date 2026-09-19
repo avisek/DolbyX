@@ -10,22 +10,20 @@
  *
  * `scale` is kind-driven (`log` for FrequencyHz): the value ↔ position
  * map is logarithmic, so `--norm` is too — 20 Hz–20 kHz puts 1 kHz
- * near the middle. Keyboard on a log slider is multiplicative: arrows
- * = a semitone (×2^±1/12), PageUp/Down = an octave, always at least
- * one `fine` step; linear sliders step `fine` / `coarse`. Home/End =
- * bounds. Falls back to linear when the range isn't strictly positive.
+ * near the middle. Keys follow the shared step rule (`step.ts`):
+ * arrows = one step (linear: 1 display unit; log: a semitone), Alt =
+ * fine, Shift = coarse, PageUp/Down = the coarse step regardless;
+ * Home/End = bounds. Falls back to linear when the range isn't
+ * strictly positive.
  *
  * `disabled` (read-only scalars keep a slider for consistency):
  * `aria-disabled`, out of the tab order, every gesture ignored — the
  * `adv-slider--disabled` modifier is the skin's cue to mute it.
- *
- * Lives inside the card LABEL: a div with tabindex is not "interactive
- * content", so the label would forward its clicks to the card's text
- * field — `click` is cancelled here to keep focus on the slider.
  */
 import type { Component } from 'solid-js'
+import { isLog, quantize, stepped, type Modifiers, type StepAxis } from './step'
 
-const SEMITONE = 2 ** (1 / 12)
+const COARSE: Modifiers = { altKey: false, shiftKey: true }
 
 const Slider: Component<{
   /** Accessible name. */
@@ -33,10 +31,8 @@ const Slider: Component<{
   value: () => number
   min: number
   max: number
-  /** Display units per arrow step (one raw unit). */
+  /** One raw unit in display units (the step lattice). */
   fine: number
-  /** Display units per PageUp/Down step. */
-  coarse: number
   unit: string
   scale?: 'linear' | 'log' | undefined
   disabled?: boolean | undefined
@@ -48,14 +44,14 @@ const Slider: Component<{
   let last: number | undefined
 
   const disabled = props.disabled === true
-  const log = props.scale === 'log' && props.min > 0 && props.max > props.min
+  const axis = (): StepAxis => ({
+    min: props.min,
+    max: props.max,
+    fine: props.fine,
+    scale: props.scale,
+  })
+  const log = isLog(axis())
   const span = (): number => props.max - props.min || 1
-
-  const clamp = (value: number): number =>
-    Math.min(props.max, Math.max(props.min, Number(value.toFixed(4))))
-  /** Snaps to the `fine` lattice (one raw unit). */
-  const quantize = (value: number): number =>
-    clamp(Math.round(value / props.fine) * props.fine)
 
   /** Value → 0–1 track position. */
   const toNorm = (value: number): number =>
@@ -63,9 +59,10 @@ const Slider: Component<{
       ? Math.log(value / props.min) / Math.log(props.max / props.min)
       : (value - props.min) / span()
 
-  /** 0–1 track position → fine-quantized value. */
+  /** 0–1 track position → lattice value. */
   const fromNorm = (norm: number): number =>
     quantize(
+      axis(),
       log
         ? props.min * (props.max / props.min) ** norm
         : props.min + norm * span(),
@@ -86,18 +83,8 @@ const Slider: Component<{
     )
   }
 
-  /** Linear: ± step. Log: × factor^±1, never less than one fine step. */
-  const nudge = (direction: 1 | -1, coarse: boolean): void => {
-    const value = props.value()
-    let next: number
-    if (log) {
-      const factor = coarse ? 2 : SEMITONE
-      next = quantize(direction > 0 ? value * factor : value / factor)
-      if (next === value) next = quantize(value + direction * props.fine)
-    } else {
-      next = quantize(value + direction * (coarse ? props.coarse : props.fine))
-    }
-    commit(next)
+  const nudge = (direction: 1 | -1, mods: Modifiers): void => {
+    commit(stepped(axis(), props.value(), direction, mods))
   }
 
   const end = (event: PointerEvent): void => {
@@ -145,17 +132,13 @@ const Slider: Component<{
       }}
       onPointerUp={end}
       onPointerCancel={end}
-      onClick={(event) => {
-        // Not interactive content: cancel the card label's forwarding.
-        event.preventDefault()
-      }}
       onKeyDown={(event) => {
         if (disabled) return
         const key = event.key
-        if (key === 'ArrowUp' || key === 'ArrowRight') nudge(1, false)
-        else if (key === 'ArrowDown' || key === 'ArrowLeft') nudge(-1, false)
-        else if (key === 'PageUp') nudge(1, true)
-        else if (key === 'PageDown') nudge(-1, true)
+        if (key === 'ArrowUp' || key === 'ArrowRight') nudge(1, event)
+        else if (key === 'ArrowDown' || key === 'ArrowLeft') nudge(-1, event)
+        else if (key === 'PageUp') nudge(1, COARSE)
+        else if (key === 'PageDown') nudge(-1, COARSE)
         else if (key === 'Home') commit(props.min)
         else if (key === 'End') commit(props.max)
         else return

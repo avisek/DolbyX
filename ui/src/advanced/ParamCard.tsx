@@ -4,7 +4,9 @@
  * One parameter's card — a LABEL for its primary control (`for` =
  * the numeric field / the switch / the currently checked radio / the
  * first writable band; none for read-only arrays), so the whole card
- * is the control's hit area and forwards hover. Flat children — code,
+ * is the control's hit area and forwards hover. Clicks that land IN a
+ * custom control are not forwarded (see `onClick`): they keep the
+ * focus they set. Flat children — code,
  * short label, reset, control region — so a skin can subgrid them
  * onto shared tracks. Zero appearance policy: access and seat are BEM
  * modifiers (`--exp`, `--ro`, `--preset`, `--diverged`, `--array`) the
@@ -36,6 +38,20 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
       }}
       for={primaryControlId(def)}
       title={def.description}
+      onClick={(event) => {
+        // Only the card's own chrome forwards. Pointer capture
+        // retargets a box's click to its wrapper span, and the slider
+        // / strip are divs — none "interactive content", so the label
+        // would forward them to its `for` target (a band card's: band
+        // 1, yanking focus off the band just clicked).
+        const target = event.target
+        if (
+          target instanceof Element &&
+          target.closest('.adv-input, [role=slider], .adv-bands') !== null
+        ) {
+          event.preventDefault()
+        }
+      }}
     >
       <code class="adv-card__code">{def.name}</code>
       <span class="adv-card__label">{def.label}</span>

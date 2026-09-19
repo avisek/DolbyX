@@ -10,7 +10,7 @@
  * bars in a bare strip, a band's editor popping up above its column.
  * The reset button is the divergence marker: a ↺ that simply hides
  * when clean; the header's is a "↺ reset" pill at the far right of
- * the bar (the bar is one button, chevron first). */
+ * the bar (the bar is one button — chevron, title, count). */
 
 .advanced--skin-a {
   --control-h: 1.5rem;
@@ -44,7 +44,8 @@
   padding-top: var(--gap);
 }
 
-/* — Category header = one button bar — */
+/* — Category header = one button bar; its right padding reserves the
+ * reset pill's spot — */
 
 .advanced--skin-a .adv-cat__toggle {
   gap: 0.45rem;
@@ -53,7 +54,10 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom: 1px solid var(--color-surface);
-  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
+  transition:
+    background 0.12s ease,
+    border-color var(--adv-fold) ease,
+    border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-a .adv-cat__head:hover .adv-cat__toggle {
@@ -73,7 +77,6 @@
 
 .advanced--skin-a .adv-cat__chevron {
   flex: none;
-  order: -1;
   width: 1.1rem;
   color: var(--color-accent);
   font-size: 1.1rem;
@@ -250,7 +253,9 @@
   transition: border-color 0.12s ease;
 }
 
-.advanced--skin-a .adv-card:hover .adv-input__field:read-write {
+/* Focus outranks hover: `:where()` keeps the hover rule's weight
+ * under the focus rule's. */
+.advanced--skin-a :where(.adv-card:hover) .adv-input__field:read-write {
   border-color: var(--hover-line);
 }
 

@@ -24,7 +24,8 @@
    * floor keeps two 3.3rem cells (+ gap) on one line after that. */
   --ctl-min: 7.5rem;
   --chev-w: 1rem;
-  --adv-reset-right: calc(0.25rem + var(--chev-w) + 0.2rem);
+  --head-x: 0.7rem;
+  --adv-reset-right: var(--head-x);
 }
 
 /* — Masonry of category cards — */
@@ -80,17 +81,26 @@
   padding: 0.3rem 0 0.55rem;
 }
 
-/* — Category header — */
+/* — Category header: the head bleeds over the card's side padding so
+ * the toggle runs edge to edge; its right padding reserves the reset's
+ * spot — */
+
+.advanced--skin-b .adv-cat__head {
+  margin: 0 -0.4rem;
+}
 
 .advanced--skin-b .adv-cat__toggle {
   gap: 0.35rem;
-  margin: 0 -0.4rem;
-  padding: 0.5rem 0.7rem 0.4rem;
+  padding: 0.5rem calc(var(--head-x) + var(--reset-w) + 0.3rem) 0.4rem
+    var(--head-x);
   border-radius: 0.5rem;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom: 1px solid var(--color-bg);
-  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
+  transition:
+    background 0.12s ease,
+    border-color var(--adv-fold) ease,
+    border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-b .adv-cat__head:hover .adv-cat__toggle {
@@ -131,10 +141,7 @@
 
 .advanced--skin-b .adv-cat__chevron {
   flex: none;
-  box-sizing: content-box;
   width: var(--chev-w);
-  margin-left: auto;
-  padding-left: calc(var(--reset-w) + 0.4rem);
   color: var(--color-accent);
   font-size: 1.05rem;
   line-height: 1;
@@ -267,7 +274,9 @@
   transition: border-color 0.12s ease;
 }
 
-.advanced--skin-b .adv-card:hover .adv-input__field:read-write {
+/* Focus outranks hover: `:where()` keeps the hover rule's weight
+ * under the focus rule's. */
+.advanced--skin-b :where(.adv-card:hover) .adv-input__field:read-write {
   border-color: var(--hover-line);
 }
 
@@ -409,7 +418,7 @@
   border-color: var(--color-accent);
 }
 
-.advanced--skin-b .adv-bands__band--hover .adv-input__field {
+.advanced--skin-b :where(.adv-bands__band--hover) .adv-input__field {
   border-color: var(--hover-line);
 }
 

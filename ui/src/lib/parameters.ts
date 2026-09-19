@@ -25,8 +25,6 @@ export type ParamKind =
   | 'aobg_channel_major'
   /** License blobs etc. — render as `int[]`. */
   | 'opaque'
-  /** Dotted version tuple, read-only display `a.b.c.d`. */
-  | 'version'
   /** 0/1/2 switch; `on` is what "on" writes (2 = the engine's auto). */
   | { readonly tristate: { readonly on: number } }
   /** dB-coded value (raw / 2^`frac_bits` dB); `lkfs` swaps the label. */

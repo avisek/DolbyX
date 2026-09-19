@@ -5,8 +5,8 @@
  * — head over a folding body — whose COLUMNS the skin defines: its own
  * tracks, or a subgrid of an outer grid; the body subgrids them, so
  * cards land on the section's tracks in every skin; the accordion
- * fold; the header = one toggle button filling the whole bar with the
- * reset laid over it), bare chrome resets (native checkbox / radios /
+ * fold; the header = one toggle button that IS the header's box with
+ * the reset laid over its right end), bare chrome resets (native checkbox / radios /
  * text fields the skins paint), and interaction plumbing (cursors,
  * touch-action, the numeric box geometry, the band strip's anchors).
  * Skins set tracks, colors, sizes and durations — `--control-h` (one
@@ -72,7 +72,10 @@
   grid-template-rows: auto minmax(0, 0fr);
 }
 
-/* — Header: the toggle IS the bar; the reset floats over it — */
+/* — Header: the toggle IS the head's box, edge to edge (the head has
+ * no padding; a skin that pads the section bleeds the HEAD out with
+ * negative margins, never the toggle, so the reset's `right` measures
+ * from the toggle's edge); the reset floats over its right end — */
 
 .adv-cat__head {
   position: relative;
@@ -167,8 +170,7 @@
  * overlay the field pads for. Every box is the same width, unit or
  * not: 5ch of digits + 4ch of unit + padding. The two lengths are
  * REGISTERED so `ch`/`em` resolve on the wrapper once and inherit as
- * absolute lengths — the unit may use a smaller font. The `--text`
- * variant (a version tuple) is a wider unit-less box. — */
+ * absolute lengths — the unit may use a smaller font. — */
 
 @property --adv-unit-w {
   syntax: '<length>';
@@ -191,12 +193,6 @@
   flex: none;
   width: calc(5ch + var(--adv-unit-w) + 2 * var(--adv-pad-x));
   touch-action: none;
-}
-
-.adv-input--text {
-  --adv-unit-w: 0px;
-
-  width: calc(9ch + 2 * var(--adv-pad-x));
 }
 
 .adv-input--scrub {

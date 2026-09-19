@@ -13,11 +13,13 @@
  * the vis frame signal, NO idle state) and channel-major `aobg` rows.
  *
  * Keyboard, on the strip (roving): ← / → move the active band
- * (`adv-bands__band--active`); ↑ / ↓ nudge its value one coarse step,
- * Shift = one raw unit; Home / End first / last; Enter or a digit
- * opens the active band's editor — focuses its box, the digit lands
- * in it (`adv-bands__band--editing`, derived from focus); Esc / Enter
- * inside the box close it and return focus to the strip.
+ * (`adv-bands__band--active`); ↑ / ↓ nudge its value by the shared
+ * step rule (`step.ts`: 1 unit, Alt 0.1×, Shift 10×); Home / End
+ * first / last; Enter or a digit opens the active band's editor —
+ * focuses its box, the digit lands in it (`adv-bands__band--editing`,
+ * derived from focus); Esc / Enter inside the box close it and return
+ * focus to the strip. Clicks on the strip are not forwarded by the
+ * card label (ParamCard cancels them).
  *
  * Pointer, on bands outside the box: pointerdown + > 3 px engages the
  * brush — x over the bands → band, y within the band → value (max at
@@ -55,6 +57,7 @@ import { displayToRaw, rawToDisplay } from '../lib/units'
 import type { VisParams } from '../lib/ws'
 import { visFrame } from '../store/vis'
 import NumberInput from './NumberInput'
+import { stepped, type Modifiers, type StepAxis } from './step'
 import {
   commitParam,
   effectiveCount,
@@ -73,16 +76,21 @@ export const display = (def: ParameterDef, raw: number): number =>
 export const toRaw = (def: ParameterDef, value: number): number =>
   Math.min(def.max, Math.max(def.min, displayToRaw(value, def.frac_bits)))
 
-/** Scrub / nudge coarse step: 1 display unit, range-scaled so wide
- * ranges (20 kHz) stay traversable — ~256 steps across the span. */
-export const coarseStep = (def: ParameterDef): number => {
-  const span = rawToDisplay(def.max - def.min, def.frac_bits)
-  return Math.max(1, Math.round(span / 256))
-}
-
-/** Scrub fine (Shift / arrow-key) step: one raw unit. */
+/** The step lattice: one raw unit in display units. */
 export const fineStep = (def: ParameterDef): number =>
   rawToDisplay(1, def.frac_bits)
+
+/** Step / slider scale by kind: frequencies live on a log axis. */
+export const scaleOf = (def: ParameterDef): 'linear' | 'log' =>
+  def.kind === 'frequency_hz' ? 'log' : 'linear'
+
+/** The def's display-unit step axis. */
+export const axisOf = (def: ParameterDef): StepAxis => ({
+  min: rawToDisplay(def.min, def.frac_bits),
+  max: rawToDisplay(def.max, def.frac_bits),
+  fine: fineStep(def),
+  scale: scaleOf(def),
+})
 
 /** 0–1 of the def's raw range — the skin's bar-height variable. */
 const norm = (def: ParameterDef, raw: number): number =>
@@ -220,10 +228,7 @@ const Strip: Component<{
   const writable = props.seat.write !== undefined
   const count = (): number => props.seat.count()
   const raw = (slot: number): number => props.seat.raws()[slot] ?? def.min
-  const clampRaw = (value: number): number =>
-    Math.min(def.max, Math.max(def.min, value))
-  /** Nudge coarse step in raw units (the scrub's coarse display step). */
-  const coarseRaw = Math.max(1, displayToRaw(coarseStep(def), def.frac_bits))
+  const axis = axisOf(def)
   const tip = (slot: number): string => {
     const text = `${def.name}[${String(slot + 1)}] = ${String(display(def, raw(slot)))}`
     return suffix === '' ? text : `${text} ${suffix}`
@@ -266,11 +271,11 @@ const Strip: Component<{
     input.select()
   }
 
-  const nudge = (direction: 1 | -1, fine: boolean): void => {
+  const nudge = (direction: 1 | -1, mods: Modifiers): void => {
     if (!writable) return
     const slot = active()
-    const step = fine ? 1 : coarseRaw
-    const next = clampRaw(raw(slot) + direction * step)
+    const current = rawToDisplay(raw(slot), def.frac_bits)
+    const next = toRaw(def, stepped(axis, current, direction, mods))
     if (next !== raw(slot)) props.seat.write?.(withSlot(slot, next), false)
   }
 
@@ -380,8 +385,8 @@ const Strip: Component<{
         if (key === 'ArrowLeft') setActive(Math.max(0, active() - 1))
         else if (key === 'ArrowRight')
           setActive(Math.min(lastSlot, active() + 1))
-        else if (key === 'ArrowUp') nudge(1, event.shiftKey)
-        else if (key === 'ArrowDown') nudge(-1, event.shiftKey)
+        else if (key === 'ArrowUp') nudge(1, event)
+        else if (key === 'ArrowDown') nudge(-1, event)
         else if (key === 'Home') setActive(0)
         else if (key === 'End') setActive(Math.max(0, lastSlot))
         else if (key === 'Enter') openEditor(active())
@@ -439,11 +444,6 @@ const Strip: Component<{
       onPointerLeave={() => {
         setHover(undefined)
       }}
-      onClick={(event) => {
-        // The click lands on the strip — not interactive content, so
-        // the card label would forward it to band 1's box.
-        if (!inEditor(event.target)) event.preventDefault()
-      }}
     >
       <For each={slotList(count())}>
         {(slot) => (
@@ -477,8 +477,8 @@ const Strip: Component<{
                 value={() => display(def, raw(slot))}
                 min={rawToDisplay(def.min, def.frac_bits)}
                 max={rawToDisplay(def.max, def.frac_bits)}
-                coarse={coarseStep(def)}
-                fine={fineStep(def)}
+                fine={axis.fine}
+                scale={axis.scale}
                 unit=""
                 onLive={(value) =>
                   props.seat.write?.(withSlot(slot, toRaw(def, value)), true)

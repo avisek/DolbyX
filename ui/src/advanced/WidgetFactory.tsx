@@ -3,9 +3,8 @@
 /**
  * One widget per (kind, access) combo, metadata-driven — no per-param
  * code, no layout policy (skins lay out the control region). Kind
- * decides structure: `version` is one read-only dotted text field;
- * EVERY other long array (`length > 1` — writable, read-only, opaque,
- * live vis, `aobg`) renders the one BandArray DOM; scalars pick a
+ * decides structure: EVERY long array (`length > 1` — writable,
+ * read-only, opaque, live vis, `aobg`) renders the one BandArray DOM; scalars pick a
  * native checkbox switch / native radio tristate / numeric box THEN
  * slider (always, whatever the range — skins may hide the slider;
  * FrequencyHz sliders are logarithmic) / read-only numeric box + a
@@ -17,10 +16,10 @@ import { For, type Component, type JSX } from 'solid-js'
 import { onValue, unitLabel, type ParameterDef } from '../lib/parameters'
 import { rawToDisplay } from '../lib/units'
 import BandArray, {
-  coarseStep,
   display,
   fineStep,
   firstBandId,
+  scaleOf,
   toRaw,
 } from './BandArray'
 import NumberInput from './NumberInput'
@@ -33,21 +32,16 @@ const head = (def: ParameterDef): number => paramValues(def)[0] ?? 0
 const isTristate = (def: ParameterDef): boolean =>
   typeof def.kind === 'object' && 'tristate' in def.kind
 
-/** Slider scale by kind: frequencies live on a log axis. */
-const scale = (def: ParameterDef): 'linear' | 'log' =>
-  def.kind === 'frequency_hz' ? 'log' : 'linear'
-
 // — Element ids: the card's `for` target —
 
 const controlId = (def: ParameterDef): string => `adv-${def.name}`
 const radioId = (def: ParameterDef, option: number): string =>
   `adv-${def.name}-r${String(option)}`
 
-/** The primary control the card labels: the numeric / version field,
- * the checkbox, the CURRENTLY CHECKED radio, the first writable band
- * — none for a read-only array. Mirrors the dispatch below. */
+/** The primary control the card labels: the numeric field, the
+ * checkbox, the CURRENTLY CHECKED radio, the first writable band —
+ * none for a read-only array. Mirrors the dispatch below. */
 export function primaryControlId(def: ParameterDef): string | undefined {
-  if (def.kind === 'version') return controlId(def)
   if (def.length > 1) return isWritable(def) ? firstBandId(def) : undefined
   if (isWritable(def) && isTristate(def)) return radioId(def, head(def))
   return controlId(def)
@@ -130,8 +124,8 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
         value={value}
         min={rawToDisplay(def.min, def.frac_bits)}
         max={rawToDisplay(def.max, def.frac_bits)}
-        coarse={coarseStep(def)}
         fine={fineStep(def)}
+        scale={scaleOf(def)}
         unit={unitLabel(def.kind)}
         onLive={onLive}
         onCommit={onCommit}
@@ -142,9 +136,8 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
         min={rawToDisplay(def.min, def.frac_bits)}
         max={rawToDisplay(def.max, def.frac_bits)}
         fine={fineStep(def)}
-        coarse={coarseStep(def)}
         unit={unitLabel(def.kind)}
-        scale={scale(def)}
+        scale={scaleOf(def)}
         onLive={onLive}
         onCommit={onCommit}
       />
@@ -174,29 +167,13 @@ const Readout: Component<{ def: ParameterDef; name: string }> = (props) => {
         min={rawToDisplay(def.min, def.frac_bits)}
         max={rawToDisplay(def.max, def.frac_bits)}
         fine={fineStep(def)}
-        coarse={coarseStep(def)}
         unit={unitLabel(def.kind)}
-        scale={scale(def)}
+        scale={scaleOf(def)}
         disabled
       />
     </>
   )
 }
-
-/** `version` — the tuple as one read-only dotted text field (`ver`:
- * `2.0.4.0`), the numeric box's DOM shape under a `--text` modifier. */
-const Version: Component<{ def: ParameterDef; name: string }> = (props) => (
-  <span class="adv-input adv-input--text">
-    <input
-      id={controlId(props.def)}
-      class="adv-input__field"
-      type="text"
-      readonly
-      aria-label={props.name}
-      value={paramValues(props.def).join('.')}
-    />
-  </span>
-)
 
 // — Dispatch —
 
@@ -207,9 +184,8 @@ const WidgetFactory: Component<{ def: ParameterDef; name: string }> = (
   props,
 ): JSX.Element => {
   const def = props.def
-  if (def.kind === 'version') return <Version def={def} name={props.name} />
-  // Every other long array is the one band DOM (access only gates the
-  // inputs inside).
+  // Every long array is the one band DOM (access only gates the inputs
+  // inside).
   if (def.length > 1) return <BandArray def={def} name={props.name} />
   if (!isWritable(def)) return <Readout def={def} name={props.name} />
   if (def.kind === 'toggle') return <Toggle def={def} name={props.name} />

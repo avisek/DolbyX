@@ -7,10 +7,9 @@
  * align across cards; params are form rows subgridded onto those
  * tracks. The reset button is the divergence marker (a dot at rest
  * that morphs into ↺ on row hover / focus) and sits LEFT of the
- * control it resets. The header is one button — title · count, a big
- * chevron at the far right — with the reset laid over it just left of
- * the chevron; the divider is the body's top border, so it folds with
- * the body. Access is color-coded on the 4-CC chip (accent / amber /
+ * control it resets. The header is one button, edge to edge — a big
+ * chevron, title · count — with the reset laid over its right end; the
+ * divider is the toggle's bottom border, faded out as the body folds. Access is color-coded on the 4-CC chip (accent / amber /
  * muted); a preset-seated category is captioned "EQ preset". Long
  * arrays are plot-styled paintable strips in the control track (thin
  * neutral bars, the whole column lights on hover); a band's editor is
@@ -29,7 +28,8 @@
   --reset-w: 1.4rem;
   --ctl-min: 11rem;
   --chev-w: 1.3rem;
-  --adv-reset-right: calc(0.35rem + var(--chev-w) + 0.25rem);
+  --head-x: 1rem;
+  --adv-reset-right: var(--head-x);
 }
 
 /* — Masonry of category cards — */
@@ -92,24 +92,32 @@
   break-inside: avoid;
 }
 
-/* The head is exactly the toggle (the reset centres on it); the gap
- * under it and the divider belong to the body, so both fold with it. */
+/* The gap under the head belongs to the body, so it folds with it. */
 .advanced--skin-c .adv-cat__body {
   row-gap: 0.1rem;
   padding: 0.4rem 0 0.8rem;
 }
 
-/* — Category header — */
+/* — Category header: the head bleeds over the card's side padding so
+ * the toggle runs edge to edge; its right padding reserves the reset's
+ * spot — */
+
+.advanced--skin-c .adv-cat__head {
+  margin: 0 -0.6rem;
+}
 
 .advanced--skin-c .adv-cat__toggle {
   gap: 0.5rem;
-  margin: 0 -0.6rem;
-  padding: 0.7rem 1rem 0.55rem;
+  padding: 0.7rem calc(var(--head-x) + var(--reset-w) + 0.35rem) 0.55rem
+    var(--head-x);
   border-radius: 0.6rem;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom: 1px solid var(--color-bg);
-  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
+  transition:
+    background 0.12s ease,
+    border-color var(--adv-fold) ease,
+    border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-c .adv-cat__head:hover .adv-cat__toggle {
@@ -149,14 +157,10 @@
   content: ' params';
 }
 
-/* The chevron: far right, big; its left padding keeps the reset's spot
- * clear of the title. */
+/* The chevron: leads the title, big. */
 .advanced--skin-c .adv-cat__chevron {
   flex: none;
-  box-sizing: content-box;
   width: var(--chev-w);
-  margin-left: auto;
-  padding-left: calc(var(--reset-w) + 0.5rem);
   color: var(--color-accent);
   font-size: 1.3rem;
   line-height: 1;
@@ -341,7 +345,9 @@
   transition: border-color 0.12s ease;
 }
 
-.advanced--skin-c .adv-card:hover .adv-input__field:read-write {
+/* Focus outranks hover: `:where()` keeps the hover rule's weight
+ * under the focus rule's. */
+.advanced--skin-c :where(.adv-card:hover) .adv-input__field:read-write {
   border-color: var(--hover-line);
 }
 
