@@ -86,7 +86,7 @@
     minmax(var(--ctl-min), 1fr);
   column-gap: 0.55rem;
   margin-bottom: 0.9rem;
-  padding: 0.5rem 0.6rem 0;
+  padding: 0 0.6rem;
   border-radius: 0.6rem;
   background: var(--color-surface);
   break-inside: avoid;
@@ -96,18 +96,20 @@
  * under it and the divider belong to the body, so both fold with it. */
 .advanced--skin-c .adv-cat__body {
   row-gap: 0.1rem;
-  margin-top: 0.3rem;
-  padding: 0.3rem 0 0.55rem;
-  border-top: 1px solid var(--color-bg);
+  padding: 0.4rem 0 0.8rem;
 }
 
 /* — Category header — */
 
 .advanced--skin-c .adv-cat__toggle {
   gap: 0.5rem;
-  padding: 0.3rem 0.35rem 0.3rem 0.4rem;
-  border-radius: 0.4rem;
-  transition: background 0.12s ease;
+  margin: 0 -0.6rem;
+  padding: 0.7rem 1rem 0.55rem;
+  border-radius: 0.6rem;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: 1px solid var(--color-bg);
+  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-c .adv-cat__head:hover .adv-cat__toggle {
@@ -117,6 +119,12 @@
 .advanced--skin-c .adv-cat__toggle:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
+}
+
+.advanced--skin-c .adv-cat--collapsed .adv-cat__toggle {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0.6rem;
+  border-bottom-right-radius: 0.6rem;
 }
 
 .advanced--skin-c .adv-cat__title {

@@ -41,18 +41,19 @@
 /* The divider is the body's top border: it folds with the body. */
 .advanced--skin-a .adv-cat__body {
   row-gap: var(--gap);
-  margin-top: 0.25rem;
   padding-top: var(--gap);
-  border-top: 1px solid var(--color-surface);
 }
 
 /* — Category header = one button bar — */
 
 .advanced--skin-a .adv-cat__toggle {
   gap: 0.45rem;
-  padding: 0.25rem 4.8rem 0.25rem 0.3rem;
-  border-radius: 0.35rem;
-  transition: background 0.12s ease;
+  padding: 0.5rem 4.8rem 0.5rem 0.3rem;
+  border-radius: 0.5rem;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: 1px solid var(--color-surface);
+  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-a .adv-cat__head:hover .adv-cat__toggle {
@@ -62,6 +63,12 @@
 .advanced--skin-a .adv-cat__toggle:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
+}
+
+.advanced--skin-a .adv-cat--collapsed .adv-cat__toggle {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
 }
 
 .advanced--skin-a .adv-cat__chevron {

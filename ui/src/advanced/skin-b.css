@@ -69,7 +69,7 @@
     minmax(var(--ctl-min), max-content);
   column-gap: 0.35rem;
   margin-bottom: 0.7rem;
-  padding: 0.35rem 0.4rem 0;
+  padding: 0 0.4rem;
   border-radius: 0.5rem;
   background: var(--color-surface);
   break-inside: avoid;
@@ -77,18 +77,20 @@
 
 .advanced--skin-b .adv-cat__body {
   row-gap: 0;
-  margin-top: 0.2rem;
-  padding: 0.2rem 0 0.4rem;
-  border-top: 1px solid var(--color-bg);
+  padding: 0.3rem 0 0.55rem;
 }
 
 /* — Category header — */
 
 .advanced--skin-b .adv-cat__toggle {
   gap: 0.35rem;
-  padding: 0.2rem 0.25rem 0.2rem 0.3rem;
-  border-radius: 0.3rem;
-  transition: background 0.12s ease;
+  margin: 0 -0.4rem;
+  padding: 0.5rem 0.7rem 0.4rem;
+  border-radius: 0.5rem;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: 1px solid var(--color-bg);
+  transition: background 0.12s ease, border-color var(--adv-fold) ease, border-radius var(--adv-fold) ease;
 }
 
 .advanced--skin-b .adv-cat__head:hover .adv-cat__toggle {
@@ -98,6 +100,12 @@
 .advanced--skin-b .adv-cat__toggle:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
+}
+
+.advanced--skin-b .adv-cat--collapsed .adv-cat__toggle {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
 }
 
 .advanced--skin-b .adv-cat__title {

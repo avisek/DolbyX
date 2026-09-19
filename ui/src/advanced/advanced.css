@@ -82,7 +82,7 @@
 .adv-cat__toggle {
   display: flex;
   align-items: center;
-  width: 100%;
+  width: stretch;
   min-width: 0;
 }
 
