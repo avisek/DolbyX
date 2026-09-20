@@ -91,7 +91,10 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
       onCommit={
         writable
           ? (value) => {
-              commitParam(def, [rawValue(def, value)])
+              // Store truth is raw: `0.62` typed over a box showing
+              // `0.63` is the same 1/16-dB step — nothing to commit.
+              const raw = rawValue(def, value)
+              if (raw !== head(def)) commitParam(def, [raw])
             }
           : undefined
       }

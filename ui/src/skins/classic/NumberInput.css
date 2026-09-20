@@ -43,9 +43,11 @@
   transition: border-color 0.12s ease;
 }
 
-/* Hover under focus weight: the card label forwards hover; a focused
-   field always wins. Readonly fields get no lift. */
-:where(.adv-card:hover) .adv-input__field:read-write {
+/* Hover under focus weight — the whole hover selector inside `:where()`
+   so the focus rule outranks it by specificity, not source order. The
+   focus line is the border itself: the same property hover paints, so
+   the contest is real. Readonly fields get no lift. */
+:where(.adv-card:hover) .adv-input__field:where(:read-write) {
   border-color: var(--hover-line);
 }
 

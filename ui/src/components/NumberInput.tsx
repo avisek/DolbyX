@@ -4,18 +4,12 @@ import { Show, createEffect, on, type Component } from 'solid-js'
 const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
 
 /**
- * The one numeric box (#87): a text field the engine follows *as you
- * type*, with the unit as an inert overlay inside it. Every `input`
- * event whose text is a complete number is a live write of that number
- * clamped to `[min, max]` — the text stays exactly as typed (`500` in
- * a 0–10 box writes 10 and keeps reading `500`); blur or Enter commits
- * the clamped value if it differs from store truth and re-syncs the
- * text; Esc reverts. Partials (`-`, `1.`, empty) write nothing. The
- * field is uncontrolled while focused (store updates never clobber
- * typing) and mirrors the store otherwise — read-only fields always.
- * A shared control: the Advanced panel's scalars and, later, band
- * editors (#91) and the Master controls (#93). Display units in and
- * out; the caller converts (`lib/scalar.ts`).
+ * The one numeric box (#87), a shared control: the engine follows *as
+ * you type*. Every complete number is a live write clamped to
+ * `[min, max]` while the text stays as typed; blur / Enter commits if
+ * it differs from store truth and re-syncs the text; Esc reverts.
+ * Uncontrolled while focused, mirroring the store otherwise (read-only
+ * always). Display units in and out — the caller converts.
  */
 const NumberInput: Component<{
   id: string
@@ -42,7 +36,7 @@ const NumberInput: Component<{
 
   /** The field's text as a complete number, else undefined. */
   const parsed = (): number | undefined => {
-    const text = input.value.trim()
+    const text = input.value
     return NUMBER.test(text) ? Number(text) : undefined
   }
 

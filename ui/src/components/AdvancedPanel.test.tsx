@@ -646,30 +646,33 @@ it('clamps an out-of-range typed value on the wire, keeps the text, re-syncs on 
   expect(sentEdits(socket)).toHaveLength(1)
 })
 
-// Behavior 5 (#87): Enter is blur — the clamped value stands committed
-// and the text re-syncs, the field no longer focused; Esc reverts the
-// text to store truth without a write.
+// Behavior 5 (#87): Enter is blur — a typed value the store moved
+// under (behavior 7) commits against the new truth and the text
+// re-syncs, the field no longer focused; Esc reverts the text to store
+// truth without a write.
 it('Enter commits and re-syncs; Esc reverts the text without a write', () => {
   renderOpen()
   const socket = connect()
-  const amount = field('Volume Leveler Amount')
-  type(amount, '500')
-  amount.dispatchEvent(
+  const boost = field('Headphone Virtualizer Surround Boost')
+  type(boost, '2')
+  applySnapshot(fixtureStateWithParams({ dhsb: [80] })) // 5 dB
+  boost.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
   )
-  expect(amount.value).toBe('10')
-  expect(document.activeElement).not.toBe(amount)
+  expect(boost.value).toBe('5')
+  expect(document.activeElement).not.toBe(boost)
   expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { dvla: [10] },
+    { dhsb: [32] }, // live
+    { dhsb: [32] }, // the Enter commit, against the changed truth
   ])
 
-  type(amount, '7.') // a partial: nothing written yet
-  amount.dispatchEvent(
+  type(boost, '7.') // a partial: nothing written
+  boost.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
   )
-  expect(amount.value).toBe('10')
-  expect(document.activeElement).not.toBe(amount)
-  expect(sentEdits(socket)).toHaveLength(1)
+  expect(boost.value).toBe('5')
+  expect(document.activeElement).not.toBe(boost)
+  expect(sentEdits(socket)).toHaveLength(2)
 })
 
 // Behavior 4 (#87): partials write nothing; the first complete number
@@ -732,7 +735,7 @@ it('renders a writable dB scalar as the numeric box with a unit overlay, first i
 it('unit overlays are aria-hidden and every numeric box shares the class contract', () => {
   const panel = renderOpen()
   const boxes = [...panel.querySelectorAll<HTMLElement>('.adv-input')]
-  expect(boxes.length).toBeGreaterThan(20)
+  expect(boxes).toHaveLength(30) // the shipped table's numeric scalars
   for (const box of boxes) {
     expect(box.querySelector('.adv-input__field')).not.toBeNull()
     const unit = box.querySelector('.adv-input__unit')
@@ -796,6 +799,16 @@ it('a store update while focused leaves the typed text; blur re-syncs', () => {
     { dhsb: [32] },
     { dhsb: [32] }, // the blur commit, against the changed truth
   ])
+
+  // Store truth is raw: text that rounds to the shown 1/16-dB step
+  // (`5.001` over `5`) writes the same raw live and commits nothing.
+  type(boost, '5.001')
+  boost.blur()
+  expect(
+    sentEdits(socket)
+      .map((frame) => frame.params)
+      .slice(2),
+  ).toEqual([{ dhsb: [80] }])
 })
 
 // Behavior 10 (#87): selected text never starts a drag — `dragstart`
