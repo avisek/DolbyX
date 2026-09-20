@@ -1,15 +1,16 @@
 import { Show, type Component } from 'solid-js'
 import { paramDef } from '../lib/parameters'
-import { isWritable } from '../store/wiring'
-import WidgetFactory from './WidgetFactory'
+import { isWritable, writesToPreset } from '../store/wiring'
+import WidgetFactory, { primaryControlId } from './WidgetFactory'
 
 /**
- * One AK parameter's card (#85): a `label` — no `for` yet, #86 points
- * it at the primary control — with flat children the skin subgrids
- * onto shared tracks. Zero appearance policy: the skin reads the
- * modifiers (ADR-0011); `title` is the engine's description. Labels
- * are category-relative, so the accessible name of every control
- * carries the category: "Volume Leveler Amount".
+ * One AK parameter's card (#85): a `label` for its primary control
+ * (#86) — the whole card is the control's hit area — with flat
+ * children the skin subgrids onto shared tracks. Zero appearance
+ * policy: the skin reads the modifiers (ADR-0011); `title` is the
+ * engine's description. Labels are category-relative, so the
+ * accessible name of every control carries the category: "Volume
+ * Leveler Amount".
  */
 const ParamCard: Component<{ name: string; categoryLabel: string }> = (
   props,
@@ -25,8 +26,26 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
         'adv-card--array': def.length > 1,
         'adv-card--ro': !isWritable(def),
         'adv-card--exp': def.access === 'experimental',
+        'adv-card--preset': writesToPreset(def),
       }}
+      for={primaryControlId(def)}
       title={def.description}
+      // A native listener (not Solid's delegated one): the guard must
+      // have run by the time the label's activation behavior asks
+      // whether the click was cancelled.
+      on:click={(event) => {
+        // Only the card's own chrome forwards to the `for` target: a
+        // click inside a control that manages its own focus (numeric
+        // box, slider, band strip — #87 on) keeps the focus it set.
+        // Tristate segments are nested labels with their own radio
+        // forwarding, deliberately not listed.
+        if (
+          event.target instanceof Element &&
+          event.target.closest('.adv-input, [role=slider], .adv-bands')
+        ) {
+          event.preventDefault()
+        }
+      }}
     >
       <code class="adv-card__code">{def.name}</code>
       <span class="adv-card__label">{def.label}</span>

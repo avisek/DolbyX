@@ -5,11 +5,19 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 
-/** Opens the panel; the category sections are the subject. */
+/**
+ * Opens the panel; the category sections are the subject. The open pref
+ * is per origin, so a second page of the same context starts open —
+ * only a collapsed panel gets the click.
+ */
 async function openAdvanced(page: Page): Promise<void> {
   await page.goto('/')
-  await expect(page.getByRole('status')).toHaveText('Connected')
-  await page.getByRole('button', { name: 'Advanced' }).click()
+  await expect(page.locator('.connection-badge')).toHaveText('Connected')
+  const header = page.getByRole('button', { name: 'Advanced' })
+  if ((await header.getAttribute('aria-expanded')) === 'false') {
+    await header.click()
+  }
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
 }
 
 // Behavior 5: the fold toggle IS the header's box — on every category,
@@ -32,9 +40,7 @@ test('every category toggle fills its header box', async ({ page }) => {
 })
 
 // Behavior 5: once folded, the body is `visibility: hidden` and Tab
-// skips its content. The cards hold nothing focusable yet (readouts,
-// disabled reset markers), so the test plants a button in the body —
-// the fold must drop it from the tab order all the same.
+// skips its content — the first card's switch (`geon`, #86) included.
 test('a folded category hides its body and takes it out of the tab order', async ({
   page,
 }) => {
@@ -42,17 +48,15 @@ test('a folded category hides its body and takes it out of the tab order', async
   const section = page.getByRole('region', { name: 'Graphic Equalizer' })
   const toggle = section.getByRole('button', { name: /^Graphic Equalizer/ })
   const body = section.locator('.adv-cat__body')
-  await body.evaluate((el) => {
-    const planted = document.createElement('button')
-    planted.textContent = 'planted'
-    el.append(planted)
-  })
 
-  // Expanded: Tab from the toggle reaches the body (the disabled reset
-  // is skipped).
+  // Expanded: Tab from the toggle reaches the first card's switch (the
+  // disabled reset markers are skipped).
   await toggle.focus()
   await page.keyboard.press('Tab')
-  await expect(page.locator(':focus')).toHaveText('planted')
+  await expect(page.locator(':focus')).toHaveAttribute(
+    'aria-label',
+    'Graphic Equalizer Enable',
+  )
 
   await toggle.click()
   await expect(section).toHaveClass(/adv-cat--collapsed/)
@@ -97,4 +101,64 @@ test('labels never overflow and controls align within a category', async ({
     expect(xs.length).toBeGreaterThan(0)
     expect(new Set(xs).size).toBe(1)
   }
+})
+
+// — Discrete controls (#86, behavior 9) —
+
+// A keyboard flip on a switch is a real `edit_profile`: Space on the
+// focused switch commits, the daemon acks the originator (which flips
+// on the ack) and broadcasts — the peer page's next `state` snapshot
+// carries the new value.
+test('Tab + Space on a switch commits, and the next snapshot carries it', async ({
+  page,
+  context,
+}) => {
+  await openAdvanced(page)
+  const peer = await context.newPage()
+  await openAdvanced(peer)
+  const name = 'Volume Leveler Enable'
+  const enable = page.getByRole('switch', { name })
+  const peerEnable = peer.getByRole('switch', { name })
+  await expect(enable).not.toBeChecked() // Music ships dvle=0
+  await expect(peerEnable).not.toBeChecked()
+
+  const toggle = page.getByRole('button', { name: /^Volume Leveler/ })
+  await toggle.focus()
+  await page.keyboard.press('Tab')
+  await expect(enable).toBeFocused()
+  await page.keyboard.press('Space')
+
+  await expect(enable).toBeChecked()
+  await expect(peerEnable).toBeChecked()
+  await expect(enable).toBeFocused()
+})
+
+// Arrow keys move within a tristate's radio group — one Tab stop — and
+// each move is a commit: the checked segment follows, the peer's next
+// snapshot carries the value, and Tab leaves the group as a whole.
+test('Arrow keys on a tristate move the selection and commit', async ({
+  page,
+  context,
+}) => {
+  await openAdvanced(page)
+  const peer = await context.newPage()
+  await openAdvanced(peer)
+  const name = 'Speaker Virtualizer Enable'
+  const group = page.getByRole('radiogroup', { name })
+  const radios = group.getByRole('radio')
+  const peerRadios = peer.getByRole('radiogroup', { name }).getByRole('radio')
+  await expect(radios.nth(0)).toBeChecked() // Music resolves vspe=0
+
+  await radios.nth(0).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(radios.nth(1)).toBeChecked()
+  await expect(peerRadios.nth(1)).toBeChecked()
+  await page.keyboard.press('ArrowRight')
+  await expect(radios.nth(2)).toBeChecked()
+  await expect(peerRadios.nth(2)).toBeChecked()
+  await expect(radios.nth(2)).toBeFocused()
+
+  // One Tab stop: Tab leaves the group for the next card's control.
+  await page.keyboard.press('Tab')
+  await expect(group.locator(':focus')).toHaveCount(0)
 })

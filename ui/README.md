@@ -85,7 +85,7 @@ until the Classic sweep (#94); new stylesheets use tokens:
 | `--radius-1` `--radius-2`                                                                                       | controls / cards                                  |
 | `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                  |
 | `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                          |
-| `--focus-ring`                                                                                                  | the focus outline                                 |
+| `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it    |
 
 **Rules** (ADR-0011 + addendum):
 
