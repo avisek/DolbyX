@@ -15,7 +15,8 @@ const COARSE: Modifiers = { altKey: false, shiftKey: true }
  * The Slider (#89), a shared control — the skinnable range control
  * after every numeric box; no native `input[type=range]` anywhere.
  * `role=slider` + `aria-value*`; publishes `--value` (display units)
- * and `--norm` (0–1 track position, log on a `log` axis) — the skin
+ * and `--norm` (0–1 track position, log on a `log` axis; a value
+ * outside the range reads outside 0–1 — the skin clamps) — the skin
  * paints track / fill / thumb from `--norm`, the component sets no
  * geometry.
  *
@@ -57,7 +58,7 @@ const Slider: Component<{
   })
 
   /** Absolute pointer x → lattice value over the track's box. */
-  const fromEvent = (event: PointerEvent): number => {
+  const valueAt = (event: PointerEvent): number => {
     const rect = track.getBoundingClientRect()
     const norm = (event.clientX - rect.left) / (rect.width || 1)
     return fromNorm(axis(), Math.min(1, Math.max(0, norm)))
@@ -99,14 +100,14 @@ const Slider: Component<{
         event.currentTarget.setPointerCapture(event.pointerId)
         event.currentTarget.focus()
         dragging = true
-        last = fromEvent(event)
+        last = valueAt(event)
         props.onLive?.(last)
         // No compat mousedown: the focus and selection stay ours.
         event.preventDefault()
       }}
       onPointerMove={(event) => {
         if (!dragging) return
-        const value = fromEvent(event)
+        const value = valueAt(event)
         if (value !== last) {
           last = value
           props.onLive?.(value)

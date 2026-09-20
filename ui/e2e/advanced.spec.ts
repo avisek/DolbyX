@@ -324,7 +324,7 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
 // the slider reads 6 dB with focus held, `--norm` is 1, the thumb sits
 // at the track's right edge, and the peer page's next snapshot carries
 // the value.
-test('dragging dhsb’s thumb to the track end lands max; the thumb tracks --norm', async ({
+test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm", async ({
   page,
   context,
 }) => {

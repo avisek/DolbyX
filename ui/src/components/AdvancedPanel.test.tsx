@@ -820,9 +820,9 @@ it('default-prevents dragstart on the field', () => {
 
 // — Numeric input: step rule + arrow keys (#87 part 2) —
 
-/** Presses one key on a focused field, with modifiers. */
+/** Presses one key on a focused control, with modifiers. */
 function press(
-  input: HTMLInputElement,
+  input: HTMLElement,
   key: string,
   mods: { altKey?: boolean; shiftKey?: boolean } = {},
 ): KeyboardEvent {
@@ -1279,30 +1279,13 @@ it('the compat click after a scrub re-selects the text; a plain click does not',
 
 const slider = (name: string) => screen.getByRole('slider', { name })
 
-/** Presses one key on a focused slider, with modifiers. */
-function pressSlider(
-  node: HTMLElement,
-  key: string,
-  mods: { altKey?: boolean; shiftKey?: boolean } = {},
-): KeyboardEvent {
-  node.focus()
-  const event = new KeyboardEvent('keydown', {
-    key,
-    bubbles: true,
-    cancelable: true,
-    ...mods,
-  })
-  node.dispatchEvent(event)
-  return event
-}
-
 // Tracer bullet (#89): → on `dhsb`'s Slider is one step under the Step
 // rule — +1 dB, raw 48 + 16 — a live 1-entry `edit_profile` on the
 // active profile, the key consumed.
 it('→ on the dhsb slider sends one live edit_profile carrying raw 64', () => {
   renderOpen()
   const socket = connect()
-  const right = pressSlider(
+  const right = press(
     slider('Headphone Virtualizer Surround Boost'),
     'ArrowRight',
   )
@@ -1436,8 +1419,8 @@ it('read-only scalars render a disabled slider that never writes but publishes -
   expect(sliderVar(count, '--norm')).toBe(1)
   expect(sliderVar(count, '--value')).toBe(20)
 
-  const left = pressSlider(count, 'ArrowLeft')
-  pressSlider(count, 'Home')
+  const left = press(count, 'ArrowLeft')
+  press(count, 'Home')
   expect(left.defaultPrevented).toBe(false)
   mockTrack(count)
   pressTrack(count, 0)
@@ -1507,16 +1490,16 @@ it('slider keys step live: ← −1, Shift −10, Alt −0.125, PageUp +10, Home
   renderOpen()
   const socket = connect()
   const vol = slider('Endpoint Volume Volume')
-  pressSlider(vol, 'ArrowLeft')
-  pressSlider(vol, 'ArrowLeft', { shiftKey: true })
-  pressSlider(vol, 'ArrowLeft', { altKey: true })
-  pressSlider(vol, 'PageUp', { altKey: true })
-  pressSlider(vol, 'PageDown')
-  pressSlider(vol, 'ArrowUp')
-  pressSlider(vol, 'ArrowDown', { shiftKey: true })
-  const home = pressSlider(vol, 'Home')
-  pressSlider(vol, 'End')
-  const tab = pressSlider(vol, 'Tab')
+  press(vol, 'ArrowLeft')
+  press(vol, 'ArrowLeft', { shiftKey: true })
+  press(vol, 'ArrowLeft', { altKey: true })
+  press(vol, 'PageUp', { altKey: true })
+  press(vol, 'PageDown')
+  press(vol, 'ArrowUp')
+  press(vol, 'ArrowDown', { shiftKey: true })
+  const home = press(vol, 'Home')
+  press(vol, 'End')
+  const tab = press(vol, 'Tab')
   expect(sentParams(socket)).toEqual([
     { vol: [-16] }, // −1 dB
     { vol: [-176] }, // −11
@@ -1573,7 +1556,7 @@ it('a preset-carried slider writes the preset while one is selected, else the pr
   applySnapshot(selectingState('rich'))
   const amount = slider('Intelligent Equalizer Amount')
   expect(amount.getAttribute('aria-valuenow')).toBe('0.63')
-  pressSlider(amount, 'ArrowLeft', { altKey: true })
+  press(amount, 'ArrowLeft', { altKey: true })
   expect(sentEdits(socket)).toEqual([
     {
       cmd: 'edit_eq_preset',
@@ -1585,7 +1568,7 @@ it('a preset-carried slider writes the preset while one is selected, else the pr
 
   applySnapshot(selectingState(null))
   expect(amount.getAttribute('aria-valuenow')).toBe('0.63') // Music's own iea=10
-  pressSlider(amount, 'End')
+  press(amount, 'End')
   expect(sentEdits(socket)[1]).toEqual({
     cmd: 'edit_profile',
     request_id: expect.any(String) as string,
