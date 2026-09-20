@@ -1,5 +1,5 @@
 import { Show, createEffect, on, type Component } from 'solid-js'
-import { clampTo, stepped, type StepAxis } from '../lib/step'
+import { clampTo, stepped, type StepAxis, type StepScale } from '../lib/step'
 
 /** A complete number — rejects the partials typing passes through. */
 const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
@@ -23,10 +23,10 @@ const NumberInput: Component<{
   value: () => number
   min: number
   max: number
-  /** One raw unit in display units — the step lattice; 1 if absent. */
-  fine?: number | undefined
-  /** `log` for frequencies: multiplicative steps. */
-  scale?: StepAxis['scale']
+  /** One raw unit in display units — the step lattice. */
+  fine: number
+  /** `log` for frequencies: multiplicative steps; linear when absent. */
+  scale?: StepScale | undefined
   /** The kind's unit label — empty renders no overlay. */
   unit: string
   readOnly?: boolean | undefined
@@ -42,7 +42,7 @@ const NumberInput: Component<{
   const axis = (): StepAxis => ({
     min: props.min,
     max: props.max,
-    fine: props.fine ?? 1,
+    fine: props.fine,
     scale: props.scale,
   })
   const clamp = (value: number): number => clampTo(axis(), value)

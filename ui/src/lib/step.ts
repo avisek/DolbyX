@@ -1,10 +1,10 @@
 /**
  * The Step rule (CONTEXT.md) — the one increment law every numeric
- * gesture shares: box ↑/↓ (#87), Slider keys (#89), band-strip nudges
- * (#91), the scrub (#88). Nothing else steps.
+ * gesture shares: box ↑/↓ (#87), Slider keys (#89), Band strip ↑/↓
+ * (#91), the Scrub (#88). Nothing else steps.
  *
- * Linear: base = 1 display unit; Alt = 0.1× (fine), Shift = 10×
- * (coarse), Alt wins when both are held. Steps snap to the raw lattice
+ * Linear: base = 1 display unit; Alt = 0.1×, Shift = 10×, Alt wins
+ * when both are held. Steps snap to the raw lattice
  * (`fine` = one raw unit in display units) and never go under one raw
  * unit — on 1/16-dB params Alt lands on 0.125 dB (2 raw), the lattice
  * step nearest 0.1; on integers Alt = 1.
@@ -21,13 +21,17 @@ export interface Modifiers {
   readonly shiftKey: boolean
 }
 
+/** How an axis steps (and how the Slider positions, #89). */
+export type StepScale = 'linear' | 'log'
+
 /** A numeric axis in display units. */
 export interface StepAxis {
   readonly min: number
   readonly max: number
   /** One raw unit in display units — the lattice. */
   readonly fine: number
-  readonly scale?: 'linear' | 'log' | undefined
+  /** Linear when absent. */
+  readonly scale?: StepScale | undefined
 }
 
 const SEMITONE = 2 ** (1 / 12)
@@ -40,8 +44,8 @@ const multiplier = (mods: Modifiers): number =>
   mods.altKey ? 0.1 : mods.shiftKey ? 10 : 1
 
 /** Whether the axis steps multiplicatively: log over a strictly
- * positive range. Also the Slider's position law (#89). */
-export const isLog = (axis: StepAxis): boolean =>
+ * positive range. */
+const isLog = (axis: StepAxis): boolean =>
   axis.scale === 'log' && axis.min > 0 && axis.max > axis.min
 
 /** The linear step under `mods`: lattice-snapped, never under `fine`. */

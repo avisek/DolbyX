@@ -7,7 +7,7 @@ const shift = { altKey: false, shiftKey: true }
 const both = { altKey: true, shiftKey: true }
 
 // Behavior 11 (#87): a linear 1/16-dB axis — base one display unit,
-// Alt a tenth floored to the lattice (0.125 dB, 2 raw), Shift ten,
+// Alt the lattice step nearest a tenth (0.125 dB, 2 raw), Shift ten,
 // Alt winning over Shift; clamped at the bounds; an integer axis
 // never steps under one raw unit, so Alt = 1.
 it('steps a linear 1/16-dB axis by 1, Alt 0.125, Shift 10, clamped', () => {

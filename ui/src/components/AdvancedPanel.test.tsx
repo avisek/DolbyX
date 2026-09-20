@@ -656,9 +656,7 @@ it('Enter commits and re-syncs; Esc reverts the text without a write', () => {
   const boost = field('Headphone Virtualizer Surround Boost')
   type(boost, '2')
   applySnapshot(fixtureStateWithParams({ dhsb: [80] })) // 5 dB
-  boost.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-  )
+  press(boost, 'Enter')
   expect(boost.value).toBe('5')
   expect(document.activeElement).not.toBe(boost)
   expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
@@ -667,9 +665,7 @@ it('Enter commits and re-syncs; Esc reverts the text without a write', () => {
   ])
 
   type(boost, '7.') // a partial: nothing written
-  boost.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-  )
+  press(boost, 'Escape')
   expect(boost.value).toBe('5')
   expect(document.activeElement).not.toBe(boost)
   expect(sentEdits(socket)).toHaveLength(2)
@@ -845,7 +841,7 @@ const fullySelected = (input: HTMLInputElement) =>
   input.selectionStart === 0 && input.selectionEnd === input.value.length
 
 // Behavior 13 (#87): ↑ steps one display unit under the Step rule —
-// Alt a tenth, floored to the raw lattice (0.125 dB = 2 raw on
+// Alt the lattice step nearest a tenth (0.125 dB = 2 raw on
 // `frac_bits = 4`), Shift ten, clamped — each a live write, each
 // leaving the re-synced text selected; the caret never moves — part
 // 2's tracer bullet.

@@ -61,8 +61,8 @@ function isNumericScalar(def: ParameterDef): boolean {
 
 /**
  * A numeric scalar's control: the box first, then the Slider slot (#89
- * fills it) — the two share `value` / `min` / `max` / `fine` / `scale`
- * / `unit`, all in display units. Writable: typing writes live, blur /
+ * fills it) — the two share `value`, `min`, `max`, `fine`, `scale`,
+ * `unit`, all in display units. Writable: typing writes live, blur /
  * Enter commits, both through the Source rule as raw clamped to the
  * def's range.
  * Read-only: the same box, `readonly`, mirroring the store — Readouts

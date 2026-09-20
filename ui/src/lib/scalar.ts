@@ -5,7 +5,7 @@
  * What every numeric control shows, writes, and steps by.
  */
 import type { ParameterDef } from './parameters'
-import type { StepAxis } from './step'
+import type { StepScale } from './step'
 import { displayToRaw, rawToDisplay } from './units'
 
 /** One raw value in display units, float noise trimmed to 2 places. */
@@ -27,6 +27,6 @@ export function fineStep(def: ParameterDef): number {
 }
 
 /** The step / Slider scale by kind: frequencies live on a log axis. */
-export function scaleOf(def: ParameterDef): NonNullable<StepAxis['scale']> {
+export function scaleOf(def: ParameterDef): StepScale {
   return def.kind === 'frequency_hz' ? 'log' : 'linear'
 }
