@@ -18,7 +18,6 @@ import {
 } from '../store/ws'
 import ActionRow from './ActionRow'
 import RenameInput from './RenameInput'
-import './EqPresetPicker.css'
 
 /**
  * The EQ preset picker: None (the profile's own EQ params — "Off" is

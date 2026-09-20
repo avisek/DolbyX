@@ -1,6 +1,5 @@
 import type { Component } from 'solid-js'
 import { connected } from '../store/ws'
-import './ConnectionBadge.css'
 
 /** Live WS connection state — connected, or reconnecting with backoff. */
 const ConnectionBadge: Component = () => (

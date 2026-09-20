@@ -7,7 +7,6 @@ import PowerToggle from './components/PowerToggle'
 import ProfileTabs from './components/ProfileTabs'
 import Visualizer from './components/Visualizer'
 import { state } from './store/state'
-import './App.css'
 
 /**
  * Root shell — power, LAN access, profiles, EQ presets, visualizer,

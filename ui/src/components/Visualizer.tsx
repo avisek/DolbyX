@@ -10,7 +10,6 @@ import { DB_FRAC_BITS, rawToDisplay } from '../lib/units'
 import { selectedProfile, visEnabled } from '../store/state'
 import { visFrame, visIdle } from '../store/vis'
 import EqCurve from './EqCurve'
-import './Visualizer.css'
 
 /**
  * What streamed silence produces — every column's from-mount floor,

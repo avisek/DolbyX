@@ -10,7 +10,6 @@ import {
 } from '../store/ws'
 import ActionRow from './ActionRow'
 import RenameInput from './RenameInput'
-import './ProfileTabs.css'
 
 /**
  * The profile tabs plus their action row (issue #26): tabs from the
