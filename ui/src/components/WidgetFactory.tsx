@@ -6,7 +6,7 @@ import {
   type ParamKind,
   type ParameterDef,
 } from '../lib/parameters'
-import { displayValue, rawValue } from '../lib/scalar'
+import { displayValue, fineStep, rawValue, scaleOf } from '../lib/scalar'
 import { rawToDisplay } from '../lib/units'
 import {
   commitParam,
@@ -61,9 +61,10 @@ function isNumericScalar(def: ParameterDef): boolean {
 
 /**
  * A numeric scalar's control: the box first, then the Slider slot (#89
- * fills it) — the two share `value` / `min` / `max` / `unit`, all in
- * display units. Writable: typing writes live, blur / Enter commits,
- * both through the Source rule as raw clamped to the def's range.
+ * fills it) — the two share `value` / `min` / `max` / `fine` / `scale`
+ * / `unit`, all in display units. Writable: typing writes live, blur /
+ * Enter commits, both through the Source rule as raw clamped to the
+ * def's range.
  * Read-only: the same box, `readonly`, mirroring the store — Readouts
  * for ReadOnly-Static — so the column reads uniformly.
  */
@@ -79,6 +80,8 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
       value={() => displayValue(def, head(def))}
       min={displayValue(def, def.min)}
       max={displayValue(def, def.max)}
+      fine={fineStep(def)}
+      scale={scaleOf(def)}
       unit={unitLabel(def.kind)}
       readOnly={!writable}
       onLive={

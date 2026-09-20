@@ -1,4 +1,5 @@
 import { Show, createEffect, on, type Component } from 'solid-js'
+import { clampTo, stepped, type StepAxis } from '../lib/step'
 
 /** A complete number — rejects the partials typing passes through. */
 const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
@@ -8,8 +9,11 @@ const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
  * you type*. Every complete number is a live write clamped to
  * `[min, max]` while the text stays as typed; blur / Enter commits if
  * it differs from store truth and re-syncs the text; Esc reverts.
- * Uncontrolled while focused, mirroring the store otherwise (read-only
- * always). Display units in and out — the caller converts.
+ * ↑ / ↓ step what the box shows by the Step rule (`fine`, `scale`;
+ * Alt / Shift from the event), write it live, and leave the re-synced
+ * text selected so the next keystroke replaces it. Uncontrolled while
+ * focused, mirroring the store otherwise (read-only always). Display
+ * units in and out — the caller converts.
  */
 const NumberInput: Component<{
   id: string
@@ -19,6 +23,10 @@ const NumberInput: Component<{
   value: () => number
   min: number
   max: number
+  /** One raw unit in display units — the step lattice; 1 if absent. */
+  fine?: number | undefined
+  /** `log` for frequencies: multiplicative steps. */
+  scale?: StepAxis['scale']
   /** The kind's unit label — empty renders no overlay. */
   unit: string
   readOnly?: boolean | undefined
@@ -31,8 +39,13 @@ const NumberInput: Component<{
 }> = (props) => {
   let input!: HTMLInputElement
   const editable = () => props.readOnly !== true
-  const clamp = (value: number): number =>
-    Math.min(props.max, Math.max(props.min, value))
+  const axis = (): StepAxis => ({
+    min: props.min,
+    max: props.max,
+    fine: props.fine ?? 1,
+    scale: props.scale,
+  })
+  const clamp = (value: number): number => clampTo(axis(), value)
 
   /** The field's text as a complete number, else undefined. */
   const parsed = (): number | undefined => {
@@ -88,10 +101,21 @@ const NumberInput: Component<{
           sync()
         }}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') input.blur()
-          else if (event.key === 'Escape') {
+          const key = event.key
+          if (key === 'Enter') input.blur()
+          else if (key === 'Escape') {
             sync()
             input.blur()
+          } else if (editable() && (key === 'ArrowUp' || key === 'ArrowDown')) {
+            // From what the box shows — typed text counts — live; then
+            // the store's (optimistically applied) truth, selected.
+            const shown = clamp(parsed() ?? props.value())
+            props.onLive?.(
+              stepped(axis(), shown, key === 'ArrowUp' ? 1 : -1, event),
+            )
+            sync()
+            input.select()
+            event.preventDefault()
           }
         }}
       />

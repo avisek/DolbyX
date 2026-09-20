@@ -206,3 +206,57 @@ test('a focused numeric field outranks the card hover', async ({ page }) => {
   await expect(boost).toHaveCSS('border-color', 'rgb(0, 180, 255)')
   expect(hovered).not.toBe('rgb(0, 180, 255)')
 })
+
+// — Numeric input (#87 part 2, behavior 16) —
+
+/** A client → daemon edit frame. */
+interface EditFrame {
+  readonly cmd: string
+  readonly request_id: string
+  readonly params?: Record<string, readonly number[]>
+}
+
+// The real-daemon check: an out-of-range value typed into Experimental
+// `vol` (−130…30 dB) leaves the box as typed while the wire carries the
+// clamped raw (30 dB = 480), every frame acks (no `INVALID_REQUEST`),
+// and a cold reload's bootstrap snapshot resolves that raw.
+test('typing out of range into vol sends the clamped raw, which a reload resolves', async ({
+  page,
+}) => {
+  const sent: EditFrame[] = []
+  const acked: string[] = []
+  const errors: unknown[] = []
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (frame) => {
+      const command = JSON.parse(String(frame.payload)) as EditFrame
+      if (command.cmd === 'edit_profile') sent.push(command)
+    })
+    ws.on('framereceived', (frame) => {
+      const event = JSON.parse(String(frame.payload)) as {
+        type: string
+        request_id?: string
+      }
+      if (event.type === 'ack' && event.request_id) acked.push(event.request_id)
+      if (event.type === 'error') errors.push(event)
+    })
+  })
+  await openAdvanced(page)
+  const name = 'Endpoint Volume Volume'
+  const vol = page.getByRole('textbox', { name })
+  await expect(vol).toHaveValue('0') // the table default
+
+  await vol.selectText()
+  await vol.pressSequentially('999')
+  await expect(vol).toHaveValue('999')
+  await expect.poll(() => sent.at(-1)?.params).toEqual({ vol: [480] })
+  await vol.press('Enter')
+  await expect(vol).toHaveValue('30')
+  await expect
+    .poll(() => sent.every((frame) => acked.includes(frame.request_id)))
+    .toBe(true)
+  expect(errors).toEqual([])
+
+  await page.reload()
+  await expect(page.locator('.connection-badge')).toHaveText('Connected')
+  await expect(page.getByRole('textbox', { name })).toHaveValue('30')
+})

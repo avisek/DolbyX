@@ -820,3 +820,93 @@ it('default-prevents dragstart on the field', () => {
   expect(boost.dispatchEvent(drag)).toBe(false)
   expect(drag.defaultPrevented).toBe(true)
 })
+
+// — Numeric input: step rule + arrow keys (#87 part 2) —
+
+/** Presses one key on a focused field, with modifiers. */
+function press(
+  input: HTMLInputElement,
+  key: string,
+  mods: { altKey?: boolean; shiftKey?: boolean } = {},
+): KeyboardEvent {
+  input.focus()
+  const event = new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+    ...mods,
+  })
+  input.dispatchEvent(event)
+  return event
+}
+
+/** Whether a field's text is fully selected — ready to be typed over. */
+const fullySelected = (input: HTMLInputElement) =>
+  input.selectionStart === 0 && input.selectionEnd === input.value.length
+
+// Behavior 13 (#87): ↑ steps one display unit under the Step rule —
+// Alt a tenth, floored to the raw lattice (0.125 dB = 2 raw on
+// `frac_bits = 4`), Shift ten, clamped — each a live write, each
+// leaving the re-synced text selected; the caret never moves — part
+// 2's tracer bullet.
+it('↑ steps a dB field live: +1, Alt +0.125, Shift +10 clamped, text selected', () => {
+  renderOpen()
+  const socket = connect()
+  const boost = field('Headphone Virtualizer Surround Boost') // dhsb, 0–6 dB, Music 3
+  const up = press(boost, 'ArrowUp')
+  expect(up.defaultPrevented).toBe(true)
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dhsb: [64] },
+    },
+  ])
+  expect(boost.value).toBe('4')
+  expect(fullySelected(boost)).toBe(true)
+
+  press(boost, 'ArrowUp', { altKey: true })
+  expect(sentEdits(socket)[1]?.params).toEqual({ dhsb: [66] })
+  expect(boost.value).toBe('4.13')
+  expect(fullySelected(boost)).toBe(true)
+
+  press(boost, 'ArrowUp', { shiftKey: true })
+  expect(sentEdits(socket)[2]?.params).toEqual({ dhsb: [96] })
+  expect(boost.value).toBe('6')
+  expect(fullySelected(boost)).toBe(true)
+  expect(document.activeElement).toBe(boost)
+})
+
+// Behavior 14 (#87): a FrequencyHz field steps on the log axis — ↑ from
+// 440 Hz is a semitone: 440 × 2^(1/12) = 466.16 → raw 466 (Hz are
+// `frac_bits = 0`); Shift ↑ an octave.
+it('↑ on a Hz field steps a semitone, Shift an octave', () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dssf: [440] }))
+  const start = field('Speaker Virtualizer Start Frequency')
+  expect(start.value).toBe('440')
+  press(start, 'ArrowUp')
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dssf: [466] },
+  ])
+  expect(start.value).toBe('466')
+  expect(fullySelected(start)).toBe(true)
+
+  press(start, 'ArrowUp', { shiftKey: true })
+  expect(sentEdits(socket)[1]?.params).toEqual({ dssf: [932] })
+})
+
+// Behavior 15 (#87): a read-only box ignores ↑ / ↓ — no frame, the
+// text untouched, the key left to the browser.
+it('↑ on a read-only scalar writes nothing and leaves the text', () => {
+  renderOpen()
+  const socket = connect()
+  const count = field('Visualizer Native Band Count') // vnnb
+  const up = press(count, 'ArrowUp')
+  press(count, 'ArrowDown')
+  expect(up.defaultPrevented).toBe(false)
+  expect(sentEdits(socket)).toEqual([])
+  expect(count.value).toBe('20')
+})
