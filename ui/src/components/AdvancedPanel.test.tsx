@@ -1,4 +1,10 @@
-import { cleanup, render, screen } from '@solidjs/testing-library'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   fixtureBootstrap,
@@ -217,14 +223,15 @@ function selectingState(presetId: string | null) {
 // the selected EQ preset's value while one is selected, the profile's
 // own after `None` (the Source rule).
 it('reads a preset-carried card from the selected EQ preset, else the profile', () => {
-  const panel = renderOpen()
-  expect(readout(panel, 'ieon')).toBe('0') // Music's own
+  renderOpen()
+  const enable = toggle('Intelligent Equalizer Enable')
+  expect(enable.checked).toBe(false) // Music's own ieon=0
 
   applySnapshot(selectingState('rich'))
-  expect(readout(panel, 'ieon')).toBe('1') // Rich
+  expect(enable.checked).toBe(true) // Rich ships ieon=1
 
   applySnapshot(selectingState(null))
-  expect(readout(panel, 'ieon')).toBe('0')
+  expect(enable.checked).toBe(false)
 })
 
 const panelBody = () => document.querySelector('.advanced__body')
@@ -313,4 +320,274 @@ it('starts stored categories collapsed and the rest expanded', () => {
     expect(collapsed()).toEqual([])
     cleanup()
   }
+})
+
+// — Discrete controls + the Source rule's write half (#86) —
+
+/** The `edit_profile` / `edit_eq_preset` frames the client sent. */
+const sentEdits = (socket: MockWebSocket) =>
+  socket
+    .sentCommands()
+    .filter(
+      (frame) => frame.cmd === 'edit_profile' || frame.cmd === 'edit_eq_preset',
+    )
+
+const toggle = (name: string) =>
+  screen.getByRole<HTMLInputElement>('switch', { name })
+
+/** Acks the last sent command and waits for the store to apply it. */
+async function ack(socket: MockWebSocket, applied: () => void): Promise<void> {
+  const last = socket.sentCommands().at(-1)
+  socket.serverMessage({ type: 'ack', request_id: last?.request_id })
+  await waitFor(applied)
+}
+
+// Behavior 1 (#86): clicking a settable toggle sends exactly one
+// 1-entry `edit_profile` on the active profile; `checked` stays on
+// daemon truth until the ack, then flips — issue #28's tracer bullet.
+it('settable toggle click sends one 1-entry edit_profile and applies on ack', async () => {
+  renderOpen()
+  const socket = connect()
+  const enable = toggle('Volume Leveler Enable')
+  expect(enable.checked).toBe(false) // Music ships dvle=0
+
+  enable.click()
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dvle: [1] },
+    },
+  ])
+  expect(enable.checked).toBe(false)
+
+  await ack(socket, () => {
+    expect(enable.checked).toBe(true)
+  })
+})
+
+// Behavior 2 (#86): the next click writes `[0]`; an experimental toggle
+// takes exactly the same path, its card carrying `--exp`.
+it('writes 0 on the next click, and experimental toggles take the same path', async () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const enable = toggle('Volume Leveler Enable')
+  enable.click()
+  await ack(socket, () => {
+    expect(enable.checked).toBe(true)
+  })
+
+  enable.click()
+  expect(sentEdits(socket)[1]?.params).toEqual({ dvle: [0] })
+  await ack(socket, () => {
+    expect(enable.checked).toBe(false)
+  })
+
+  const vis = toggle('Visualizer Enable')
+  expect(vis.checked).toBe(true) // Music ships ven=1
+  expect(card(panel, 'ven').classList).toContain('adv-card--exp')
+  vis.click()
+  expect(sentEdits(socket)[2]).toEqual({
+    cmd: 'edit_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    params: { ven: [0] },
+  })
+  await ack(socket, () => {
+    expect(vis.checked).toBe(false)
+  })
+})
+
+/** A tristate's three radios, Off / On / Auto — values 0 / 1 / 2. */
+const tristate = (name: string) => {
+  const group = screen.getByRole('radiogroup', { name })
+  const [off, on, auto] = within(group).getAllByRole<HTMLInputElement>('radio')
+  if (!off || !on || !auto) throw new Error(`${name}: not three radios`)
+  expect([off.value, on.value, auto.value]).toEqual(['0', '1', '2'])
+  const segText = (radio: HTMLInputElement) =>
+    group.querySelector(`label[for="${radio.id}"]`)?.textContent
+  expect([off, on, auto].map(segText)).toEqual(['Off', 'On', 'Auto'])
+  return { group, off, on, auto }
+}
+
+// Behavior 3 (#86): a tristate is a native radio group — Off / On /
+// Auto write 0 / 1 / 2 — ack-then-apply like the switch; re-picking
+// the checked option writes nothing.
+it('tristate: clicking Auto sends [2] and checks on ack; the checked option sends nothing', async () => {
+  renderOpen()
+  const socket = connect()
+  const { off, on, auto } = tristate('Speaker Virtualizer Enable')
+  expect([off.checked, on.checked, auto.checked]).toEqual([true, false, false])
+
+  auto.click()
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { vspe: [2] },
+    },
+  ])
+  // Not yet acked: the clicked radio never checked. (happy-dom leaves
+  // the group's previous radio unchecked on a cancelled click — real
+  // browsers restore it; the Playwright spec covers the group.)
+  expect(auto.checked).toBe(false)
+  await ack(socket, () => {
+    expect([off.checked, auto.checked]).toEqual([false, true])
+  })
+
+  auto.click()
+  expect(sentEdits(socket)).toHaveLength(1)
+  expect(auto.checked).toBe(true)
+})
+
+// Behavior 4 (#86): the Source rule's write half — a preset-carried
+// toggle writes `edit_eq_preset` on the selected EQ preset and applies
+// on the ack; with `None` selected it writes the profile.
+it('preset-carried toggle writes edit_eq_preset with a preset selected, edit_profile on None', async () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(selectingState('rich'))
+  const enable = toggle('Intelligent Equalizer Enable')
+  expect(enable.checked).toBe(true) // Rich ships ieon=1
+
+  enable.click()
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      params: { ieon: [0] },
+    },
+  ])
+  expect(enable.checked).toBe(true)
+  await ack(socket, () => {
+    expect(enable.checked).toBe(false)
+  })
+
+  applySnapshot(selectingState(null))
+  expect(enable.checked).toBe(false) // Music's own ieon=0
+  enable.click()
+  expect(sentEdits(socket)[1]).toEqual({
+    cmd: 'edit_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    params: { ieon: [1] },
+  })
+})
+
+// Behavior 5 (#86): `adv-card--preset` marks the nine preset-carried
+// cards and `adv-cat--preset` the `ieq` / `geq` sections while an EQ
+// preset is selected — gone on `None`. The skin captions them.
+it('publishes --preset on the carried cards and their categories while a preset is selected', () => {
+  const panel = renderOpen()
+  const presetCards = () =>
+    [...panel.querySelectorAll<HTMLElement>('.adv-card--preset')]
+      .map((node) => node.querySelector('.adv-card__code')?.textContent)
+      .sort()
+  const presetSections = () =>
+    [...panel.querySelectorAll('.adv-cat--preset')].map((node) =>
+      node.getAttribute('aria-label'),
+    )
+  expect(presetCards()).toEqual([])
+  expect(presetSections()).toEqual([])
+
+  applySnapshot(selectingState('rich'))
+  expect(presetCards()).toEqual(
+    [
+      'genb',
+      'gebf',
+      'geon',
+      'gebg',
+      'ienb',
+      'iebf',
+      'ieon',
+      'iebt',
+      'iea',
+    ].sort(),
+  )
+  expect(presetSections()).toEqual([
+    'Intelligent Equalizer',
+    'Graphic Equalizer',
+  ])
+
+  applySnapshot(selectingState(null))
+  expect(presetCards()).toEqual([])
+  expect(presetSections()).toEqual([])
+})
+
+// Behavior 6 (#86): the card is a `label` for its primary control —
+// clicking the card's own text forwards to the switch exactly once; a
+// tristate card's `for` is the currently checked radio's id, following
+// the value so a label click just focuses the current state.
+it('card label text toggles the switch once; a tristate card targets its checked radio', async () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const leveler = card(panel, 'dvle')
+  expect(leveler.getAttribute('for')).toBe('adv-dvle')
+
+  leveler.querySelector<HTMLElement>('.adv-card__label')?.click()
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dvle: [1] },
+    },
+  ])
+
+  const speaker = card(panel, 'vspe')
+  const { off, auto } = tristate('Speaker Virtualizer Enable')
+  expect(speaker.getAttribute('for')).toBe(off.id)
+  auto.click()
+  await ack(socket, () => {
+    expect(auto.checked).toBe(true)
+  })
+  expect(speaker.getAttribute('for')).toBe(auto.id)
+  // Readouts have no control yet: no `for`.
+  expect(card(panel, 'vnnb').hasAttribute('for')).toBe(false)
+})
+
+// Behavior 7 (#86): a click inside a control that manages its own focus
+// (`.adv-input`, `[role=slider]`, `.adv-bands` — #87 on) never forwards
+// to the card's `for` target: no command, focus untouched. None exist
+// yet, so the test plants one in a switch card's control region.
+it('a click inside a guarded control does not activate the label target', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const leveler = card(panel, 'dvle')
+  const planted = document.createElement('span')
+  planted.className = 'adv-input'
+  planted.tabIndex = 0
+  leveler.querySelector('.adv-card__control')?.append(planted)
+
+  planted.focus()
+  planted.click()
+  expect(sentEdits(socket)).toEqual([])
+  expect(document.activeElement).toBe(planted)
+})
+
+// Behavior 8 (#86): an `error` reply leaves the control on daemon
+// truth — never flipped — and the client's existing reconcile issues
+// `get_state`.
+it('an error reply leaves the switch unflipped and reconciles', async () => {
+  renderOpen()
+  const socket = connect()
+  const enable = toggle('Volume Leveler Enable')
+  enable.click()
+  const sent = sentEdits(socket)
+  expect(sent).toHaveLength(1)
+
+  socket.serverMessage({
+    type: 'error',
+    request_id: sent[0]?.request_id,
+    code: 'INVALID_REQUEST',
+    message: 'out of range',
+  })
+  await waitFor(() => {
+    const after = socket.sentCommands().slice(-1)
+    expect(after.map((frame) => frame.cmd)).toEqual(['get_state'])
+  })
+  expect(enable.checked).toBe(false)
 })

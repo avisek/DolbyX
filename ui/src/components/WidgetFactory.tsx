@@ -1,12 +1,35 @@
-import type { Component } from 'solid-js'
+import { Match, Switch, type Component } from 'solid-js'
 import {
+  onValue,
   unitLabel,
   type ParamAccess,
   type ParamKind,
   type ParameterDef,
 } from '../lib/parameters'
 import { rawToDisplay } from '../lib/units'
-import { paramValues } from '../store/wiring'
+import { commitParam, isWritable, paramValues } from '../store/wiring'
+import Toggle from './Toggle'
+import Tristate, { tristateRadioId } from './Tristate'
+
+/** A scalar card's raw head value. */
+const head = (def: ParameterDef): number => paramValues(def)[0] ?? 0
+
+/** The element id of a card's control. */
+const controlId = (def: ParameterDef): string => `adv-${def.name}`
+
+/**
+ * The primary control a card labels — its `for` target: the switch,
+ * the tristate's *currently checked* radio (so a label click focuses
+ * the current state), none while the card is still a readout. Reactive
+ * through the head value; mirrors the factory's dispatch.
+ */
+export function primaryControlId(def: ParameterDef): string | undefined {
+  if (def.length > 1 || !isWritable(def)) return undefined
+  const kind = kindTag(def.kind)
+  if (kind === 'toggle') return controlId(def)
+  if (kind === 'tristate') return tristateRadioId(controlId(def), head(def))
+  return undefined
+}
 
 /**
  * The generic readout — a card's values as text, `frac_bits` applied,
@@ -78,8 +101,34 @@ const WidgetFactory: Component<{ def: ParameterDef; name: string }> = (
       )
     }
   }
-  // Every known combo is the readout in this slice; #86–#91 branch here.
-  return <Readout def={def} name={props.name} />
+  // Kind decides structure, access gates editability; `def` is static,
+  // so the branch is taken once. Every other combo is still the
+  // readout — #87–#91 add matches here.
+  const editableScalar = def.length === 1 && isWritable(def)
+  return (
+    <Switch fallback={<Readout def={def} name={props.name} />}>
+      <Match when={editableScalar && kind === 'toggle'}>
+        <Toggle
+          id={controlId(def)}
+          name={props.name}
+          checked={head(def) !== 0}
+          onToggle={(on) => {
+            commitParam(def, [on ? onValue(def.kind) : 0])
+          }}
+        />
+      </Match>
+      <Match when={editableScalar && kind === 'tristate'}>
+        <Tristate
+          id={controlId(def)}
+          name={props.name}
+          value={head(def)}
+          onSelect={(option) => {
+            commitParam(def, [option])
+          }}
+        />
+      </Match>
+    </Switch>
+  )
 }
 
 export default WidgetFactory

@@ -333,6 +333,25 @@ export function removeEqPreset(id: string): void {
 }
 
 /**
+ * Local-first `edit_eq_preset` for discrete controls — [`editProfile`]'s
+ * mirror on the Source rule's preset path (#86): sends the batch,
+ * applies it on the daemon's ack.
+ */
+export function editEqPreset(
+  id: string,
+  params: Readonly<Record<string, readonly number[]>>,
+): void {
+  void client
+    ?.request({ cmd: 'edit_eq_preset', id, params })
+    .then(() => {
+      applyEqPresetEdit(id, params)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/**
  * Optimistic `edit_eq_preset` for continuous drags — the GEQ editor's
  * write path when a preset is active (issue #25 part C), same
  * local-first shape as [`editProfileLive`].

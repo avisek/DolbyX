@@ -1,6 +1,7 @@
 import { For, createSignal, type Component } from 'solid-js'
 import type { CategoryDef } from '../lib/parameters'
 import { foldedCategories, setCategoryFolded } from '../lib/prefs'
+import { categoryWritesToPreset } from '../store/wiring'
 import ParamCard from './ParamCard'
 
 /**
@@ -26,7 +27,10 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
   return (
     <section
       class="adv-cat"
-      classList={{ 'adv-cat--collapsed': folded() }}
+      classList={{
+        'adv-cat--collapsed': folded(),
+        'adv-cat--preset': categoryWritesToPreset(props.category),
+      }}
       aria-label={props.category.label}
     >
       <header class="adv-cat__head">
