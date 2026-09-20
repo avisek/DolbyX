@@ -370,10 +370,11 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
           const spill = Math.max(
             ...final.map((gain, band) => Math.abs(gain - (vis[band] ?? 0))),
           )
-          const held = Math.abs((vis[19] ?? 0) - (final[19] ?? 0))
-          if (spill > 48) return `spill ${spill}`
-          if (held > 8) return `held band off by ${held}`
-          if ((vis[19] ?? 0) < 128) return `filterbank bypassed: ${vis[19]}`
+          const top = vis[19] ?? 0
+          const held = Math.abs(top - (final[19] ?? 0))
+          if (spill > 48) return `spill ${String(spill)}`
+          if (held > 8) return `held band off by ${String(held)}`
+          if (top < 128) return `filterbank bypassed: ${String(top)}`
           return 'landed'
         },
         { timeout: 30_000 },
