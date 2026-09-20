@@ -13,7 +13,7 @@ const KERNEL_KEY = 'dolbyx.geq.kernel'
 const DEFAULT_SLIDERS = 5
 
 /**
- * The visible Slider count `N ∈ [2, genb]` (default 5 → step 4.75 on
+ * The visible EQ slider count `N ∈ [2, genb]` (default 5 → step 4.75 on
  * the shipped grid; `N = genb` → step 1, the original tablet). A `genb`
  * below the floor (Advanced divergence, unsupported) degrades to
  * `genb` itself.

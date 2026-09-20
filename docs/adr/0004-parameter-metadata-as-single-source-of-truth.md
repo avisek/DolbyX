@@ -49,3 +49,32 @@ Master-control membership is deliberately *not* metadata — it's a curated
 UI overlay; those params also appear in the Advanced panel under their
 feature categories, and their rendering facts come from this table by
 4-CC lookup.
+
+## Addendum (2026-09-20) — category table
+
+Display composition joins the single source of truth as a `[[category]]`
+table — the *only* place it lives:
+
+```toml
+[[category]]
+name = "dialog_enhancer"          # closed ParamCategory id
+label = "Dialog Enhancer"
+params = ["deon", "dea", "ded"]   # card order
+```
+
+Table order is section order; `params` order is card order. The per-param
+`category` field is gone — `ParameterDef.category` is derived from
+membership, and the parser refuses to start unless every root leaf sits in
+exactly one category, every category is non-empty, and every name resolves
+(unknown 4-CC or category ⇒ error; `ParamCategory` stays a closed enum,
+with `build_license` split into `build` and `license`).
+
+`[[param]]` order stays pinned to the param twin's order so the two files
+diff line-for-line — display order never reorders it. `label` is a short,
+category-relative name ("Enable", "Amount") because the UI always shows the
+category beside it; `description` keeps the engine's full phrasing.
+
+Consequence for the UI: no per-param special casing — presentation derives
+from kind, access, and category alone. Mechanical prefix rules (`*nb`
+gating a group's live band count, `aobg`'s `1 + aonb` channel stride) are
+rules, not cases.
