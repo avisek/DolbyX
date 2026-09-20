@@ -123,8 +123,11 @@ test('Tab + Space on a switch commits, and the next snapshot carries it', async 
   await expect(enable).not.toBeChecked() // Music ships dvle=0
   await expect(peerEnable).not.toBeChecked()
 
-  const toggle = page.getByRole('button', { name: /^Volume Leveler/ })
-  await toggle.focus()
+  // From the preceding card's numeric box (`dvlo`, #87) — one Tab
+  // reaches the switch; the disabled reset marker between is skipped.
+  await page
+    .getByRole('textbox', { name: 'Volume Leveler Output Target' })
+    .focus()
   await page.keyboard.press('Tab')
   await expect(enable).toBeFocused()
   await page.keyboard.press('Space')
@@ -162,4 +165,44 @@ test('Arrow keys on a tristate move the selection and commit', async ({
   // One Tab stop: Tab leaves the group for the next card's control.
   await page.keyboard.press('Tab')
   await expect(group.locator(':focus')).toHaveCount(0)
+})
+
+// — Numeric input (#87 part 1, behavior 9) —
+
+// Every numeric box measures the same width whether or not it carries a
+// unit — `dhsb` (dB) and `dvla` (unit-less) — and the unit overlay is
+// inert chrome: `pointer-events: none`, a click on it lands in the field.
+test('a unit-bearing and a unit-less box measure the same width; the unit is inert', async ({
+  page,
+}) => {
+  await openAdvanced(page)
+  const boost = page.getByRole('textbox', {
+    name: 'Headphone Virtualizer Surround Boost',
+  })
+  const amount = page.getByRole('textbox', { name: 'Volume Leveler Amount' })
+  const boxWidth = async (input: typeof boost) =>
+    input.locator('..').evaluate((box) => box.getBoundingClientRect().width)
+  expect(await boxWidth(boost)).toBeGreaterThan(0)
+  expect(await boxWidth(amount)).toBe(await boxWidth(boost))
+
+  const unit = boost.locator('..').locator('.adv-input__unit')
+  await expect(unit).toHaveText('dB')
+  await expect(unit).toHaveCSS('pointer-events', 'none')
+  await unit.click({ force: true })
+  await expect(boost).toBeFocused()
+})
+
+// Focus beats hover: with the card hovered, the focused field paints the
+// focus line, not the hover line.
+test('a focused numeric field outranks the card hover', async ({ page }) => {
+  await openAdvanced(page)
+  const boost = page.getByRole('textbox', {
+    name: 'Headphone Virtualizer Surround Boost',
+  })
+  const card = boost.locator('xpath=ancestor::label[1]')
+  await card.hover()
+  const hovered = await boost.evaluate((el) => getComputedStyle(el).borderColor)
+  await boost.focus()
+  await expect(boost).toHaveCSS('border-color', 'rgb(0, 180, 255)')
+  expect(hovered).not.toBe('rgb(0, 180, 255)')
 })
