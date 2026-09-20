@@ -120,15 +120,19 @@ export function categories(): readonly CategoryDef[] {
 }
 
 /**
- * The nine preset-carried 4-CCs, in table order — eligibility is
- * derived, `category ∈ {Ieq, Geq}`, never a flag (ADR-0003). The
- * vocabulary of the None row's scoped reset and its capture gesture
- * (issue #26).
+ * Whether a param rides an EQ preset — eligibility is derived,
+ * `category ∈ {Ieq, Geq}`, never a flag (ADR-0003).
+ */
+export function isPresetCarried(def: ParameterDef): boolean {
+  return def.category === 'ieq' || def.category === 'geq'
+}
+
+/**
+ * The nine preset-carried 4-CCs, in table order — the vocabulary of the
+ * None row's scoped reset and its capture gesture (issue #26).
  */
 export function presetCarried(): readonly string[] {
-  return paramTable
-    .filter((def) => def.category === 'ieq' || def.category === 'geq')
-    .map((def) => def.name)
+  return paramTable.filter(isPresetCarried).map((def) => def.name)
 }
 
 /**

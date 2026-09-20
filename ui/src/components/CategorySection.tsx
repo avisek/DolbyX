@@ -1,12 +1,14 @@
 import { For, createSignal, type Component } from 'solid-js'
 import type { CategoryDef } from '../lib/parameters'
 import { foldedCategories, setCategoryFolded } from '../lib/prefs'
+import ParamCard from './ParamCard'
 
 /**
  * One Parameter category as a labelled section (#85): a header whose
  * fold toggle IS the header's box (chevron, title, count inside — no
  * nested interactive content) followed by the category's reset marker
- * (inert until #92), over a body of its params in `params` order.
+ * (inert until #92), over a body of one card per param in `params`
+ * order.
  * The Fold is state — `adv-cat--collapsed`, content stays mounted, the
  * skin animates (ADR-0011 addendum) — remembered per browser
  * (`dolbyx.advanced.collapsed`).
@@ -48,7 +50,11 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
         />
       </header>
       <div class="adv-cat__body">
-        <For each={props.category.params}>{(name) => <code>{name}</code>}</For>
+        <For each={props.category.params}>
+          {(name) => (
+            <ParamCard name={name} categoryLabel={props.category.label} />
+          )}
+        </For>
       </div>
     </section>
   )

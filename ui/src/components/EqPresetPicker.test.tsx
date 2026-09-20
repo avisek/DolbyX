@@ -248,10 +248,10 @@ it('the None row sends a reset_profile scoped to the 9', () => {
     request_id: expect.any(String) as string,
     id: 'music',
     only: [
-      'ieon',
       'ienb',
       'iebf',
       'iebt',
+      'ieon',
       'iea',
       'geon',
       'genb',

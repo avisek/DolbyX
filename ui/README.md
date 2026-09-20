@@ -77,15 +77,15 @@ rejects it everywhere but `main.tsx` (`src/skin.test.ts` pins the rule).
 components never read them. Existing components still carry literals
 until the Classic sweep (#94); new stylesheets use tokens:
 
-| Token                                                                                             | Meaning                                           |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` | palette + type                                    |
-| `--space-1…6`                                                                                     | spacing scale, 0.25–2 rem                         |
-| `--control-h`                                                                                     | one height for input / toggle / tristate / slider |
-| `--radius-1` `--radius-2`                                                                         | controls / cards                                  |
-| `--hue-settable` `--hue-experimental` `--hue-readonly`                                            | 4-CC color by settability bucket                  |
-| `--fold-ms` `--fold-ease`                                                                         | fold / disclosure motion                          |
-| `--focus-ring`                                                                                    | the focus outline                                 |
+| Token                                                                                                           | Meaning                                           |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` `--font-mono` | palette + type                                    |
+| `--space-1…6`                                                                                                   | spacing scale, 0.25–2 rem                         |
+| `--control-h`                                                                                                   | one height for input / toggle / tristate / slider |
+| `--radius-1` `--radius-2`                                                                                       | controls / cards                                  |
+| `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                  |
+| `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                          |
+| `--focus-ring`                                                                                                  | the focus outline                                 |
 
 **Rules** (ADR-0011 + addendum):
 

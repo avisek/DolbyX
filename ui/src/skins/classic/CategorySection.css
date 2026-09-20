@@ -1,13 +1,18 @@
-/* One category card (#85): a two-row grid — header over a folding body.
-   The Fold is state (`adv-cat--collapsed`, ADR-0011 addendum): only the
-   body's row track animates (1fr ↔ 0fr); margins and paddings never
-   move. The body keeps its full height and spills past the shrinking
-   row; the section clips the spill, and the body leaves the tab order
-   once the fold lands (delayed `visibility`). */
+/* One category card (#85): a two-row grid — header over a folding
+   body — over four shared tracks (code | label | reset | control) the
+   cards subgrid onto, so rows align across every card. The Fold is
+   state (`adv-cat--collapsed`, ADR-0011 addendum): only the body's row
+   track animates (1fr ↔ 0fr); margins and paddings never move. The
+   body keeps its full height and spills past the shrinking row; the
+   section clips the spill, and the body leaves the tab order once the
+   fold lands (delayed `visibility`). */
 
 .adv-cat {
   --head-x: var(--space-4);
+  --code-w: 3.3rem;
+  --label-w: 8.5rem;
   --reset-w: 1.4rem;
+  --ctl-min: 11rem;
 
   display: grid;
   /*   minmax(0, …)         the row may shrink to nothing
@@ -15,6 +20,10 @@
        align-items: start   the body keeps full height, spills past its row
        overflow: hidden     this box clips the spill */
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns:
+    var(--code-w) var(--label-w) var(--reset-w)
+    minmax(var(--ctl-min), 1fr);
+  column-gap: var(--space-2);
   align-content: start;
   align-items: start;
   margin-bottom: var(--space-3);
@@ -42,6 +51,7 @@
 
 .adv-cat__head {
   position: relative;
+  grid-column: 1 / -1;
 }
 
 .adv-cat__toggle {
@@ -137,13 +147,15 @@
 }
 
 /* — Body: the card's block spacing lives here, so it folds with the
-   body and the clip edge is the header's bottom once folded — */
+   body and the clip edge is the header's bottom once folded. Inline
+   padding insets the tracks; a card's own padding lands its content on
+   the header's text edge — */
 
 .adv-cat__body {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-4) var(--space-4);
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding: var(--space-2) var(--space-2) var(--space-3);
   transition: visibility 0s linear 0s;
 }
 
@@ -152,14 +164,4 @@
 .adv-cat--collapsed .adv-cat__body {
   visibility: hidden;
   transition-delay: var(--fold-ms);
-}
-
-/* Part 1 placeholder: the category's 4-CCs as chips (Part 2 → cards). */
-.adv-cat__body > code {
-  padding: 0.12rem 0.38rem;
-  border-radius: var(--radius-1);
-  background: var(--color-bg);
-  color: var(--color-accent);
-  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
-  font-size: 0.68rem;
 }
