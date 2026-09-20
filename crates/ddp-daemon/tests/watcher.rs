@@ -158,19 +158,34 @@ async fn a_sustained_external_writer_tracks_at_window_cadence() {
         std::fs::write(&path, "[profile.music]\ndvla = 9\n").expect("external write");
     });
 
-    // Collect reload broadcasts until the stream settles.
+    // Collect reloads until the sentinel lands, then drain the quiet
+    // tail. Bounded by time, not by inter-frame gaps: a loaded runner
+    // can stall the socket past any gap a "settled" heuristic picks.
+    writer.await.expect("writer thread");
+    let sentinel = |frame: &serde_json::Value| {
+        profile(frame, "music")["params"]["dvla"] == serde_json::json!([9])
+    };
     let mut reloads = Vec::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !reloads.last().is_some_and(sentinel) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the final value lands (got {} reloads)",
+            reloads.len()
+        );
+        let frame = recv_state(&mut ws).await;
+        reloads.push(frame);
+    }
     while let Some(frame) = try_recv_json(&mut ws, 400).await {
         assert_eq!(frame["type"], "state");
         reloads.push(frame);
     }
-    writer.await.expect("writer thread");
 
     let last = reloads.last().expect("at least one reload");
     assert_eq!(
         profile(last, "music")["params"]["dvla"],
         serde_json::json!([9]),
-        "the final value lands"
+        "the final value wins"
     );
     // ~800 ms of writes through 100 ms windows: a handful of reloads —
     // strictly fewer than the 41 writes (collapse), several (tracking).

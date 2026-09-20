@@ -366,18 +366,20 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
       .poll(
         () => {
           const vis = latestVcbg
-          if (!vis) return Number.POSITIVE_INFINITY
-          return Math.max(
+          if (!vis) return 'no vis frame'
+          const spill = Math.max(
             ...final.map((gain, band) => Math.abs(gain - (vis[band] ?? 0))),
           )
+          const top = vis[19] ?? 0
+          const held = Math.abs(top - (final[19] ?? 0))
+          if (spill > 48) return `spill ${String(spill)}`
+          if (held > 8) return `held band off by ${String(held)}`
+          if (top < 128) return `filterbank bypassed: ${String(top)}`
+          return 'landed'
         },
         { timeout: 30_000 },
       )
-      .toBeLessThanOrEqual(48)
-    expect(
-      Math.abs((latestVcbg?.[19] ?? 0) - (final[19] ?? 0)),
-    ).toBeLessThanOrEqual(8)
-    expect(latestVcbg?.[19] ?? 0).toBeGreaterThanOrEqual(128)
+      .toBe('landed')
   } finally {
     pump.stopped = true
     await pumped.catch(() => undefined)
