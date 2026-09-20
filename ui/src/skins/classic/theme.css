@@ -9,6 +9,7 @@
   --color-text: #e8eef5;
   --color-text-muted: #8fa1b3;
   --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
 
   /* Spacing scale */
   --space-1: 0.25rem;

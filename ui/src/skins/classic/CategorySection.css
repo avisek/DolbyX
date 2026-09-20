@@ -1,10 +1,11 @@
-/* One category card (#85): a two-row grid — header over a folding body
-   — over four shared tracks (code | label | reset | control) the cards
-   subgrid onto, so rows align across every card. The Fold is state (`adv-cat--collapsed`, ADR-0011 addendum): only the
-   body's row track animates (1fr ↔ 0fr); margins and paddings never
-   move. The body keeps its full height and spills past the shrinking
-   row; the section clips the spill, and the body leaves the tab order
-   once the fold lands (delayed `visibility`). */
+/* One category card (#85): a two-row grid — header over a folding
+   body — over four shared tracks (code | label | reset | control) the
+   cards subgrid onto, so rows align across every card. The Fold is
+   state (`adv-cat--collapsed`, ADR-0011 addendum): only the body's row
+   track animates (1fr ↔ 0fr); margins and paddings never move. The
+   body keeps its full height and spills past the shrinking row; the
+   section clips the spill, and the body leaves the tab order once the
+   fold lands (delayed `visibility`). */
 
 .adv-cat {
   --head-x: var(--space-4);
@@ -154,7 +155,6 @@
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  row-gap: 0.1rem;
   padding: var(--space-2) var(--space-2) var(--space-3);
   transition: visibility 0s linear 0s;
 }

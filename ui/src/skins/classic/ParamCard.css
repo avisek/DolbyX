@@ -31,7 +31,7 @@
   border-radius: var(--radius-1);
   background: var(--color-bg);
   color: var(--hue-settable);
-  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.02em;
 }
@@ -86,7 +86,7 @@
 .adv-readout {
   min-width: 0;
   color: var(--color-text-muted);
-  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   line-height: 1.4;
   overflow-wrap: anywhere;

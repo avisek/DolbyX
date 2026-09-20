@@ -1,6 +1,11 @@
 import { cleanup, render, screen } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { fixtureBootstrap, fixtureState, fixtureVis } from '../test/fixture'
+import {
+  fixtureBootstrap,
+  fixtureCategories,
+  fixtureState,
+  fixtureVis,
+} from '../test/fixture'
 import { MockWebSocket } from '../test/mock-ws'
 
 // The store and the parameter table both read window.__BOOTSTRAP__ at
@@ -83,7 +88,7 @@ const cards = (panel: HTMLElement, label: string) => [
 ]
 
 // Behavior 6 (#85): each category body holds one card per listed 4-CC
-// in `params` order — 64 in all — carrying the code, the def's short
+// in `params` order — 64 in all — carrying the 4-CC, the def's short
 // label, and its description as the hover title.
 it('renders one card per listed 4-CC with code, label and title', () => {
   const panel = renderOpen()
@@ -99,12 +104,9 @@ it('renders one card per listed 4-CC with code, label and title', () => {
     'dvmc',
     'dvme',
   ])
-  expect(cards(panel, 'Graphic Equalizer').map(code)).toEqual([
-    'geon',
-    'genb',
-    'gebf',
-    'gebg',
-  ])
+  for (const { label, params } of fixtureCategories()) {
+    expect(cards(panel, label).map(code)).toEqual(params)
+  }
 
   const [amount, , , enable] = cards(panel, 'Volume Leveler')
   expect(amount?.querySelector('.adv-card__label')?.textContent).toBe('Amount')
