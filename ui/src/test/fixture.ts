@@ -1,176 +1,75 @@
+import { parse } from 'smol-toml'
 import type { Bootstrap } from '../lib/bootstrap'
 import type { CategoryDef, ParameterDef } from '../lib/parameters'
 import type { EqPreset, Profile, StateSnapshot, VisParams } from '../lib/ws'
+// The shipped table itself (ADR-0004) — the fixture is truth-derived, so
+// panel tests exercise the real 64 shape and never drift (issue #85).
+import parametersToml from '../../../crates/ddp-daemon/parameters.toml?raw'
 
-/** One table row over compact defaults — values stay daemon-truthful. */
-function def(
-  entry: Partial<ParameterDef> &
-    Pick<ParameterDef, 'name' | 'kind' | 'category'>,
-): ParameterDef {
-  return {
-    length: 1,
-    min: 0,
-    max: 1,
-    frac_bits: 0,
-    default: [0],
-    access: 'settable',
-    label: entry.name.toUpperCase(),
-    description: '',
-    help: '',
-    ...entry,
-  }
+/** One `[[param]]` row as the TOML carries it — `category` is derived. */
+type ParamRow = Omit<ParameterDef, 'category'>
+
+/**
+ * The shipped `parameters.toml`, parsed once. The daemon's parser is the
+ * validator (refuse-to-start on a malformed table); the cast trusts the
+ * shape it enforces — kinds and accesses serialize identically in TOML
+ * and JSON (externally tagged serde).
+ */
+const table = parse(parametersToml) as unknown as {
+  readonly category: readonly CategoryDef[]
+  readonly param: readonly ParamRow[]
 }
 
 /**
- * The master-control rows of `parameters.toml` (+ the `vnnb` readout) —
- * ranges, `frac_bits`, kinds, and defaults verbatim from the shipped
- * table, so widgets resolve against daemon truth.
+ * The real parameter table — every root leaf, `[[param]]` (engine) order,
+ * each row's `category` derived from `[[category]]` membership the way
+ * the daemon derives it.
  */
 export function fixtureParams(): readonly ParameterDef[] {
-  return [
-    def({
-      name: 'vdhe',
-      max: 2,
-      kind: { tristate: { on: 2 } },
-      category: 'headphone_virtualizer',
-    }),
-    def({
-      name: 'dhsb',
-      max: 96,
-      frac_bits: 4,
-      default: [96],
-      kind: { decibel: { lkfs: false } },
-      category: 'headphone_virtualizer',
-    }),
-    def({ name: 'deon', kind: 'toggle', category: 'dialog_enhancer' }),
-    def({
-      name: 'dea',
-      max: 16,
-      frac_bits: 4,
-      kind: 'integer',
-      category: 'dialog_enhancer',
-    }),
-    def({
-      name: 'dvle',
-      default: [1],
-      kind: 'toggle',
-      category: 'volume_leveller',
-    }),
-    def({
-      name: 'dvla',
-      max: 10,
-      default: [7],
-      kind: 'integer',
-      category: 'volume_leveller',
-    }),
-    def({
-      name: 'vnnb',
-      min: 1,
-      max: 20,
-      default: [20],
-      kind: 'integer',
-      category: 'visualizer',
-      access: 'read_only_static',
-    }),
-    // The nine preset-carried params (ADR-0003: category ∈ {Ieq, Geq})
-    // — the EqPresetPicker derives "the 9" from these rows.
-    def({ name: 'ieon', kind: 'toggle', category: 'ieq' }),
-    def({
-      name: 'ienb',
-      min: 1,
-      max: 40,
-      default: [10],
-      kind: 'integer',
-      category: 'ieq',
-    }),
-    def({
-      name: 'iebf',
-      length: 40,
-      min: 20,
-      max: 20000,
-      kind: 'frequency_hz',
-      category: 'ieq',
-    }),
-    def({
-      name: 'iebt',
-      length: 40,
-      min: -480,
-      max: 480,
-      frac_bits: 4,
-      kind: { decibel: { lkfs: false } },
-      category: 'ieq',
-    }),
-    def({
-      name: 'iea',
-      max: 16,
-      frac_bits: 4,
-      default: [10],
-      kind: 'integer',
-      category: 'ieq',
-    }),
-    def({ name: 'geon', kind: 'toggle', category: 'geq' }),
-    def({
-      name: 'genb',
-      min: 1,
-      max: 40,
-      default: [10],
-      kind: 'integer',
-      category: 'geq',
-    }),
-    def({
-      name: 'gebf',
-      length: 40,
-      min: 20,
-      max: 20000,
-      kind: 'frequency_hz',
-      category: 'geq',
-    }),
-    def({
-      name: 'gebg',
-      length: 40,
-      min: -576,
-      max: 576,
-      frac_bits: 4,
-      kind: { decibel: { lkfs: false } },
-      category: 'geq',
-    }),
-  ]
+  return table.param.map((row) => {
+    const owner = table.category.find(({ params }) => params.includes(row.name))
+    if (!owner)
+      throw new Error(`parameters.toml: \`${row.name}\` uncategorized`)
+    return { ...row, category: owner.name }
+  })
+}
+
+/** The shipped `[[category]]` rows — section order, card order (issue #83). */
+export function fixtureCategories(): readonly CategoryDef[] {
+  return table.category
+}
+
+/** The real table with one row patched — for a def the table never ships. */
+export function fixtureParamsWith(
+  name: string,
+  patch: Partial<ParameterDef>,
+): readonly ParameterDef[] {
+  return fixtureParams().map((def) =>
+    def.name === name ? { ...def, ...patch } : def,
+  )
+}
+
+/** Every writable param at its table default — a profile's full content. */
+function writableDefaults(): Record<string, readonly number[]> {
+  return Object.fromEntries(
+    fixtureParams()
+      .filter(
+        (def) => def.access === 'settable' || def.access === 'experimental',
+      )
+      .map((def) => [def.name, def.default]),
+  )
 }
 
 /**
- * The shipped `[[category]]` rows restricted to the fixture's params —
- * section order and card order as `parameters.toml` lists them, every
- * fixture param exactly once (issue #83).
+ * The eight Readouts at their table defaults — what the main session
+ * reads on the shipped engine (`vnnb` curates 20).
  */
-export function fixtureCategories(): readonly CategoryDef[] {
-  return [
-    {
-      name: 'volume_leveller',
-      label: 'Volume Leveler',
-      params: ['dvla', 'dvle'],
-    },
-    {
-      name: 'ieq',
-      label: 'Intelligent Equalizer',
-      params: ['ienb', 'iebf', 'iebt', 'ieon', 'iea'],
-    },
-    {
-      name: 'geq',
-      label: 'Graphic Equalizer',
-      params: ['geon', 'genb', 'gebf', 'gebg'],
-    },
-    {
-      name: 'dialog_enhancer',
-      label: 'Dialog Enhancer',
-      params: ['deon', 'dea'],
-    },
-    {
-      name: 'headphone_virtualizer',
-      label: 'Headphone Virtualizer',
-      params: ['vdhe', 'dhsb'],
-    },
-    { name: 'visualizer', label: 'Visualizer', params: ['vnnb'] },
-  ]
+function readouts(): Record<string, readonly number[]> {
+  return Object.fromEntries(
+    fixtureParams()
+      .filter((def) => def.access === 'read_only_static')
+      .map((def) => [def.name, def.default]),
+  )
 }
 
 /**
@@ -207,9 +106,11 @@ function factoryProfile(
   name: string,
   params: Profile['params'],
 ): Profile {
-  // The `defaults.toml [profile]` shared visualizer + GEQ pins
-  // (issues #24, #25) — every resolved profile carries them.
+  // Every writable param resolves (the Cascade bottoms out on the table
+  // default), then the `defaults.toml [profile]` shared visualizer + GEQ
+  // pins (issues #24, #25) every resolved profile carries.
   const resolved = {
+    ...writableDefaults(),
     ven: [1],
     vcnb: [20],
     vcbf: [...GEQ_GRID],
@@ -304,7 +205,7 @@ export function fixtureState(
       factoryPreset('rich', 'Rich'),
       factoryPreset('focused', 'Focused'),
     ],
-    readouts: { vnnb: [20] },
+    readouts: readouts(),
     ...overrides,
   }
 }

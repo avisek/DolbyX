@@ -1,6 +1,6 @@
 /**
- * #85 Part 1: the Advanced panel's geometry — what jsdom can't see
- * (ADR-0011). Real browser, real daemon, the shipped category table.
+ * #85: the Advanced panel's geometry — what jsdom can't see (ADR-0011).
+ * Real browser, real daemon, the shipped parameter table.
  */
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
@@ -32,9 +32,9 @@ test('every category toggle fills its header box', async ({ page }) => {
 })
 
 // Behavior 5: once folded, the body is `visibility: hidden` and Tab
-// skips its content. Part 1's placeholder holds nothing focusable, so
-// the test plants a button in the body — the fold must drop it from
-// the tab order all the same.
+// skips its content. The cards hold nothing focusable yet (readouts,
+// disabled reset markers), so the test plants a button in the body —
+// the fold must drop it from the tab order all the same.
 test('a folded category hides its body and takes it out of the tab order', async ({
   page,
 }) => {
@@ -63,4 +63,38 @@ test('a folded category hides its body and takes it out of the tab order', async
   await page.keyboard.press('Tab')
   await expect(page.locator(':focus')).toHaveClass(/adv-cat__toggle/)
   await expect(page.locator(':focus')).toHaveText(/^Dialog Enhancer/)
+})
+
+// Behavior 10: at 1280 px no label truncates — every `adv-card__label`
+// fits its track (wrapping is fine, overflow is not) — and the shared
+// tracks hold: within one category every control starts at the same x.
+test('labels never overflow and controls align within a category', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await openAdvanced(page)
+  const labels = page.locator('.adv-card__label')
+  await expect(labels).toHaveCount(64) // the shipped `[[param]]` rows
+
+  const overflowing = await labels.evaluateAll((elements) =>
+    elements
+      .filter((label) => label.scrollWidth > label.clientWidth)
+      .map((label) => label.textContent),
+  )
+  expect(overflowing).toEqual([])
+
+  const controlXs = await page
+    .locator('.adv-cat')
+    .evaluateAll((sections) =>
+      sections.map((section) =>
+        [...section.querySelectorAll('.adv-card__control')].map(
+          (control) => control.getBoundingClientRect().x,
+        ),
+      ),
+    )
+  expect(controlXs).toHaveLength(15)
+  for (const xs of controlXs) {
+    expect(xs.length).toBeGreaterThan(0)
+    expect(new Set(xs).size).toBe(1)
+  }
 })

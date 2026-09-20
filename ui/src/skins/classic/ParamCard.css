@@ -1,0 +1,93 @@
+/* One parameter card (#85): a form row subgridded onto the category's
+   four tracks — code | label | reset | control — so rows align across
+   every card. Access is color-coded on the 4-CC chip by hue token;
+   labels wrap, never truncate. The reset marker's dot / ↺ morph arrives
+   with divergence (#92). */
+
+.adv-card {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: default;
+  transition: background 0.12s ease;
+}
+
+/* Hover under focus weight: a card holding focus always wins. */
+:where(.adv-card:hover) {
+  background: rgb(255 255 255 / 3%);
+}
+
+.adv-card:has(:focus-visible) {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+
+.adv-card__code {
+  grid-column: 1;
+  justify-self: start;
+  padding: 0.12rem 0.38rem;
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--hue-settable);
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.adv-card--exp .adv-card__code {
+  color: var(--hue-experimental);
+}
+
+.adv-card--ro .adv-card__code {
+  color: var(--hue-readonly);
+}
+
+.adv-card__label {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.adv-card--ro .adv-card__label {
+  color: var(--color-text-muted);
+}
+
+/* The reset marker: bare chrome sized for its slot; clean ⇒ invisible,
+   slot kept so rows never shift. Read-only cards leave the track empty. */
+.adv-card__reset {
+  grid-column: 3;
+  justify-self: center;
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.adv-card__reset:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adv-card__control {
+  display: flex;
+  grid-column: 4;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The generic readout: values as text, wrapping across the track. */
+.adv-readout {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}

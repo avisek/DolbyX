@@ -25,6 +25,18 @@ export { visFrame }
 export { visIdle }
 
 /**
+ * One of the frame's four arrays by 4-CC — a Live array's read
+ * (CONTEXT.md); `undefined` before the first event or for any other
+ * name.
+ */
+export function visArray(name: string): readonly number[] | undefined {
+  const frame = visFrame()
+  return frame && Object.hasOwn(frame, name)
+    ? frame[name as keyof VisParams]
+    : undefined
+}
+
+/**
  * Lands one `vis` event's params as the latest frame (the WS glue) and
  * re-arms the idle timer.
  */

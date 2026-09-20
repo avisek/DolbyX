@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [solid({ hot: false })],
   // Solid ships separate dev/browser builds — tests need the dev one.
   resolve: { conditions: ['development', 'browser'] },
+  // src/test/fixture.ts reads the shipped `crates/ddp-daemon/parameters.toml`
+  // as text — outside the UI package, inside the repo.
+  server: { fs: { allow: ['..'] } },
   // Unit tests only — e2e/*.spec.ts belongs to Playwright (`just e2e`).
   test: {
     environment: 'happy-dom',

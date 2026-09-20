@@ -16,13 +16,22 @@ it('serves the bootstrap category table in section order', () => {
     'ieq',
     'geq',
     'dialog_enhancer',
+    'volume_maximizer',
+    'speaker_virtualizer',
     'headphone_virtualizer',
+    'next_gen_surround',
+    'audio_regulator',
+    'audio_optimizer',
+    'peak_limiter',
+    'endpoint_volume',
     'visualizer',
+    'build',
+    'license',
   ])
   expect(categories()[0]).toEqual({
     name: 'volume_leveller',
     label: 'Volume Leveler',
-    params: ['dvla', 'dvle'],
+    params: ['dvla', 'dvli', 'dvlo', 'dvle', 'dvmc', 'dvme'],
   })
   for (const { params } of categories()) {
     for (const name of params) expect(paramDef(name).name).toBe(name)
@@ -30,13 +39,13 @@ it('serves the bootstrap category table in section order', () => {
 })
 
 // Preset eligibility stays derived from the per-param `category` the
-// daemon derives (ADR-0003) — the nine, in table order.
+// daemon derives (ADR-0003) — the nine, in `[[param]]` (engine) order.
 it('still derives the nine preset-carried 4-CCs', () => {
   expect(presetCarried()).toEqual([
-    'ieon',
     'ienb',
     'iebf',
     'iebt',
+    'ieon',
     'iea',
     'geon',
     'genb',
