@@ -14,7 +14,9 @@ use serde_json::json;
 /// A profile's full resolved set, recomputed from the shipped files —
 /// what one atomic switch batch must carry.
 fn resolved(profile: &str) -> Vec<(String, Vec<i16>)> {
-    let defs = ddp_state::parse(include_str!("../parameters.toml")).expect("table parses");
+    let defs = ddp_state::parse(include_str!("../parameters.toml"))
+        .expect("table parses")
+        .params;
     let defaults = ddp_persistence::parse_defaults(include_str!("../defaults.toml"), &defs)
         .expect("defaults parse");
     let mut state = ddp_state::State::new_from_defaults(&defaults);

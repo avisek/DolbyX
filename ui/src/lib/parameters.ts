@@ -34,7 +34,7 @@ export type ParamKind =
 export type ParamAccess =
   'settable' | 'experimental' | 'read_only_dynamic' | 'read_only_static'
 
-/** UI grouping. */
+/** Parameter category id — the closed `ParamCategory` enum's serde ids. */
 export type ParamCategory =
   | 'ieq'
   | 'geq'
@@ -49,7 +49,20 @@ export type ParamCategory =
   | 'peak_limiter'
   | 'visualizer'
   | 'endpoint_volume'
-  | 'build_license'
+  | 'build'
+  | 'license'
+
+/**
+ * One `[[category]]` row — a Parameter category (ADR-0004 addendum).
+ * Bootstrap order is section order; `params` order is card order.
+ */
+export interface CategoryDef {
+  readonly name: ParamCategory
+  /** Section title, as displayed. */
+  readonly label: string
+  /** The 4-CCs it owns, in card order. */
+  readonly params: readonly string[]
+}
 
 /** Metadata for one AK parameter (one root leaf of the engine's tree). */
 export interface ParameterDef {
@@ -67,11 +80,11 @@ export interface ParameterDef {
   readonly default: readonly number[]
   /** Drives widget choice + unit label. */
   readonly kind: ParamKind
-  /** UI grouping. */
+  /** The Parameter category owning this param (derived by the daemon). */
   readonly category: ParamCategory
   /** Settability bucket. */
   readonly access: ParamAccess
-  /** Human-readable display name. */
+  /** Short, category-relative display name (`Enable`, `Amount`). */
   readonly label: string
   /** Engine one-liner. */
   readonly description: string
@@ -82,7 +95,9 @@ export interface ParameterDef {
 // The table is static per page load (parsed at daemon startup, injected
 // at request time); absent only on a direct :5173 visit, where main.tsx
 // redirects before anything resolves against it.
-const table: readonly ParameterDef[] = window.__BOOTSTRAP__?.params ?? []
+const paramTable: readonly ParameterDef[] = window.__BOOTSTRAP__?.params ?? []
+const categoryTable: readonly CategoryDef[] =
+  window.__BOOTSTRAP__?.categories ?? []
 
 /**
  * Resolves a 4-CC against the bootstrap table. Throws when absent — a
@@ -90,9 +105,18 @@ const table: readonly ParameterDef[] = window.__BOOTSTRAP__?.params ?? []
  * caught by the first render.
  */
 export function paramDef(name: string): ParameterDef {
-  const def = table.find((entry) => entry.name === name)
+  const def = paramTable.find((entry) => entry.name === name)
   if (!def) throw new Error(`parameter \`${name}\` missing from bootstrap`)
   return def
+}
+
+/**
+ * The Parameter categories in section order — the Advanced panel's
+ * composition, straight from `parameters.toml`; the UI hand-lists
+ * nothing (issue #83).
+ */
+export function categories(): readonly CategoryDef[] {
+  return categoryTable
 }
 
 /**
@@ -102,7 +126,7 @@ export function paramDef(name: string): ParameterDef {
  * (issue #26).
  */
 export function presetCarried(): readonly string[] {
-  return table
+  return paramTable
     .filter((def) => def.category === 'ieq' || def.category === 'geq')
     .map((def) => def.name)
 }

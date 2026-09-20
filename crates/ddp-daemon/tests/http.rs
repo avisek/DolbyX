@@ -1,5 +1,6 @@
 //! Behavior 1 (issue #12): `GET /` serves the UI HTML with a valid
-//! injected `window.__BOOTSTRAP__` — params (64 defs) + state.
+//! injected `window.__BOOTSTRAP__` — params (64 defs) + categories
+//! (issue #83) + state.
 
 mod common;
 
@@ -26,6 +27,40 @@ async fn get_root_serves_html_with_a_valid_bootstrap() {
     assert_eq!(dvla["max"], 10);
     assert_eq!(dvla["access"], "settable");
 
+    // The `[[category]]` table rides beside the params, in table order
+    // (issue #83) — the UI hand-lists nothing.
+    let categories = bootstrap["categories"]
+        .as_array()
+        .expect("categories array");
+    let names: Vec<_> = categories.iter().map(|c| &c["name"]).collect();
+    assert_eq!(
+        names,
+        [
+            "volume_leveller",
+            "ieq",
+            "geq",
+            "dialog_enhancer",
+            "volume_maximizer",
+            "speaker_virtualizer",
+            "headphone_virtualizer",
+            "next_gen_surround",
+            "audio_regulator",
+            "audio_optimizer",
+            "peak_limiter",
+            "endpoint_volume",
+            "visualizer",
+            "build",
+            "license",
+        ]
+    );
+    assert_eq!(
+        categories[0],
+        serde_json::json!({
+            "name": "volume_leveller",
+            "label": "Volume Leveler",
+            "params": ["dvla", "dvli", "dvlo", "dvle", "dvmc", "dvme"],
+        })
+    );
     let state = &bootstrap["state"];
     assert_eq!(state["power"], true);
     assert_eq!(state["selected_profile"], "music");

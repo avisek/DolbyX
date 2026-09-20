@@ -2,13 +2,19 @@
 //! [#11](https://github.com/avisek/DolbyX/issues/11)) and the CI structural
 //! check against the probe-generated `parameters.engine.toml` twin.
 
-use ddp_state::{ParamAccess, ParamCategory, ParamKind, ParameterDef, lookup, parse};
+use ddp_state::{
+    ParamAccess, ParamCategory, ParamKind, ParameterDef, ParameterTable, lookup, parse,
+};
 
 const PARAMETERS: &str = include_str!("../parameters.toml");
 const TWIN: &str = include_str!("../parameters.engine.toml");
 
-fn defs() -> Vec<ParameterDef> {
+fn table() -> ParameterTable {
     parse(PARAMETERS).expect("parameters.toml must parse")
+}
+
+fn defs() -> Vec<ParameterDef> {
+    table().params
 }
 
 /// Tracer bullet: the table holds exactly the engine's 64 root leaves —
@@ -34,10 +40,53 @@ fn spot_checks_dvla_and_scpe() {
         lookup(&defs, "scpe").unwrap().access,
         ParamAccess::Experimental
     );
+    let category_of = |name| lookup(&defs, name).unwrap().category;
+    assert_eq!(category_of("bndl"), ParamCategory::Build);
+    assert_eq!(category_of("lcmf"), ParamCategory::License);
+    assert_eq!(category_of("dvla"), ParamCategory::VolumeLeveller);
+}
+
+/// The `[[category]]` table (issue #83): fifteen Parameter categories in
+/// the prototype's section order, `build` / `license` split three each,
+/// every root leaf listed exactly once.
+#[test]
+fn ships_fifteen_categories_covering_every_leaf_once() {
+    let table = table();
+    let labels: Vec<&str> = table.categories.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(
-        lookup(&defs, "bndl").unwrap().category,
-        ParamCategory::BuildLicense
+        labels,
+        [
+            "Volume Leveler",
+            "Intelligent Equalizer",
+            "Graphic Equalizer",
+            "Dialog Enhancer",
+            "Volume Maximizer",
+            "Speaker Virtualizer",
+            "Headphone Virtualizer",
+            "Next Gen Surround",
+            "Audio Regulator",
+            "Audio Optimizer",
+            "Peak Limiter",
+            "Endpoint Volume",
+            "Visualizer",
+            "Build",
+            "License",
+        ]
     );
+    let by_name = |name| table.categories.iter().find(|c| c.name == name).unwrap();
+    assert_eq!(
+        by_name(ParamCategory::Build).params,
+        ["bver", "ver", "bndl"]
+    );
+    assert_eq!(
+        by_name(ParamCategory::License).params,
+        ["lcmf", "lcvd", "lcpt"]
+    );
+    // The parser holds exactly-once membership; the shipped table must
+    // also reach all 64 leaves.
+    let listed: usize = table.categories.iter().map(|c| c.params.len()).sum();
+    assert_eq!(listed, 64);
+    assert_eq!(table.params.len(), 64);
 }
 
 /// The four settability buckets hold exactly 42 / 10 / 4 / 8 params.
@@ -118,12 +167,14 @@ fn curated_defaults_correct_the_oob_power_on_slots() {
     assert_eq!(lookup(&defs, "vnnb").unwrap().default, vec![20]);
 }
 
-/// The CI structural check against the param twin: same 64 leaves,
-/// `length` equal (the allocation is a hard engine fact), every range
-/// within the engine envelope. Everything else — narrowed bounds,
-/// `frac_bits`, `default` — is curation, free to diverge; the parser
-/// already holds every default slot inside `[min, max]`. Red? Rerun
-/// `just param-twin` to see the engine's truth.
+/// The CI structural check against the param twin: the same 64 leaves
+/// in the same `[[param]]` order (display order lives only in
+/// `[[category]]`, so the two files diff line-for-line), `length` equal
+/// (the allocation is a hard engine fact), every range within the
+/// engine envelope. Everything else — narrowed bounds, `frac_bits`,
+/// `default` — is curation, free to diverge; the parser already holds
+/// every default slot inside `[min, max]`. Red? Rerun `just param-twin`
+/// to see the engine's truth.
 #[test]
 fn stays_within_the_engine_envelope() {
     let defs = defs();
@@ -134,11 +185,11 @@ fn stays_within_the_engine_envelope() {
         .iter()
         .map(|p| p["name"].as_str().expect("twin name"))
         .collect();
-    let mut names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    names.sort_unstable();
-    let mut sorted_twin_names = twin_names.clone();
-    sorted_twin_names.sort_unstable();
-    assert_eq!(names, sorted_twin_names, "parameter sets differ");
+    let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(
+        names, twin_names,
+        "[[param]] order must match the param twin"
+    );
 
     for entry in twin {
         let name = entry["name"].as_str().unwrap();

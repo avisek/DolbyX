@@ -342,8 +342,8 @@ fn is_ip_or_localhost(host: &str) -> bool {
 }
 
 /// `GET /`: the UI HTML from disk with `window.__BOOTSTRAP__` injected —
-/// params + state, re-serialized on every request so a fresh tab always
-/// paints current truth (ADR-0006).
+/// params + categories + state, re-serialized on every request so a
+/// fresh tab always paints current truth (ADR-0006).
 async fn serve_index(State(app): State<Arc<App>>) -> Response {
     let html = match tokio::fs::read_to_string(&app.ui_path).await {
         Ok(html) => html,
@@ -354,6 +354,7 @@ async fn serve_index(State(app): State<Arc<App>>) -> Response {
     };
     let bootstrap = serde_json::json!({
         "params": app.params_json,
+        "categories": app.categories_json,
         "state": app.snapshot_json().await,
     });
     // `<` is escaped so no JSON string can close the <script> element.

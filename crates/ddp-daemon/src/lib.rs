@@ -101,6 +101,9 @@ pub(crate) struct App {
     pub(crate) params: Vec<ParameterDef>,
     /// The table pre-serialized for the bootstrap — static per boot.
     pub(crate) params_json: serde_json::Value,
+    /// The `[[category]]` table pre-serialized for the bootstrap —
+    /// display composition, static per boot (ADR-0004 addendum).
+    pub(crate) categories_json: serde_json::Value,
     /// Live user state.
     pub(crate) state: RwLock<State>,
     /// The engine seam.
@@ -313,15 +316,16 @@ impl Daemon {
     ///
     /// # Panics
     ///
-    /// Never in practice: a parsed `ParameterDef` table always
-    /// serializes to JSON.
+    /// Never in practice: a parsed `parameters.toml` always serializes
+    /// to JSON.
     pub async fn start(config: DaemonConfig, engine: Arc<dyn Engine>) -> Result<Self, StartError> {
         let read = |path: PathBuf| match std::fs::read_to_string(&path) {
             Ok(document) => Ok(document),
             Err(source) => Err(StartError::Read { path, source }),
         };
 
-        let params = ddp_state::parse(&read(config.daemon_dir.join("parameters.toml"))?)?;
+        let table = ddp_state::parse(&read(config.daemon_dir.join("parameters.toml"))?)?;
+        let params = table.params;
         let defaults = ddp_persistence::parse_defaults(
             &read(config.daemon_dir.join("defaults.toml"))?,
             &params,
@@ -364,6 +368,8 @@ impl Daemon {
         let lan_gate = Arc::new(http_server::LanGate::new(state.lan_access));
         let app = Arc::new(App {
             params_json: serde_json::to_value(&params).expect("defs always serialize"),
+            categories_json: serde_json::to_value(&table.categories)
+                .expect("categories always serialize"),
             params,
             state: RwLock::new(state),
             supervisor: supervisor.clone(),

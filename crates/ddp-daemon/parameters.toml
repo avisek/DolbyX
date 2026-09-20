@@ -11,6 +11,88 @@
 # by-ref vis arrays (vnbg vnbe vcbg vcbe) carry the real dB coding the
 # API doesn't report (help: "scaled by 16 ie. 16 = 1 dB"; output range
 # [-192, 576], ddp/02).
+#
+# [[category]] is the Advanced panel's composition: table order = section
+# order, `params` order = card order; every param sits in exactly one
+# category (parser-enforced), and its `category` is derived from here.
+# [[param]] order is pinned to the param twin — never reorder it. `label` is
+# short and category-relative ("Enable", "Amount"); `description` keeps
+# the engine's full phrasing.
+
+[[category]]
+name = "volume_leveller"
+label = "Volume Leveler"
+params = ["dvla", "dvli", "dvlo", "dvle", "dvmc", "dvme"]
+
+[[category]]
+name = "ieq"
+label = "Intelligent Equalizer"
+params = ["ienb", "iebf", "iebt", "ieon", "iea"]
+
+[[category]]
+name = "geq"
+label = "Graphic Equalizer"
+params = ["geon", "genb", "gebf", "gebg"]
+
+[[category]]
+name = "dialog_enhancer"
+label = "Dialog Enhancer"
+params = ["deon", "dea", "ded"]
+
+[[category]]
+name = "volume_maximizer"
+label = "Volume Maximizer"
+params = ["vmon", "vmb"]
+
+[[category]]
+name = "speaker_virtualizer"
+label = "Speaker Virtualizer"
+params = ["vspe", "dssb", "dssa", "dssf", "scpe"]
+
+[[category]]
+name = "headphone_virtualizer"
+label = "Headphone Virtualizer"
+params = ["vdhe", "dhsb", "dhrg"]
+
+[[category]]
+name = "next_gen_surround"
+label = "Next Gen Surround"
+params = ["ngon"]
+
+[[category]]
+name = "audio_regulator"
+label = "Audio Regulator"
+params = ["arnb", "arbf", "arbi", "arbl", "arbh", "arod", "artp"]
+
+[[category]]
+name = "audio_optimizer"
+label = "Audio Optimizer"
+params = ["aocc", "aonb", "aobf", "aobg", "aoon"]
+
+[[category]]
+name = "peak_limiter"
+label = "Peak Limiter"
+params = ["plb", "plmd", "test"]
+
+[[category]]
+name = "endpoint_volume"
+label = "Endpoint Volume"
+params = ["endp", "ocf", "preg", "pstg", "vol"]
+
+[[category]]
+name = "visualizer"
+label = "Visualizer"
+params = ["ven", "vnnb", "vnbf", "vnbg", "vnbe", "vcnb", "vcbf", "vcbg", "vcbe"]
+
+[[category]]
+name = "build"
+label = "Build"
+params = ["bver", "ver", "bndl"]
+
+[[category]]
+name = "license"
+label = "License"
+params = ["lcmf", "lcvd", "lcpt"]
 
 [[param]]
 name = "bver"
@@ -20,9 +102,8 @@ max = 32767
 frac_bits = 0
 default = [4, 28, 9, 0, 0]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
-label = "Bundle version"
+label = "Bundle Version"
 description = "Identifies the version of the bundle as a combination of versions of all objects."
 help = """
 This parameter is automatically calculated as the sum of the versions of all objects in the bundle and is intended as a way to uniquely identify the bundle, in conjunction with the bndl parameter.
@@ -36,7 +117,6 @@ max = 32767
 frac_bits = 0
 default = [2, 0, 4, 0]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
 label = "Version"
 description = "Version number of this object."
@@ -50,9 +130,8 @@ max = 32767
 frac_bits = 0
 default = [16708, 80]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
-label = "Bundle id"
+label = "Bundle ID"
 description = "Identifies the bundle."
 help = "This can be turned into a four character name using the ak_ints_to_name() function"
 
@@ -64,7 +143,6 @@ max = 6
 frac_bits = 0
 default = [0]
 kind = "integer"
-category = "endpoint_volume"
 access = "experimental"
 label = "Endpoint"
 description = "Specifies the endpoint of the signal chain."
@@ -78,7 +156,6 @@ max = 2
 frac_bits = 0
 default = [0]
 kind = "integer"
-category = "endpoint_volume"
 access = "experimental"
 label = "Output Channel Format"
 description = "Specifies the output channel configuration of the Audio Processing Platform."
@@ -92,7 +169,6 @@ max = 480
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "endpoint_volume"
 access = "experimental"
 label = "Pre-gain"
 description = "The gain applied to the signal prior to entering the Audio Processing Platform."
@@ -106,7 +182,6 @@ max = 480
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "endpoint_volume"
 access = "experimental"
 label = "Post-gain"
 description = "The gain applied to the signal after leaving the Audio Processing Platform.For example: by an analog volume control."
@@ -120,7 +195,6 @@ max = 480
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "endpoint_volume"
 access = "experimental"
 label = "Volume"
 description = "The gain the user would like the Audio Processing Platform to apply to the signal."
@@ -134,9 +208,8 @@ max = 2
 frac_bits = 0
 default = [0]
 kind = { tristate = { on = 2 } }
-category = "headphone_virtualizer"
 access = "settable"
-label = "Dolby Headphone Virtualizer Control"
+label = "Enable"
 description = "Specifies the preferential enable for the Dolby Headphone feature."
 help = """
 - DAP_FEATURE_OFF will disable Dolby Headphone.
@@ -152,9 +225,8 @@ max = 2
 frac_bits = 0
 default = [0]
 kind = { tristate = { on = 2 } }
-category = "speaker_virtualizer"
 access = "settable"
-label = "Dolby Virtual Speaker Virtualizer Control"
+label = "Enable"
 description = "Specifies the preferential enable for the Dolby Virtual Speaker feature."
 help = """
 - DAP_FEATURE_OFF will disable Dolby Virtual Speaker.
@@ -170,9 +242,8 @@ max = 96
 frac_bits = 4
 default = [96]
 kind = { decibel = { lkfs = false } }
-category = "headphone_virtualizer"
 access = "settable"
-label = "Dolby Headphone Surround Boost"
+label = "Surround Boost"
 description = "Amount of boost applied to the surround channels when Dolby Headphone is enabled as the virtualizer, or when the Surround Compressor is active and no virtualizer is active."
 help = ""
 
@@ -184,9 +255,8 @@ max = 192
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "headphone_virtualizer"
 access = "settable"
-label = "Dolby Headphone Reverberation Gain"
+label = "Reverberation Gain"
 description = "Amount of reverberation to add to the signal when Dolby Headphone is being used as the virtualizer."
 help = ""
 
@@ -198,9 +268,8 @@ max = 96
 frac_bits = 4
 default = [96]
 kind = { decibel = { lkfs = false } }
-category = "speaker_virtualizer"
 access = "settable"
-label = "Dolby Virtual Speaker Surround Boost"
+label = "Surround Boost"
 description = "Amount of boost applied to the surround channels when Dolby Virtual Speaker is enabled as the virtualizer."
 help = ""
 
@@ -212,9 +281,8 @@ max = 30
 frac_bits = 0
 default = [10]
 kind = "degrees"
-category = "speaker_virtualizer"
 access = "settable"
-label = "Dolby Virtual Speaker Angle"
+label = "Speaker Angle"
 description = "Informs Dolby Virtual Speaker of the physical angle of each loudspeaker from the central listening position."
 help = ""
 
@@ -226,9 +294,8 @@ max = 20000
 frac_bits = 0
 default = [20]
 kind = "frequency_hz"
-category = "speaker_virtualizer"
 access = "settable"
-label = "Dolby Virtual Speaker Start Frequency"
+label = "Start Frequency"
 description = "Frequencies below this value will not get virtualized."
 help = "This is useful for improving bass response."
 
@@ -240,9 +307,8 @@ max = 2
 frac_bits = 0
 default = [2]
 kind = { tristate = { on = 2 } }
-category = "speaker_virtualizer"
 access = "experimental"
-label = "Surround Compressor enable"
+label = "Surround Compressor Enable"
 description = "Specifies the preferential enable for the Surround Compressor feature."
 help = "The Surround compressor feature, applies up to 6dB of boost to the surround channels. The amount of boost is given by the Dolby Virtual Speaker Surround Boost parameter when Dolby Virtual Speaker is active and the Dolby Headpone Surround Boost parameter otherwise. When set to DAP_FEATURE_AUTO, surround compressor is enabled whenever Dolby Virtual Speaker or Dolby Headphone are active."
 
@@ -254,9 +320,8 @@ max = 10
 frac_bits = 0
 default = [7]
 kind = "integer"
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Leveling Amount"
+label = "Amount"
 description = "Sets how much the leveler adjusts the loudness to normalize different audio content."
 help = ""
 
@@ -268,9 +333,8 @@ max = 0
 frac_bits = 4
 default = [-320]
 kind = { decibel = { lkfs = true } }
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Leveler Input Target"
+label = "Input Target"
 description = "Sets the target average loudness level of the Dolby Volume Leveler."
 help = "Dolby Volume will level the audio to the average loudness level specified by the Leveler Input Target. The level is specified according to a K loudness weighting."
 
@@ -282,9 +346,8 @@ max = 0
 frac_bits = 4
 default = [-320]
 kind = { decibel = { lkfs = true } }
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Leveler Output Target"
+label = "Output Target"
 description = "The Leveler Output Target is adjusted at manufacture to calibrate the system to a reference playback sound pressure level."
 help = "To compensate for the difference between mastering and playback levels, Dolby Volume applies an un-shaped digital gain of Leveler Output Target minus Leveler Input Target so that zero digital and analog volume produces reference loudness levels."
 
@@ -296,9 +359,8 @@ max = 1
 frac_bits = 0
 default = [1]
 kind = "toggle"
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Leveler Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Dolby Volume Leveler feature."
 help = "The Dolby Volume leveler, reduces the loud parts of the audio, and increases the quiet parts, to enhance the listening experience for non-ideal listening environments, while maintaining the expected dynamics of the signal.The Dolby Volume Leveler is active when this parameteris set to DAP_FEATURE_ON and it is part of this SKU."
 
@@ -310,9 +372,8 @@ max = 320
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Modeler Calibration"
+label = "Modeler Calibration"
 description = "Use this parameter to fine-tune the manufacturer calibrated reference level to the listening environment."
 help = "This input parameter allows end users to adjust for variables such as listening positions or differing speaker sensitivities. For example, the end user of an A/V receiver (AVR) with Dolby Volume can recalibrate an AVR to optimize the reference level for the user's actual listening position."
 
@@ -324,9 +385,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "volume_leveller"
 access = "settable"
-label = "Dolby Volume Modeler Enable"
+label = "Modeler Enable"
 description = "Specifies the preferential enable for the Dolby Volume Modeler feature."
 help = "The Dolby Volume Modeler, provides calibrated spectral shaping of the audio, to compensate for the differences between your current playback level, and the mastering loudness levels at time of recording.The Dolby Volume Modeler is active when this parameter is set to DAP_FEATURE_ON and it is part of this SKU.NB The Dolby Volume Modeler feature should NOT be used in system integrations where the user's volume control applies it's gain after the Audio Processing Platform."
 
@@ -338,9 +398,8 @@ max = 40
 frac_bits = 0
 default = [10]
 kind = "integer"
-category = "ieq"
 access = "settable"
-label = "Intelligent Equalizer Band Count"
+label = "Band Count"
 description = "Specifies the number of target band gains and center frequencies that will be provided to the Intelligent Equalizer."
 help = "After this value is changed, the 'iebf' and 'iebt' parameters must be updated. The Intelligent Equalizer profile will remain unchanged until this has been done."
 
@@ -352,9 +411,8 @@ max = 20000
 frac_bits = 0
 default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
-category = "ieq"
 access = "settable"
-label = "Intelligent Equalizer Band Frequencies"
+label = "Band Frequencies"
 description = "Specifies the band center frequencies for the Intelligent Equalizer target levels."
 help = "After this value is changed, the 'iebt' parameter must also be updated. The Intelligent Equalizer profile will remain unchanged until this has been done."
 
@@ -366,9 +424,8 @@ max = 480
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "ieq"
 access = "settable"
-label = "Intelligent Equalizer Band Targets"
+label = "Band Targets"
 description = "Specifies the band target levels for the Intelligent Equalizer."
 help = ""
 
@@ -380,9 +437,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "ieq"
 access = "settable"
-label = "Intelligent Equalizer Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Intelligent Equalizer feature."
 help = "The Intelligent Equalizer is a new generation of graphic equalizer that dynamically adjusts your audio to meet your spectral preferences.Instead of telling the equalizer just to boost a bass frequency, you tell the intelligent equalizer I like this much bass relative to higher frequencies, so adjust the audio appropriately to achieve this.The Intelligent Equalizer will be active if this parameter is set to DAP_FEATURE_ON and it is part of this SKU."
 
@@ -394,9 +450,8 @@ max = 16
 frac_bits = 4
 default = [10]
 kind = "integer"
-category = "ieq"
 access = "settable"
-label = "Intelligent Equalizer Amount"
+label = "Amount"
 description = "Specifies the strength of the Intelligent Equalizer effect to apply."
 help = ""
 
@@ -408,9 +463,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "dialog_enhancer"
 access = "settable"
-label = "Dialog Enhancement Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Dialog Enhancement feature."
 help = "The Dialog Enhancement feature will be enabled if this parameter is DAP_FEATURE_ON and it part of this SKU."
 
@@ -422,9 +476,8 @@ max = 16
 frac_bits = 4
 default = [0]
 kind = "integer"
-category = "dialog_enhancer"
 access = "settable"
-label = "Dialog Enhancement Amount"
+label = "Amount"
 description = "Specifies the strength of the Dialog Enhancement effect."
 help = ""
 
@@ -436,9 +489,8 @@ max = 16
 frac_bits = 4
 default = [0]
 kind = "integer"
-category = "dialog_enhancer"
 access = "settable"
-label = "Dialog Enhancement Ducking"
+label = "Ducking"
 description = "Controls the degree of suppresion of channels that don't contain dialog."
 help = ""
 
@@ -450,9 +502,8 @@ max = 2
 frac_bits = 0
 default = [2]
 kind = { tristate = { on = 2 } }
-category = "next_gen_surround"
 access = "settable"
-label = "Next Gen Surround Enable"
+label = "Enable"
 description = "Specifies the preferential enable for Next Gen Surround (NGS) feature."
 help = "The Next Gen Surround feature allows you to create a 7.1 channel mix from a 5.1 channel mix or even 5.1 or 7.1 channel mixes from 2 channel audio. It will utilize any Dolby Pro Logic encodings contained in the audio. This is Dolby's next generation surround decoder following the Pro Logic series. If NGS is on in this SKU and Next Gen Surround Enable is set to DAP_FEATURE_AUTO, NGS will be active whenever the output channel format is greater than the number of channels in the input audio or when Dolby Virtual Speaker or Dolby Headphone are active. If NGS is on in this SKU and Next Gen Surround Enable is set to DAP_FEATURE_ON, NGS will be active also for 5.1 channels in, 5.1 channels out, and 7.1 channels in, 7.1 channels out configurations."
 
@@ -464,9 +515,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "geq"
 access = "settable"
-label = "Graphic Equalizer Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Graphic Equalizer feature."
 help = "The Graphic Equalizer feature is a traditional equalizer, with configurable number of bands and centre frequencies. Typically the user will dynamically adjust the Graphic Equalizer gains from a user interface. The same equalization gains will be applied to all channels.The Graphic equalizer will be active when this parameter is set to DAP_FEATURE_ON and the Graphic Equalizer is part of this SKU."
 
@@ -478,9 +528,8 @@ max = 40
 frac_bits = 0
 default = [10]
 kind = "integer"
-category = "geq"
 access = "settable"
-label = "Graphic Equalizer Band Count"
+label = "Band Count"
 description = "The number of band gains that will be supplied to the Graphic Equalizer."
 help = "If this value is changed, the 'gebf' and 'gebg' settings must be updated. The Graphic Equalizer will not update until these parameters have been updated."
 
@@ -492,9 +541,8 @@ max = 20000
 frac_bits = 0
 default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
-category = "geq"
 access = "settable"
-label = "Graphic Equalizer Band Frequencies"
+label = "Band Frequencies"
 description = "The band center frequencies for the Graphic Equalizer."
 help = "The 'gebg' parameter must be updated after this value has been modified. No change to the Graphic Equalizer will be made until the gains have also been updated."
 
@@ -506,9 +554,8 @@ max = 576
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "geq"
 access = "settable"
-label = "Graphic Equalizer Band Gains"
+label = "Band Gains"
 description = "The band gains for the Graphic Equalizer."
 help = ""
 
@@ -520,9 +567,8 @@ max = 8
 frac_bits = 0
 default = [1]
 kind = "integer"
-category = "audio_optimizer"
 access = "settable"
-label = "Audio Optimizer Channel Count"
+label = "Channel Count"
 description = "The maximum number of channels of configuration data that will be provided to the Audio Optimizer."
 help = ""
 
@@ -534,9 +580,8 @@ max = 40
 frac_bits = 0
 default = [10]
 kind = "integer"
-category = "audio_optimizer"
 access = "settable"
-label = "Audio Optimizer Band Count"
+label = "Band Count"
 description = "The number of frequency bands per channel that will be provided to the Audio Optimizer."
 help = "After this value has changed, the 'aobf' and 'aobg' properties must be updated. The Audio Optimizer will remain unchanged until this step has been completed."
 
@@ -548,9 +593,8 @@ max = 20000
 frac_bits = 0
 default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
-category = "audio_optimizer"
 access = "settable"
-label = "Audio Optimizer Band Frequencies"
+label = "Band Frequencies"
 description = "The center frequencies of the Audio Optimizer bands."
 help = "After this value has been updated, 'aobg' must be re-set. No change to the Audio Optimizer bands will be made until this has been done."
 
@@ -562,9 +606,8 @@ max = 480
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = "aobg_channel_major"
-category = "audio_optimizer"
 access = "settable"
-label = "Audio Optimizer Band Gains"
+label = "Band Gains"
 description = "The Audio Optimizer gains for each band for each channel."
 help = """
 This data is stored channel by channel. Each data set is preceeded by an AK_CHAN_* identifier for that particular set of gains. The data set will be parsed until either 'aocc' channels worth of data has been read or the channel ID AK_CHAN_EMPTY is encountered. All other channels (if applicable) will be set to have a gain of 0dB. For example:
@@ -583,9 +626,8 @@ max = 2
 frac_bits = 0
 default = [0]
 kind = { tristate = { on = 2 } }
-category = "audio_optimizer"
 access = "settable"
-label = "Audio Optimizer Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Audio Optimizer feature."
 help = """
 The audio optimizer provides a static equalization curve with a configurable number of bands and centre frequencies. This curve may be different for different channels. The curves are typically produced by a tuning tool to compensate for imperfections in the speakers internal to a device. The Audio Optimizer feature will be active if it is part of this SKU and this parameter is DAP_FEATURE_ON or
@@ -599,9 +641,8 @@ max = 40
 frac_bits = 0
 default = [10]
 kind = "integer"
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Band Count"
+label = "Band Count"
 description = "Specifies the number of frequency bands that will be supplied to the Audio Regulator."
 help = "When this value changes, the 'arbf', 'arbi', 'arbl' and 'arbh' parameters must all be re-written. The Audio Regulator will not be permitted to enter speaker distortion limiting mode until valid data has been supplied."
 
@@ -613,9 +654,8 @@ max = 20000
 frac_bits = 0
 default = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Band Frequencies"
+label = "Band Frequencies"
 description = "Specifies the center frequencies of the audio regulator bands."
 help = "These values must increment from lowest to highest. Invalid data will cause the Audio Regulator to not be permitted to enter speaker distortion limiting mode. The 'arbi', 'arbl' and 'arbh' parameters must be updated after modifying this value."
 
@@ -627,9 +667,8 @@ max = 1
 frac_bits = 0
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = "per_band"
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Band Isolates"
+label = "Band Isolates"
 description = "Specifies each Audio regulator band as isolated or not."
 help = "Single bands that cause severe distortion should be marked as isolated, and not isolated otherwise.Thresholds marked as Not Isolated will be smoothed based on signal content and the timbre preservation amount, to reach a compromise between signal distortion, loudness, and maintaining the spectral timbre of the audio.When a band is marked as isolated, it's threshold is not adjusted by timbre preservation."
 
@@ -641,9 +680,8 @@ max = 0
 frac_bits = 4
 default = [-192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192, -192]
 kind = { decibel = { lkfs = false } }
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Band Low Thresholds"
+label = "Band Low Thresholds"
 description = "Sets the low onset point of the compression curve for each band."
 help = ""
 
@@ -655,9 +693,8 @@ max = 0
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Band High Thresholds"
+label = "Band High Thresholds"
 description = "Sets the high limiting point of the compression curve for each band."
 help = ""
 
@@ -669,9 +706,8 @@ max = 192
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Overdrive"
+label = "Overdrive"
 description = "The amount the signal is allowed to push past the distortion thresholds."
 help = ""
 
@@ -683,9 +719,8 @@ max = 16
 frac_bits = 4
 default = [16]
 kind = "integer"
-category = "audio_regulator"
 access = "settable"
-label = "Audio Regulator Timbre Preservation Amount"
+label = "Timbre Preservation"
 description = "Controls the compromise between loudness and timbre preservation at high volume levels."
 help = ""
 
@@ -697,9 +732,8 @@ max = 192
 frac_bits = 4
 default = [0]
 kind = { decibel = { lkfs = false } }
-category = "peak_limiter"
 access = "settable"
-label = "Peak Limiter Boost"
+label = "Boost"
 description = "Specifies a limited gain to be applied to the signal."
 help = "The limiter will apply this maximum gain if the resulting signal is less than the allowed peak level."
 
@@ -711,9 +745,8 @@ max = 4
 frac_bits = 0
 default = [4]
 kind = "integer"
-category = "peak_limiter"
 access = "settable"
-label = "Peak Limiting and Protection Mode"
+label = "Limiting and Protection Mode"
 description = "Controls the state of the Peak Limiter and Audio Regulator."
 help = """
 The Audio Processing Platform contains two features that allow protection of the audio signal at high levels from clipping and other distortions. The peak limiter is used to prevent clipping due to peaks in the audio caused by the Audio Processing Platform features. While the Audio Regulator is designed to allow the user to maximize the loudness of the system while minimizing the distortions created by loudspeakers and other components of the system.
@@ -735,9 +768,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "peak_limiter"
 access = "experimental"
-label = "Peak Limiter Test Mode Enable"
+label = "Test Mode Enable"
 description = "Enable for test mode in the Peak Limiter."
 help = "A test mode is provided in the Peak LImiter that removes the system headroom, and hard-clips any peaks on the output, instead of normal limiter operation. This mode is used for system tests. This test mode is active when this parameter is set to DAP_PLIM_TEST_ENABLE, and inactive otherwise. Test mode should only be used in conjunction with the 'plmd' parameter set to DAP_PLMD_PEAK_ONLY."
 
@@ -749,9 +781,8 @@ max = 1
 frac_bits = 0
 default = [0]
 kind = "toggle"
-category = "visualizer"
 access = "experimental"
-label = "Visualization Support Enable"
+label = "Enable"
 description = "Enable for visualization."
 help = "The Audio Processing Platform provides visualizations of the excitation (power) in each frequency band and the gains applied by the Audio Processing Platform in  each frequency band.The visualization can be provided at the native frequncy bands. Or you can configure the visualization for a custom set of frequencies.Visualization is available when this parameter is set to DAP_FEATURE_ON."
 
@@ -763,9 +794,8 @@ max = 20
 frac_bits = 0
 default = [20]
 kind = "integer"
-category = "visualizer"
 access = "read_only_static"
-label = "Native Visualization Band Count"
+label = "Native Band Count"
 description = "Returns the number of bands that are natively supported by the visualizer."
 help = "The value is dependent on the sample rate. This parameter is always accessible independent of the ven parameter setting."
 
@@ -777,9 +807,8 @@ max = 32767
 frac_bits = 0
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = "frequency_hz"
-category = "visualizer"
 access = "read_only_static"
-label = "Native Visualization Band Center Frequencies"
+label = "Native Band Frequencies"
 description = "Contains the center frequencies of the native visualizer bands."
 help = "These center frequencies are dependent on the sample rate. They are always accessible independent of the ven parameter setting. The range of these centre frequencies is from 20 to 20000."
 
@@ -791,9 +820,8 @@ max = 576
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "visualizer"
 access = "read_only_dynamic"
-label = "Native Visualizer Band Gains"
+label = "Native Band Gains"
 description = "Contains the visualizer gains for the native visualizer bands."
 help = "The ven parameter must be DAP_FEATURE_ON to read this parameter. The gains are scaled by 16 ie. 16 = 1 dB."
 
@@ -805,9 +833,8 @@ max = 576
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "visualizer"
 access = "read_only_dynamic"
-label = "Native Visualizer Band Excitations"
+label = "Native Band Excitations"
 description = "Contains the excitation (power) data for the native visualizer bands."
 help = "This array contains the visualization of power in each native band. It is only available when the ven parameter is set to DAP_FEATURE_ON. The gains are scaled by 16 ie. 16 = 1 dB."
 
@@ -819,9 +846,8 @@ max = 20
 frac_bits = 0
 default = [0]
 kind = "integer"
-category = "visualizer"
 access = "experimental"
-label = "Custom Visualizer Band Count"
+label = "Custom Band Count"
 description = "Configures the number of frequency bands for the custom visualization."
 help = "This parameter specifies the number of center frequencies that will be supplied by the user for a custom visualization. After this value is modified, the vcbf parameter must be updated. Changes to this parameter will not take effect until the ven parameter is set to DAP_FEATURE_ON.If it is set to 0 not custom gains or excitations will be provided."
 
@@ -833,9 +859,8 @@ max = 20000
 frac_bits = 0
 default = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
 kind = "frequency_hz"
-category = "visualizer"
 access = "experimental"
-label = "Custom Visualizer Band Center Frequencies"
+label = "Custom Band Frequencies"
 description = "Specifies the centre frequencies of the Custom Visualizer bands."
 help = "This parameter allows control over the frequencies of the custom visualization bands. The values must be monotonically increasing. Changes to this parameter will not take effect until ven is set to DAP_FEATURE_ON."
 
@@ -847,9 +872,8 @@ max = 576
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "visualizer"
 access = "read_only_dynamic"
-label = "Custom Visualizer Band Gains"
+label = "Custom Band Gains"
 description = "Contains the gains applied by the Audio Processing Platform in the custom visualizer bands."
 help = "The ven parameter must be set to DAP_FEATURE_ON to read this parameter."
 
@@ -861,9 +885,8 @@ max = 576
 frac_bits = 4
 default = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 kind = { decibel = { lkfs = false } }
-category = "visualizer"
 access = "read_only_dynamic"
-label = "Custom Visualizer Band Excitations"
+label = "Custom Band Excitations"
 description = "Contains the visualization of excitation (power) in each of the custom visualizer bands."
 help = "The ven parameter must be set to DAP_FEATURE_ON to read this parameter."
 
@@ -875,9 +898,8 @@ max = 2
 frac_bits = 0
 default = [2]
 kind = { tristate = { on = 2 } }
-category = "volume_maximizer"
 access = "settable"
-label = "Volume Maximizer Enable"
+label = "Enable"
 description = "Specifies the preferential enable for the Volume Maximizer feature."
 help = """
 The Volume Maximizer allows a configurable boost to be applied to the audio.
@@ -891,9 +913,8 @@ max = 192
 frac_bits = 4
 default = [144]
 kind = { decibel = { lkfs = false } }
-category = "volume_maximizer"
 access = "settable"
-label = "Volume Maximizer Boost"
+label = "Boost"
 description = "The boost to be applied by Volume Maximizer."
 help = ""
 
@@ -905,9 +926,8 @@ max = 32767
 frac_bits = 0
 default = [0, 0]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
-label = "Manufacturer Identifier"
+label = "Manufacturer ID"
 description = "This is the manufacturer ID issued by Dolby when a license file for the technology is issued. This ID must match the ID specified in the license file."
 help = "This parameter will usually be set before any blocks of audio are processed.This parameter is entered as two 16-bit values that are derived from the 32-bit manufacturer ID. The first value is the least significant word caste to a signed short and the second is the most significant word caste to a signed short."
 
@@ -919,9 +939,8 @@ max = 32767
 frac_bits = 0
 default = [1, 0]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
-label = "License Authentication Return Value"
+label = "Authentication Status"
 description = "Used to query the authentication status."
 help = """
 Consists of array of 2 short return values. Offset of 0 contains license type. Possible return values are:
@@ -950,9 +969,8 @@ max = 255
 frac_bits = 0
 default = [0]
 kind = "opaque"
-category = "build_license"
 access = "read_only_static"
-label = "License Pointer"
+label = "Data Pointer"
 description = "This parameter is for passing the license data into the Audio Processing Platform."
 help = """
 This is managed as an array of signed chars that can be passed in as a pointer to external memory or data to copy to internal library memory.
