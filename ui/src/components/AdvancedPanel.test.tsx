@@ -1,5 +1,6 @@
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -905,4 +906,371 @@ it('↑ on a read-only scalar writes nothing and leaves the text', () => {
   expect(up.defaultPrevented).toBe(false)
   expect(sentEdits(socket)).toEqual([])
   expect(count.value).toBe('20')
+})
+
+// — Pointer-lock scrub (#88) —
+
+/** The `adv-input` wrapper a field sits in — the scrub surface. */
+const box = (input: HTMLInputElement): HTMLElement => {
+  const wrapper = input.parentElement
+  if (!wrapper) throw new Error('field without a wrapper')
+  return wrapper
+}
+
+/** Whether a field's box publishes `--scrubbing`. */
+const scrubbingOn = (input: HTMLInputElement): boolean =>
+  box(input).classList.contains('adv-input--scrubbing')
+
+/** The sent edit frames' `params`, oldest first. */
+const sentParams = (socket: MockWebSocket): unknown[] =>
+  sentEdits(socket).map((frame) => frame.params)
+
+/**
+ * happy-dom has no Pointer Lock. The stub emulates the API's observable
+ * surface: `requestPointerLock` records the caller, makes it
+ * `document.pointerLockElement`, and resolves; `exitPointerLock`
+ * releases. Tests swap `requestPointerLock` to a refusal (behavior 10).
+ */
+const lock: { held: Element | null; requests: Element[]; exits: number } = {
+  held: null,
+  requests: [],
+  exits: 0,
+}
+// On the instance: happy-dom's `document` doesn't chain to the global
+// `Document.prototype`.
+Object.defineProperty(document, 'pointerLockElement', {
+  configurable: true,
+  get: () => lock.held,
+})
+document.exitPointerLock = () => {
+  lock.exits += 1
+  lock.held = null
+}
+HTMLElement.prototype.requestPointerLock = function requestPointerLock() {
+  lock.requests.push(this)
+  lock.held = this
+  return Promise.resolve()
+}
+beforeEach(() => {
+  lock.held = null
+  lock.requests = []
+  lock.exits = 0
+})
+
+/** A press at `clientY` on a field's box, pointer 1, button 0. */
+function pressAt(input: HTMLInputElement, clientY: number): void {
+  fireEvent.pointerDown(box(input), { pointerId: 1, button: 0, clientY })
+}
+
+/** A pre-engage move on the box: the element's own listeners see it. */
+function moveTo(input: HTMLInputElement, clientY: number): void {
+  fireEvent.pointerMove(box(input), { pointerId: 1, clientY })
+}
+
+/** A tracked move — window-level, carrying a locked `movementY`. */
+function scrubBy(
+  movementY: number,
+  mods: { altKey?: boolean; shiftKey?: boolean } = {},
+): void {
+  fireEvent.pointerMove(window, { pointerId: 1, movementY, ...mods })
+}
+
+/** Presses at y = 100 and drags past the 3 px threshold: engaged. */
+function engage(input: HTMLInputElement): void {
+  pressAt(input, 100)
+  moveTo(input, 97)
+}
+
+/** The tracked gesture's end — a window-level release. */
+function release(): void {
+  fireEvent.pointerUp(window, { pointerId: 1, button: 0 })
+}
+
+// Tracer bullet (#88): past the threshold the gesture is engaged; one
+// window-tracked move of −4 px (up, DPR 1) is one step — raw +1 on
+// `dvla` (`frac_bits = 0`, Music 4) — a live `edit_profile`, the field
+// focused with its text fully selected as the readout.
+it('engages past 3 px, then one −4 px window move steps dvla 4 → 5 live, field selected', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  scrubBy(-4)
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dvla: [5] },
+    },
+  ])
+  expect(amount.value).toBe('5')
+  expect(document.activeElement).toBe(amount)
+  expect(fullySelected(amount)).toBe(true)
+})
+
+// Behavior 5 (#88): a modifier flip mid-gesture rebases — the value
+// after the flip continues from the last emitted one, never jumping.
+// `vol` (−130…30 dB, `frac_bits = 4`, Music 0): −16 px = +4 dB, then
+// one Shift step (10 dB) from there = 14 dB → raws 64, 224.
+it('holding Shift mid-scrub switches to 10× steps from the last value, no jump', () => {
+  renderOpen()
+  const socket = connect()
+  const vol = field('Endpoint Volume Volume')
+  engage(vol)
+  scrubBy(-16)
+  scrubBy(-4, { shiftKey: true })
+  expect(sentParams(socket)).toEqual([{ vol: [64] }, { vol: [224] }])
+  expect(vol.value).toBe('14')
+  expect(fullySelected(vol)).toBe(true)
+})
+
+// Behavior 6 (#88): pinned at a bound the gesture rebases to it, so
+// reversing by one step's px steps off the bound at once — no dead
+// travel. `dvla` from 4: −32 px asks for 12, clamps to 10; +4 px → 9.
+it('pinning at max then reversing one step emits max − 1 immediately', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  scrubBy(-32)
+  scrubBy(4)
+  expect(sentParams(socket)).toEqual([{ dvla: [10] }, { dvla: [9] }])
+  expect(amount.value).toBe('9')
+})
+
+// Behavior 7 (#88): Chromium cancels the wrapper's pointer as the lock
+// engages — a `pointercancel` there leaves the gesture running (window
+// moves still step); the window `pointerup` ends it (moves after it
+// step nothing).
+it('a wrapper pointercancel after engage keeps scrubbing; a window pointerup ends it', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  fireEvent.pointerCancel(box(amount), { pointerId: 1 })
+  scrubBy(-4)
+  expect(sentParams(socket)).toEqual([{ dvla: [5] }])
+  release()
+  scrubBy(-4)
+  expect(sentEdits(socket)).toHaveLength(1)
+})
+
+// Behavior 8 (#88): release exits the lock, drops `--scrubbing`, and
+// commits the last value once — observable when a peer moved the truth
+// mid-gesture (the live writes already applied the rest) — leaving the
+// field focused with its text fully selected.
+it('release exits the lock, drops --scrubbing, commits the last value, keeps focus + selection', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  expect(lock.held).toBe(box(amount))
+  expect(scrubbingOn(amount)).toBe(true)
+  scrubBy(-8)
+  applySnapshot(fixtureStateWithParams({ dvla: [2] })) // a peer's edit
+  release()
+  expect(lock.exits).toBe(1)
+  expect(lock.held).toBeNull()
+  expect(scrubbingOn(amount)).toBe(false)
+  expect(sentParams(socket)).toEqual([
+    { dvla: [6] }, // live
+    { dvla: [6] }, // the release commit, against the changed truth
+  ])
+  expect(amount.value).toBe('6')
+  expect(document.activeElement).toBe(amount)
+  expect(fullySelected(amount)).toBe(true)
+})
+
+// Behavior 1 (#88): a press without drag is a plain click — the
+// `pointerdown` keeps its default (the browser's focus — happy-dom runs
+// no default actions, so the un-prevented event stands in; Playwright
+// sees the focus itself), no lock is requested, nothing is written, and
+// the wrapper's `pointerup` disarms: a later drag past the threshold
+// engages nothing.
+it('a press released without movement never locks or writes, and disarms', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  const down = new PointerEvent('pointerdown', {
+    pointerId: 1,
+    button: 0,
+    clientY: 100,
+    bubbles: true,
+    cancelable: true,
+  })
+  expect(box(amount).dispatchEvent(down)).toBe(true)
+  fireEvent.pointerUp(box(amount), { pointerId: 1, button: 0 })
+  expect(lock.requests).toEqual([])
+  expect(scrubbingOn(amount)).toBe(false)
+
+  moveTo(amount, 90)
+  scrubBy(-16)
+  expect(lock.requests).toEqual([])
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 2 (#88): two px of travel keep the press a click; the third
+// engages — exactly one lock request on the wrapper, `--scrubbing`
+// published, the field focused with its text fully selected — and
+// further wrapper moves request nothing more.
+it('a 2 px move keeps the press armed; the third px engages once', () => {
+  renderOpen()
+  const amount = field('Volume Leveler Amount')
+  pressAt(amount, 100)
+  moveTo(amount, 98)
+  expect(lock.requests).toEqual([])
+  expect(scrubbingOn(amount)).toBe(false)
+
+  moveTo(amount, 97)
+  expect(lock.requests).toEqual([box(amount)])
+  expect(scrubbingOn(amount)).toBe(true)
+  expect(document.activeElement).toBe(amount)
+  expect(fullySelected(amount)).toBe(true)
+
+  moveTo(amount, 80)
+  expect(lock.requests).toHaveLength(1)
+})
+
+// Behavior 3 (#88): one tracked move of −16 px (up, DPR 1) is four
+// steps at 4 px each — one live frame carrying raw 4 + 4 = 8 on `dvla`.
+it('a −16 px window move at DPR 1 is four steps: dvla 4 → 8 in one frame', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  scrubBy(-16)
+  expect(sentParams(socket)).toEqual([{ dvla: [8] }])
+  expect(amount.value).toBe('8')
+})
+
+// Behavior 4 (#88): locked `movementY` is device px — at DPR 2 the same
+// −16 is 8 css px, two steps: dvla 4 → 6. Scrubbing feels the same on
+// every display.
+it('at devicePixelRatio 2 a locked −16 px move is two steps', () => {
+  vi.stubGlobal('devicePixelRatio', 2)
+  try {
+    renderOpen()
+    const socket = connect()
+    const amount = field('Volume Leveler Amount')
+    engage(amount)
+    scrubBy(-16)
+    expect(sentParams(socket)).toEqual([{ dvla: [6] }])
+  } finally {
+    vi.stubGlobal('devicePixelRatio', 1)
+  }
+})
+
+// Behavior 9 (#88): a read-only box never scrubs — no `--scrub`
+// capability, a press-drag requests no lock and writes nothing.
+it('a read-only box publishes no --scrub and never arms', () => {
+  renderOpen()
+  const socket = connect()
+  const count = field('Visualizer Native Band Count') // vnnb
+  expect(box(count).classList.contains('adv-input--scrub')).toBe(false)
+  expect(box(field('Volume Leveler Amount')).classList).toContain(
+    'adv-input--scrub',
+  )
+  engage(count)
+  scrubBy(-16)
+  expect(lock.requests).toEqual([])
+  expect(scrubbingOn(count)).toBe(false)
+  expect(sentEdits(socket)).toEqual([])
+  expect(count.value).toBe('20')
+})
+
+// Behavior 10 (#88): the lock is best-effort — refused synchronously or
+// by a rejected promise (a window without focus), the gesture scrubs on
+// unlocked movement deltas.
+it('scrubs on plain movement when requestPointerLock throws or rejects', async () => {
+  const request = vi.spyOn(HTMLElement.prototype, 'requestPointerLock')
+  try {
+    renderOpen()
+    const socket = connect()
+    const amount = field('Volume Leveler Amount')
+
+    request.mockImplementation(() => {
+      throw new Error('refused')
+    })
+    engage(amount)
+    scrubBy(-4)
+    release()
+    expect(sentParams(socket)).toEqual([{ dvla: [5] }])
+
+    request.mockImplementation(() => Promise.reject(new Error('refused')))
+    engage(amount)
+    scrubBy(-4)
+    release()
+    await Promise.resolve() // the rejection settles, handled
+    expect(sentParams(socket)).toEqual([{ dvla: [5] }, { dvla: [6] }])
+  } finally {
+    request.mockRestore()
+  }
+})
+
+// (#88) Unlocked deltas are css px already: with the lock refused at
+// DPR 2, −16 px is still four steps — the fallback never under-scales
+// on hiDPI.
+it('with the lock refused at devicePixelRatio 2, −16 px is still four steps', () => {
+  const request = vi
+    .spyOn(HTMLElement.prototype, 'requestPointerLock')
+    .mockImplementation(() => Promise.reject(new Error('refused')))
+  vi.stubGlobal('devicePixelRatio', 2)
+  try {
+    renderOpen()
+    const socket = connect()
+    const amount = field('Volume Leveler Amount')
+    engage(amount)
+    scrubBy(-16)
+    expect(sentParams(socket)).toEqual([{ dvla: [8] }])
+  } finally {
+    vi.stubGlobal('devicePixelRatio', 1)
+    request.mockRestore()
+  }
+})
+
+// Behavior 11 (#88): the selected text never starts a text drag —
+// `dragstart` on the field is default-prevented while scrubbing too.
+it('default-prevents dragstart on the selected field mid-scrub', () => {
+  renderOpen()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  expect(fullySelected(amount)).toBe(true)
+  const drag = new Event('dragstart', { bubbles: true, cancelable: true })
+  expect(amount.dispatchEvent(drag)).toBe(false)
+})
+
+// (#88) Losing the window mid-gesture would strand the lock: a window
+// `blur` ends the scrub like a release — lock exited, `--scrubbing`
+// dropped, later moves step nothing.
+it('a window blur mid-scrub ends the gesture', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  scrubBy(-4)
+  fireEvent.blur(window)
+  expect(lock.held).toBeNull()
+  expect(scrubbingOn(amount)).toBe(false)
+  scrubBy(-4)
+  expect(sentParams(socket)).toEqual([{ dvla: [5] }])
+})
+
+// (#88) The compat `click` the browser fires after the release would
+// place a caret in the field — after a scrub it re-selects instead;
+// a click without a scrub behind it is left alone (caret placement for
+// typing).
+it('the compat click after a scrub re-selects the text; a plain click does not', () => {
+  renderOpen()
+  const amount = field('Volume Leveler Amount')
+  engage(amount)
+  scrubBy(-4)
+  release()
+  amount.setSelectionRange(1, 1) // what the click's default would leave
+  fireEvent.click(box(amount))
+  expect(fullySelected(amount)).toBe(true)
+
+  amount.setSelectionRange(1, 1)
+  fireEvent.click(box(amount))
+  expect(fullySelected(amount)).toBe(false)
 })

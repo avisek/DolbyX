@@ -64,7 +64,7 @@ function isNumericScalar(def: ParameterDef): boolean {
  * fills it) — the two share `value`, `min`, `max`, `fine`, `scale`,
  * `unit`, all in display units. Writable: typing writes live, blur /
  * Enter commits, both through the Source rule as raw clamped to the
- * def's range.
+ * def's range; the Scrub (#88) rides the same two paths.
  * Read-only: the same box, `readonly`, mirroring the store — Readouts
  * for ReadOnly-Static — so the column reads uniformly.
  */
@@ -84,6 +84,7 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
       scale={scaleOf(def)}
       unit={unitLabel(def.kind)}
       readOnly={!writable}
+      scrub={writable}
       onLive={
         writable
           ? (value) => {

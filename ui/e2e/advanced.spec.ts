@@ -260,3 +260,58 @@ test('typing out of range into vol sends the clamped raw, which a reload resolve
   await expect(page.locator('.connection-badge')).toHaveText('Connected')
   await expect(page.getByRole('textbox', { name })).toHaveValue('30')
 })
+
+// — Pointer-lock scrub (#88, behavior 12) —
+
+// The real lock: a press-drag on `dhsb` locks the pointer on the box
+// (`document.pointerLockElement` is the `adv-input` wrapper) with the
+// field focused; the release exits the lock leaving the field focused
+// with its text selected under the scrub cursor, and the peer page's
+// next snapshot carries the changed value. The step count stays
+// unasserted: under a lock, CDP-synthesized mouse input carries
+// cursor-warp artifacts in `movementY` (the engagement alone fires one),
+// so only a real mouse can drive exact locked deltas — jsdom covers the
+// arithmetic.
+test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focus + selection', async ({
+  page,
+  context,
+}) => {
+  await openAdvanced(page)
+  const peer = await context.newPage()
+  await openAdvanced(peer)
+  const name = 'Headphone Virtualizer Surround Boost'
+  const boost = page.getByRole('textbox', { name })
+  const wrapper = boost.locator('..')
+  await expect(boost).toHaveValue('3') // Music ships dhsb=48
+  await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  const lockedOn = () =>
+    page.evaluate(() => document.pointerLockElement?.className ?? null)
+
+  // `page.mouse` never scrolls: bring the box into the viewport first.
+  await boost.scrollIntoViewIfNeeded()
+  const rect = await boost.boundingBox()
+  if (!rect) throw new Error('field not laid out')
+  const x = rect.x + rect.width / 2
+  const y = rect.y + rect.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x, y - 3) // the third px engages
+  await expect.poll(lockedOn).toMatch(/\badv-input\b/)
+  await expect(wrapper).toHaveClass(/adv-input--scrubbing/)
+  await expect(boost).toBeFocused()
+
+  await page.mouse.move(x, y - 11)
+  await expect(boost).not.toHaveValue('3')
+  await page.mouse.up()
+
+  await expect.poll(lockedOn).toBeNull()
+  await expect(wrapper).not.toHaveClass(/adv-input--scrubbing/)
+  await expect(boost).toBeFocused()
+  await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  const after = await boost.evaluate((el: HTMLInputElement) => ({
+    value: el.value,
+    selection: [el.selectionStart, el.selectionEnd],
+  }))
+  expect(after.selection).toEqual([0, after.value.length])
+  await expect(peer.getByRole('textbox', { name })).toHaveValue(after.value)
+})
