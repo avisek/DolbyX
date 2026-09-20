@@ -8,9 +8,10 @@ import {
 } from 'solid-js'
 import {
   clampTo,
+  stepMode,
   stepped,
-  type Modifiers,
   type StepAxis,
+  type StepMode,
   type StepScale,
 } from '../lib/step'
 
@@ -21,10 +22,6 @@ const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
 const ENGAGE_PX = 3
 /** Css px of travel per step while scrubbing. */
 const PX_PER_STEP = 4
-
-/** The modifier set a scrub steps under — a flip rebases the gesture. */
-const modeOf = (mods: Modifiers): 'alt' | 'shift' | 'base' =>
-  mods.altKey ? 'alt' : mods.shiftKey ? 'shift' : 'base'
 
 /**
  * The one numeric box (#87), a shared control: the engine follows *as
@@ -42,7 +39,8 @@ const modeOf = (mods: Modifiers): 'alt' | 'shift' | 'base' =>
  * `PX_PER_STEP` css px is one Step-rule step under the modifiers held
  * at that moment (up = +), written live; release exits the lock and
  * commits. The box stays focused with its text selected throughout —
- * it is the gesture's readout. A plain click falls through to typing.
+ * the selected text is the gesture's live display. A plain click falls
+ * through to typing.
  */
 const NumberInput: Component<{
   id: string
@@ -109,19 +107,26 @@ const NumberInput: Component<{
   // capture-phase window listeners track it, locked or not.
   const [scrubbing, setScrubbing] = createSignal(false)
   let armed = false
-  /** A scrub just ended — its compat `click` re-selects, not carets. */
-  let scrubbed = false
+  /** A scrub just ended: the compat `click` behind it re-selects
+   * instead of placing a caret. */
+  let clickPending = false
   let startY = 0
   /** The value `accum` steps from. */
   let base = 0
   /** Css px of upward travel since the last rebase. */
   let accum = 0
-  let mode: ReturnType<typeof modeOf> = 'base'
+  let mode: StepMode = 'base'
   /** The last value the gesture wrote. */
   let last: number | undefined
 
+  /** The field as the gesture's live display: focused, fully selected. */
+  const holdSelected = (): void => {
+    input.focus()
+    input.select()
+  }
+
   /** After a live write: the store's (synchronously applied) truth,
-   * selected — the readout. */
+   * selected, ready to be typed over. */
   const showSynced = (): void => {
     sync()
     input.select()
@@ -130,10 +135,10 @@ const NumberInput: Component<{
   /** One tracked movement sample → possibly one live step. Locked
    * `movementY` is device px; unlocked (the lock refused) css px. */
   const track = (event: PointerEvent): void => {
-    if (modeOf(event) !== mode) {
+    if (stepMode(event) !== mode) {
       // A modifier flip rebases: the new step size counts from the
       // last value written, so the value never jumps.
-      mode = modeOf(event)
+      mode = stepMode(event)
       base = last ?? base
       accum = 0
     }
@@ -174,9 +179,8 @@ const NumberInput: Component<{
     detach()
     if (last !== undefined) props.onCommit?.(last)
     // The lock's exit and the compat mouseup both disturb focus and
-    // selection — re-assert the readout.
-    input.focus()
-    input.select()
+    // selection — re-assert.
+    holdSelected()
   }
 
   /** A not-yet-engaged press released or cancelled: a plain click. */
@@ -191,11 +195,10 @@ const NumberInput: Component<{
   /** Past the threshold: lock the pointer, follow it on the window. */
   const engage = (event: PointerEvent): void => {
     armed = false
-    scrubbed = true
-    mode = modeOf(event)
+    clickPending = true
+    mode = stepMode(event)
     setScrubbing(true)
-    input.focus()
-    input.select()
+    holdSelected()
     window.addEventListener('pointermove', track, true)
     window.addEventListener('pointerup', endScrub, true)
     // Losing the window mid-gesture would strand the lock: end it.
@@ -204,6 +207,7 @@ const NumberInput: Component<{
     // lacks focus — synchronously or through the returned promise —
     // and the gesture scrubs on unlocked deltas instead.
     try {
+      // Typed `Promise<void>`; older engines return nothing — guard.
       const lock = wrapper.requestPointerLock() as unknown
       if (lock instanceof Promise) lock.catch(() => undefined)
     } catch {
@@ -237,8 +241,8 @@ const NumberInput: Component<{
       onPointerUp={disarm}
       onPointerCancel={disarm}
       onClick={() => {
-        if (!scrubbed) return
-        scrubbed = false
+        if (!clickPending) return
+        clickPending = false
         input.select()
       }}
     >
@@ -285,8 +289,7 @@ const NumberInput: Component<{
             props.onLive?.(
               stepped(axis(), shown, key === 'ArrowUp' ? 1 : -1, event),
             )
-            sync()
-            input.select()
+            showSynced()
             event.preventDefault()
           }
         }}

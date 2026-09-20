@@ -39,9 +39,16 @@ const SEMITONE = 2 ** (1 / 12)
 /** Float-noise trim — the lattice is powers of two, 4 places suffice. */
 const trim = (value: number): number => Number(value.toFixed(4))
 
-/** Alt 0.1, Shift 10, else 1 — Alt wins. */
+/** The modifier set a gesture steps under — Alt wins over Shift. A
+ * scrub (#88) rebases when it flips. */
+export type StepMode = 'alt' | 'shift' | 'base'
+
+export const stepMode = (mods: Modifiers): StepMode =>
+  mods.altKey ? 'alt' : mods.shiftKey ? 'shift' : 'base'
+
+/** Alt 0.1, Shift 10, else 1. */
 const multiplier = (mods: Modifiers): number =>
-  mods.altKey ? 0.1 : mods.shiftKey ? 10 : 1
+  ({ alt: 0.1, shift: 10, base: 1 })[stepMode(mods)]
 
 /** Whether the axis steps multiplicatively: log over a strictly
  * positive range. */
@@ -54,7 +61,7 @@ const linearStep = (fine: number, mods: Modifiers): number =>
 
 /** The log factor under `mods`: semitone, Alt a tenth, Shift an octave. */
 const logFactor = (mods: Modifiers): number =>
-  mods.altKey ? SEMITONE ** 0.1 : mods.shiftKey ? 2 : SEMITONE
+  ({ alt: SEMITONE ** 0.1, shift: 2, base: SEMITONE })[stepMode(mods)]
 
 /** `value` clamped to the axis. */
 export const clampTo = (axis: StepAxis, value: number): number =>

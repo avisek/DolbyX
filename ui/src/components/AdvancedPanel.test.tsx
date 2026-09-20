@@ -917,6 +917,14 @@ const box = (input: HTMLInputElement): HTMLElement => {
   return wrapper
 }
 
+/** Whether a field's box publishes `--scrubbing`. */
+const scrubbingOn = (input: HTMLInputElement): boolean =>
+  box(input).classList.contains('adv-input--scrubbing')
+
+/** The sent edit frames' `params`, oldest first. */
+const sentParams = (socket: MockWebSocket): unknown[] =>
+  sentEdits(socket).map((frame) => frame.params)
+
 /**
  * happy-dom has no Pointer Lock. The stub emulates the API's observable
  * surface: `requestPointerLock` records the caller, makes it
@@ -1012,10 +1020,7 @@ it('holding Shift mid-scrub switches to 10× steps from the last value, no jump'
   engage(vol)
   scrubBy(-16)
   scrubBy(-4, { shiftKey: true })
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { vol: [64] },
-    { vol: [224] },
-  ])
+  expect(sentParams(socket)).toEqual([{ vol: [64] }, { vol: [224] }])
   expect(vol.value).toBe('14')
   expect(fullySelected(vol)).toBe(true)
 })
@@ -1030,10 +1035,7 @@ it('pinning at max then reversing one step emits max − 1 immediately', () => {
   engage(amount)
   scrubBy(-32)
   scrubBy(4)
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { dvla: [10] },
-    { dvla: [9] },
-  ])
+  expect(sentParams(socket)).toEqual([{ dvla: [10] }, { dvla: [9] }])
   expect(amount.value).toBe('9')
 })
 
@@ -1048,9 +1050,7 @@ it('a wrapper pointercancel after engage keeps scrubbing; a window pointerup end
   engage(amount)
   fireEvent.pointerCancel(box(amount), { pointerId: 1 })
   scrubBy(-4)
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { dvla: [5] },
-  ])
+  expect(sentParams(socket)).toEqual([{ dvla: [5] }])
   release()
   scrubBy(-4)
   expect(sentEdits(socket)).toHaveLength(1)
@@ -1066,14 +1066,14 @@ it('release exits the lock, drops --scrubbing, commits the last value, keeps foc
   const amount = field('Volume Leveler Amount')
   engage(amount)
   expect(lock.held).toBe(box(amount))
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(true)
+  expect(scrubbingOn(amount)).toBe(true)
   scrubBy(-8)
   applySnapshot(fixtureStateWithParams({ dvla: [2] })) // a peer's edit
   release()
   expect(lock.exits).toBe(1)
   expect(lock.held).toBeNull()
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(false)
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+  expect(scrubbingOn(amount)).toBe(false)
+  expect(sentParams(socket)).toEqual([
     { dvla: [6] }, // live
     { dvla: [6] }, // the release commit, against the changed truth
   ])
@@ -1083,9 +1083,11 @@ it('release exits the lock, drops --scrubbing, commits the last value, keeps foc
 })
 
 // Behavior 1 (#88): a press without drag is a plain click — the
-// `pointerdown` keeps its default (the browser's focus), no lock is
-// requested, nothing is written, and the wrapper's `pointerup` disarms:
-// a later drag past the threshold engages nothing.
+// `pointerdown` keeps its default (the browser's focus — happy-dom runs
+// no default actions, so the un-prevented event stands in; Playwright
+// sees the focus itself), no lock is requested, nothing is written, and
+// the wrapper's `pointerup` disarms: a later drag past the threshold
+// engages nothing.
 it('a press released without movement never locks or writes, and disarms', () => {
   renderOpen()
   const socket = connect()
@@ -1100,7 +1102,7 @@ it('a press released without movement never locks or writes, and disarms', () =>
   expect(box(amount).dispatchEvent(down)).toBe(true)
   fireEvent.pointerUp(box(amount), { pointerId: 1, button: 0 })
   expect(lock.requests).toEqual([])
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(false)
+  expect(scrubbingOn(amount)).toBe(false)
 
   moveTo(amount, 90)
   scrubBy(-16)
@@ -1118,11 +1120,11 @@ it('a 2 px move keeps the press armed; the third px engages once', () => {
   pressAt(amount, 100)
   moveTo(amount, 98)
   expect(lock.requests).toEqual([])
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(false)
+  expect(scrubbingOn(amount)).toBe(false)
 
   moveTo(amount, 97)
   expect(lock.requests).toEqual([box(amount)])
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(true)
+  expect(scrubbingOn(amount)).toBe(true)
   expect(document.activeElement).toBe(amount)
   expect(fullySelected(amount)).toBe(true)
 
@@ -1138,9 +1140,7 @@ it('a −16 px window move at DPR 1 is four steps: dvla 4 → 8 in one frame', (
   const amount = field('Volume Leveler Amount')
   engage(amount)
   scrubBy(-16)
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { dvla: [8] },
-  ])
+  expect(sentParams(socket)).toEqual([{ dvla: [8] }])
   expect(amount.value).toBe('8')
 })
 
@@ -1155,9 +1155,7 @@ it('at devicePixelRatio 2 a locked −16 px move is two steps', () => {
     const amount = field('Volume Leveler Amount')
     engage(amount)
     scrubBy(-16)
-    expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-      { dvla: [6] },
-    ])
+    expect(sentParams(socket)).toEqual([{ dvla: [6] }])
   } finally {
     vi.stubGlobal('devicePixelRatio', 1)
   }
@@ -1176,7 +1174,7 @@ it('a read-only box publishes no --scrub and never arms', () => {
   engage(count)
   scrubBy(-16)
   expect(lock.requests).toEqual([])
-  expect(box(count).classList.contains('adv-input--scrubbing')).toBe(false)
+  expect(scrubbingOn(count)).toBe(false)
   expect(sentEdits(socket)).toEqual([])
   expect(count.value).toBe('20')
 })
@@ -1197,25 +1195,41 @@ it('scrubs on plain movement when requestPointerLock throws or rejects', async (
     engage(amount)
     scrubBy(-4)
     release()
-    expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-      { dvla: [5] },
-    ])
+    expect(sentParams(socket)).toEqual([{ dvla: [5] }])
 
     request.mockImplementation(() => Promise.reject(new Error('refused')))
     engage(amount)
     scrubBy(-4)
     release()
     await Promise.resolve() // the rejection settles, handled
-    expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-      { dvla: [5] },
-      { dvla: [6] },
-    ])
+    expect(sentParams(socket)).toEqual([{ dvla: [5] }, { dvla: [6] }])
   } finally {
     request.mockRestore()
   }
 })
 
-// Behavior 11 (#88): the selected readout never starts a text drag —
+// (#88) Unlocked deltas are css px already: with the lock refused at
+// DPR 2, −16 px is still four steps — the fallback never under-scales
+// on hiDPI.
+it('with the lock refused at devicePixelRatio 2, −16 px is still four steps', () => {
+  const request = vi
+    .spyOn(HTMLElement.prototype, 'requestPointerLock')
+    .mockImplementation(() => Promise.reject(new Error('refused')))
+  vi.stubGlobal('devicePixelRatio', 2)
+  try {
+    renderOpen()
+    const socket = connect()
+    const amount = field('Volume Leveler Amount')
+    engage(amount)
+    scrubBy(-16)
+    expect(sentParams(socket)).toEqual([{ dvla: [8] }])
+  } finally {
+    vi.stubGlobal('devicePixelRatio', 1)
+    request.mockRestore()
+  }
+})
+
+// Behavior 11 (#88): the selected text never starts a text drag —
 // `dragstart` on the field is default-prevented while scrubbing too.
 it('default-prevents dragstart on the selected field mid-scrub', () => {
   renderOpen()
@@ -1237,18 +1251,16 @@ it('a window blur mid-scrub ends the gesture', () => {
   scrubBy(-4)
   fireEvent.blur(window)
   expect(lock.held).toBeNull()
-  expect(box(amount).classList.contains('adv-input--scrubbing')).toBe(false)
+  expect(scrubbingOn(amount)).toBe(false)
   scrubBy(-4)
-  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
-    { dvla: [5] },
-  ])
+  expect(sentParams(socket)).toEqual([{ dvla: [5] }])
 })
 
 // (#88) The compat `click` the browser fires after the release would
-// place a caret in the readout — after a scrub it re-selects instead;
+// place a caret in the field — after a scrub it re-selects instead;
 // a click without a scrub behind it is left alone (caret placement for
 // typing).
-it('the compat click after a scrub re-selects the readout; a plain click does not', () => {
+it('the compat click after a scrub re-selects the text; a plain click does not', () => {
   renderOpen()
   const amount = field('Volume Leveler Amount')
   engage(amount)

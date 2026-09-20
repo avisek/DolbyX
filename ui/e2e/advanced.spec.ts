@@ -266,13 +266,13 @@ test('typing out of range into vol sends the clamped raw, which a reload resolve
 // The real lock: a press-drag on `dhsb` locks the pointer on the box
 // (`document.pointerLockElement` is the `adv-input` wrapper) with the
 // field focused; the release exits the lock leaving the field focused
-// with its readout selected under the scrub cursor, and the peer page's
+// with its text selected under the scrub cursor, and the peer page's
 // next snapshot carries the changed value. The step count stays
 // unasserted: under a lock, CDP-synthesized mouse input carries
 // cursor-warp artifacts in `movementY` (the engagement alone fires one),
 // so only a real mouse can drive exact locked deltas — jsdom covers the
 // arithmetic.
-test('press-drag on dhsb locks the pointer on the box, scrubs, and restores the readout', async ({
+test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focus + selection', async ({
   page,
   context,
 }) => {
@@ -308,10 +308,10 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores the 
   await expect(wrapper).not.toHaveClass(/adv-input--scrubbing/)
   await expect(boost).toBeFocused()
   await expect(boost).toHaveCSS('cursor', 'ns-resize')
-  const readout = await boost.evaluate((el: HTMLInputElement) => ({
+  const after = await boost.evaluate((el: HTMLInputElement) => ({
     value: el.value,
     selection: [el.selectionStart, el.selectionEnd],
   }))
-  expect(readout.selection).toEqual([0, readout.value.length])
-  await expect(peer.getByRole('textbox', { name })).toHaveValue(readout.value)
+  expect(after.selection).toEqual([0, after.value.length])
+  await expect(peer.getByRole('textbox', { name })).toHaveValue(after.value)
 })
