@@ -3,7 +3,9 @@
    the same width, unit or not — 5ch of digits + the unit slot + padding
    — so columns line up. The two lengths are registered so `ch` / `em`
    resolve on the wrapper once and inherit as absolute lengths (the unit
-   uses a smaller font). Control-height, hover under focus weight. */
+   uses a smaller font). Control-height, hover under focus weight. The
+   Scrub (#88): `--scrub` (capability) gets the ns-resize cursor,
+   `--scrubbing` (state) the accent line. */
 
 @property --adv-unit-w {
   syntax: '<length>';
@@ -26,6 +28,14 @@
   flex: none;
   width: calc(5ch + var(--adv-unit-w) + 2 * var(--adv-pad-x));
   font-size: 0.8rem;
+  /* A press-drag is the Scrub's, never the browser's pan. */
+  touch-action: none;
+}
+
+/* On the field too: a text input's `auto` cursor is the I-beam. */
+.adv-input--scrub,
+.adv-input--scrub .adv-input__field {
+  cursor: ns-resize;
 }
 
 .adv-input__field {
@@ -51,7 +61,8 @@
   border-color: var(--hover-line);
 }
 
-.adv-input__field:focus {
+.adv-input__field:focus,
+.adv-input--scrubbing .adv-input__field {
   border-color: var(--color-accent);
   outline: none;
 }

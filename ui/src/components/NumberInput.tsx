@@ -1,8 +1,30 @@
-import { Show, createEffect, on, type Component } from 'solid-js'
-import { clampTo, stepped, type StepAxis, type StepScale } from '../lib/step'
+import {
+  Show,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  type Component,
+} from 'solid-js'
+import {
+  clampTo,
+  stepped,
+  type Modifiers,
+  type StepAxis,
+  type StepScale,
+} from '../lib/step'
 
 /** A complete number — rejects the partials typing passes through. */
 const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
+
+/** Vertical travel that turns a press into a Scrub (#88). */
+const ENGAGE_PX = 3
+/** Css px of travel per step while scrubbing. */
+const PX_PER_STEP = 4
+
+/** The modifier set a scrub steps under — a flip rebases the gesture. */
+const modeOf = (mods: Modifiers): 'alt' | 'shift' | 'base' =>
+  mods.altKey ? 'alt' : mods.shiftKey ? 'shift' : 'base'
 
 /**
  * The one numeric box (#87), a shared control: the engine follows *as
@@ -14,6 +36,13 @@ const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
  * text selected so the next keystroke replaces it. Uncontrolled while
  * focused, mirroring the store otherwise (read-only always). Display
  * units in and out — the caller converts.
+ *
+ * `scrub` (#88) adds the Scrub: a press on the box arms; past
+ * `ENGAGE_PX` of vertical travel the pointer locks and every
+ * `PX_PER_STEP` css px is one Step-rule step under the modifiers held
+ * at that moment (up = +), written live; release exits the lock and
+ * commits. The box stays focused with its text selected throughout —
+ * it is the gesture's readout. A plain click falls through to typing.
  */
 const NumberInput: Component<{
   id: string
@@ -30,6 +59,8 @@ const NumberInput: Component<{
   /** The kind's unit label — empty renders no overlay. */
   unit: string
   readOnly?: boolean | undefined
+  /** Opts a writable box into the Scrub; publishes `adv-input--scrub`. */
+  scrub?: boolean | undefined
   /** Roving-tabindex members (band editors) pass -1. */
   tabIndex?: number | undefined
   /** The field element, for composites that focus it programmatically. */
@@ -38,7 +69,9 @@ const NumberInput: Component<{
   onCommit?: ((value: number) => void) | undefined
 }> = (props) => {
   let input!: HTMLInputElement
+  let wrapper!: HTMLSpanElement
   const editable = () => props.readOnly !== true
+  const scrub = () => props.scrub === true && editable()
   const axis = (): StepAxis => ({
     min: props.min,
     max: props.max,
@@ -68,8 +101,147 @@ const NumberInput: Component<{
     ),
   )
 
+  // — The Scrub (#88): a state machine over one press —
+  // armed (pressed, not yet moved ENGAGE_PX) → scrubbing (locked,
+  // tracked on the window) → released. Chromium fires `pointercancel`
+  // and drops pointer capture the instant the lock engages, so the
+  // wrapper's own listeners can't carry the gesture: from engage on,
+  // capture-phase window listeners track it, locked or not.
+  const [scrubbing, setScrubbing] = createSignal(false)
+  let armed = false
+  /** A scrub just ended — its compat `click` re-selects, not carets. */
+  let scrubbed = false
+  let startY = 0
+  /** The value `accum` steps from. */
+  let base = 0
+  /** Css px of upward travel since the last rebase. */
+  let accum = 0
+  let mode: ReturnType<typeof modeOf> = 'base'
+  /** The last value the gesture wrote. */
+  let last: number | undefined
+
+  /** After a live write: the store's (synchronously applied) truth,
+   * selected — the readout. */
+  const showSynced = (): void => {
+    sync()
+    input.select()
+  }
+
+  /** One tracked movement sample → possibly one live step. Locked
+   * `movementY` is device px; unlocked (the lock refused) css px. */
+  const track = (event: PointerEvent): void => {
+    if (modeOf(event) !== mode) {
+      // A modifier flip rebases: the new step size counts from the
+      // last value written, so the value never jumps.
+      mode = modeOf(event)
+      base = last ?? base
+      accum = 0
+    }
+    const locked = document.pointerLockElement === wrapper
+    // Up = increase.
+    accum -= locked ? event.movementY / devicePixelRatio : event.movementY
+    const steps = Math.trunc(accum / PX_PER_STEP)
+    const value = stepped(axis(), base, steps, event)
+    if (
+      (steps > 0 && value === props.max) ||
+      (steps < 0 && value === props.min)
+    ) {
+      // Pinned at a bound: rebase to it, so reversing bites within one
+      // step instead of unwinding dead travel.
+      base = value
+      accum = 0
+    }
+    if (value !== last) {
+      last = value
+      props.onLive?.(value)
+      showSynced()
+    }
+    event.preventDefault()
+  }
+
+  /** Stops following the pointer; releases the lock if held. */
+  const detach = (): void => {
+    window.removeEventListener('pointermove', track, true)
+    window.removeEventListener('pointerup', endScrub, true)
+    window.removeEventListener('blur', endScrub)
+    setScrubbing(false)
+    if (document.pointerLockElement === wrapper) document.exitPointerLock()
+  }
+  // Unmounted mid-gesture: abandon it — the live writes already landed.
+  onCleanup(detach)
+
+  const endScrub = (): void => {
+    detach()
+    if (last !== undefined) props.onCommit?.(last)
+    // The lock's exit and the compat mouseup both disturb focus and
+    // selection — re-assert the readout.
+    input.focus()
+    input.select()
+  }
+
+  /** A not-yet-engaged press released or cancelled: a plain click. */
+  const disarm = (event: PointerEvent & { currentTarget: HTMLElement }) => {
+    if (!armed) return
+    armed = false
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  /** Past the threshold: lock the pointer, follow it on the window. */
+  const engage = (event: PointerEvent): void => {
+    armed = false
+    scrubbed = true
+    mode = modeOf(event)
+    setScrubbing(true)
+    input.focus()
+    input.select()
+    window.addEventListener('pointermove', track, true)
+    window.addEventListener('pointerup', endScrub, true)
+    // Losing the window mid-gesture would strand the lock: end it.
+    window.addEventListener('blur', endScrub)
+    // Best-effort: Chromium refuses the lock e.g. while the window
+    // lacks focus — synchronously or through the returned promise —
+    // and the gesture scrubs on unlocked deltas instead.
+    try {
+      const lock = wrapper.requestPointerLock() as unknown
+      if (lock instanceof Promise) lock.catch(() => undefined)
+    } catch {
+      // Refused — unlocked scrub.
+    }
+  }
+
   return (
-    <span class="adv-input">
+    <span
+      ref={wrapper}
+      class="adv-input"
+      classList={{
+        'adv-input--scrub': scrub(),
+        'adv-input--scrubbing': scrubbing(),
+      }}
+      // Arm only — no preventDefault, so a click still focuses the
+      // field for typing.
+      onPointerDown={(event) => {
+        if (!scrub() || event.button !== 0 || scrubbing()) return
+        armed = true
+        startY = event.clientY
+        base = props.value()
+        accum = 0
+        last = undefined
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (!armed || Math.abs(event.clientY - startY) < ENGAGE_PX) return
+        engage(event)
+      }}
+      onPointerUp={disarm}
+      onPointerCancel={disarm}
+      onClick={() => {
+        if (!scrubbed) return
+        scrubbed = false
+        input.select()
+      }}
+    >
       <input
         ref={(element) => {
           input = element
