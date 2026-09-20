@@ -132,7 +132,9 @@ async fn zero_session_readouts_carry_the_parameter_defaults() {
     assert_eq!(readouts["vnnb"], json!([20]));
 
     // And every value is the table's default, verbatim.
-    let table = ddp_state::parse(include_str!("../parameters.toml")).expect("table parses");
+    let table = ddp_state::parse(include_str!("../parameters.toml"))
+        .expect("table parses")
+        .params;
     for (name, value) in readouts {
         let def = ddp_state::lookup(&table, name).expect("declared param");
         assert_eq!(value, &json!(def.default), "`{name}` readout");

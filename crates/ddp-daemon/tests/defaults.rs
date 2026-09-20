@@ -16,7 +16,9 @@ const DDP_GRID: [i16; 20] = [
 ];
 
 fn defs() -> Vec<ParameterDef> {
-    ddp_state::parse(PARAMETERS).expect("parameters.toml must parse")
+    ddp_state::parse(PARAMETERS)
+        .expect("parameters.toml must parse")
+        .params
 }
 
 fn defaults() -> ddp_state::Defaults {

@@ -19,8 +19,8 @@ pub mod state;
 
 pub use conversion::{display_to_raw, raw_to_display};
 pub use param_def::{
-    ParamAccess, ParamCategory, ParamKind, ParameterDef, ParseError, base_eq_params, base_params,
-    lookup, parse,
+    CategoryDef, ParamAccess, ParamCategory, ParamKind, ParameterDef, ParameterTable, ParseError,
+    base_eq_params, base_params, lookup, parse,
 };
 pub use preset::{EqPreset, PresetContent, PresetId};
 pub use profile::{Profile, ProfileContent, ProfileId};

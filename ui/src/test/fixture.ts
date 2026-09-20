@@ -1,5 +1,5 @@
 import type { Bootstrap } from '../lib/bootstrap'
-import type { ParameterDef } from '../lib/parameters'
+import type { CategoryDef, ParameterDef } from '../lib/parameters'
 import type { EqPreset, Profile, StateSnapshot, VisParams } from '../lib/ws'
 
 /** One table row over compact defaults — values stay daemon-truthful. */
@@ -134,6 +134,42 @@ export function fixtureParams(): readonly ParameterDef[] {
       kind: { decibel: { lkfs: false } },
       category: 'geq',
     }),
+  ]
+}
+
+/**
+ * The shipped `[[category]]` rows restricted to the fixture's params —
+ * section order and card order as `parameters.toml` lists them, every
+ * fixture param exactly once (issue #83).
+ */
+export function fixtureCategories(): readonly CategoryDef[] {
+  return [
+    {
+      name: 'volume_leveller',
+      label: 'Volume Leveler',
+      params: ['dvla', 'dvle'],
+    },
+    {
+      name: 'ieq',
+      label: 'Intelligent Equalizer',
+      params: ['ienb', 'iebf', 'iebt', 'ieon', 'iea'],
+    },
+    {
+      name: 'geq',
+      label: 'Graphic Equalizer',
+      params: ['geon', 'genb', 'gebf', 'gebg'],
+    },
+    {
+      name: 'dialog_enhancer',
+      label: 'Dialog Enhancer',
+      params: ['deon', 'dea'],
+    },
+    {
+      name: 'headphone_virtualizer',
+      label: 'Headphone Virtualizer',
+      params: ['vdhe', 'dhsb'],
+    },
+    { name: 'visualizer', label: 'Visualizer', params: ['vnnb'] },
   ]
 }
 
@@ -296,7 +332,11 @@ export function fixtureVis(
 export function fixtureBootstrap(
   overrides: Partial<StateSnapshot> = {},
 ): Bootstrap {
-  return { params: fixtureParams(), state: fixtureState(overrides) }
+  return {
+    params: fixtureParams(),
+    categories: fixtureCategories(),
+    state: fixtureState(overrides),
+  }
 }
 
 /** The fixture state with the active profile's params edited. */

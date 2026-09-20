@@ -7,14 +7,16 @@
 //! The table is curated and validation-clean — every `default` slot in
 //! `[min, max]`; CI checks its structure against the committed
 //! `parameters.engine.toml` twin: names 1:1, lengths equal, ranges
-//! within the engine envelope.
+//! within the engine envelope. Display composition is the `[[category]]`
+//! table beside it — section order, labels, card order — and every
+//! param's `category` derives from it (ADR-0004 addendum).
 
 use serde::{Deserialize, Serialize};
 
 /// Metadata for one AK parameter (one root leaf of the engine's AK tree).
-/// (`Serialize` feeds the UI bootstrap; the wire shape mirrors the TOML.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// (`Serialize` feeds the UI bootstrap; the wire shape mirrors the TOML
+/// row plus the derived `category`.)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ParameterDef {
     /// 4-CC name: `"dvla"`, `"iebt"`, … (1–4 lowercase ASCII alphanumerics).
     pub name: String,
@@ -32,17 +34,77 @@ pub struct ParameterDef {
     pub default: Vec<i16>,
     /// Drives UI widget choice + unit label.
     pub kind: ParamKind,
-    /// UI grouping.
+    /// The Parameter category owning this param — derived at parse from
+    /// `[[category]]` membership, never declared on the row.
     pub category: ParamCategory,
     /// Settability bucket.
     pub access: ParamAccess,
-    /// Human-readable display name.
+    /// Short, category-relative display name (`"Enable"`, `"Amount"`).
     pub label: String,
     /// Engine one-liner.
     pub description: String,
     /// Engine long help — may be empty (absent in TOML ⇒ empty).
-    #[serde(default)]
     pub help: String,
+}
+
+/// One `[[param]]` row as written — [`ParameterDef`] minus the derived
+/// `category`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParamRow {
+    name: String,
+    length: usize,
+    min: i16,
+    max: i16,
+    frac_bits: u8,
+    default: Vec<i16>,
+    kind: ParamKind,
+    access: ParamAccess,
+    label: String,
+    description: String,
+    #[serde(default)]
+    help: String,
+}
+
+impl ParamRow {
+    fn into_def(self, category: ParamCategory) -> ParameterDef {
+        ParameterDef {
+            name: self.name,
+            length: self.length,
+            min: self.min,
+            max: self.max,
+            frac_bits: self.frac_bits,
+            default: self.default,
+            kind: self.kind,
+            category,
+            access: self.access,
+            label: self.label,
+            description: self.description,
+            help: self.help,
+        }
+    }
+}
+
+/// One `[[category]]` row — a Parameter category: table order is
+/// section order, `params` order is card order (ADR-0004 addendum).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryDef {
+    /// Closed id (`volume_leveller`, `build`, …).
+    pub name: ParamCategory,
+    /// Section title, as displayed.
+    pub label: String,
+    /// The 4-CCs it owns, in card order.
+    pub params: Vec<String>,
+}
+
+/// A parsed `parameters.toml`: both tables, each in file order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterTable {
+    /// `[[param]]` rows — pinned to the param twin's order.
+    pub params: Vec<ParameterDef>,
+    /// `[[category]]` rows — display composition.
+    pub categories: Vec<CategoryDef>,
 }
 
 /// What a parameter *is* for the UI — widget choice + unit label.
@@ -169,8 +231,20 @@ pub enum ParamCategory {
     Visualizer,
     /// Endpoint, host volume, and output config slots.
     EndpointVolume,
-    /// Engine identity + license slots (`bver bndl ver lcmf lcvd lcpt`).
-    BuildLicense,
+    /// Engine identity slots (`bver ver bndl`).
+    Build,
+    /// License slots (`lcmf lcvd lcpt`).
+    License,
+}
+
+impl std::fmt::Display for ParamCategory {
+    /// The closed id as the toml spells it (`volume_leveller`).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match toml::Value::try_from(*self) {
+            Ok(toml::Value::String(id)) => f.write_str(&id),
+            _ => unreachable!("unit variants serialize as strings"),
+        }
+    }
 }
 
 impl ParamCategory {
@@ -241,14 +315,43 @@ pub enum ParseError {
         /// The declared `on` value.
         on: i16,
     },
+    /// A `[[param]]` no `[[category]]` lists.
+    #[error("parameter `{0}` is listed in no category")]
+    UncategorizedParam(String),
+    /// A 4-CC two `[[category]]` rows list.
+    #[error("parameter `{name}` is listed in two categories: `{first}` and `{second}`")]
+    ParamInTwoCategories {
+        /// The offending parameter.
+        name: String,
+        /// The first category listing it.
+        first: ParamCategory,
+        /// The second.
+        second: ParamCategory,
+    },
+    /// A `[[category]]` lists a 4-CC no `[[param]]` declares.
+    #[error("category `{category}` lists unknown parameter `{name}`")]
+    UnknownCategoryParam {
+        /// The offending category.
+        category: ParamCategory,
+        /// The undeclared 4-CC.
+        name: String,
+    },
+    /// Two `[[category]]` rows share a `name`.
+    #[error("duplicate category `{0}`")]
+    DuplicateCategory(ParamCategory),
+    /// A `[[category]]` with an empty `params` list.
+    #[error("category `{0}` lists no parameters")]
+    EmptyCategory(ParamCategory),
 }
 
-/// The document root: a `[[param]]` array of tables.
+/// The document root: `[[category]]` + `[[param]]` arrays of tables.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
     #[serde(default)]
-    param: Vec<ParameterDef>,
+    category: Vec<CategoryDef>,
+    #[serde(default)]
+    param: Vec<ParamRow>,
 }
 
 /// Parses and validates a `parameters.toml` document.
@@ -257,16 +360,51 @@ struct Document {
 ///
 /// Returns a [`ParseError`] describing the first malformed entry —
 /// TOML/schema errors carry the offending span.
-pub fn parse(document: &str) -> Result<Vec<ParameterDef>, ParseError> {
+pub fn parse(document: &str) -> Result<ParameterTable, ParseError> {
     let document: Document = toml::from_str(document)?;
-    let defs = document.param;
-    for (i, def) in defs.iter().enumerate() {
-        if defs[..i].iter().any(|prior| prior.name == def.name) {
-            return Err(ParseError::DuplicateName(def.name.clone()));
+    let categories = document.category;
+    let mut owner: std::collections::HashMap<&str, ParamCategory> =
+        std::collections::HashMap::new();
+    for (i, row) in categories.iter().enumerate() {
+        if categories[..i].iter().any(|prior| prior.name == row.name) {
+            return Err(ParseError::DuplicateCategory(row.name));
         }
-        validate(def)?;
+        if row.params.is_empty() {
+            return Err(ParseError::EmptyCategory(row.name));
+        }
+        for name in &row.params {
+            if let Some(first) = owner.insert(name, row.name) {
+                return Err(ParseError::ParamInTwoCategories {
+                    name: name.clone(),
+                    first,
+                    second: row.name,
+                });
+            }
+        }
     }
-    Ok(defs)
+    let mut params: Vec<ParameterDef> = Vec::with_capacity(document.param.len());
+    for row in document.param {
+        if params.iter().any(|prior| prior.name == row.name) {
+            return Err(ParseError::DuplicateName(row.name));
+        }
+        let Some(&category) = owner.get(row.name.as_str()) else {
+            return Err(ParseError::UncategorizedParam(row.name));
+        };
+        let def = row.into_def(category);
+        validate(&def)?;
+        params.push(def);
+    }
+    if let Some((category, name)) = categories
+        .iter()
+        .flat_map(|row| row.params.iter().map(move |name| (row.name, name)))
+        .find(|(_, name)| lookup(&params, name).is_none())
+    {
+        return Err(ParseError::UnknownCategoryParam {
+            category,
+            name: name.clone(),
+        });
+    }
+    Ok(ParameterTable { params, categories })
 }
 
 /// Checks one entry's internal consistency.
@@ -335,7 +473,25 @@ pub fn lookup<'a>(defs: &'a [ParameterDef], name: &str) -> Option<&'a ParameterD
 mod tests {
     use super::*;
 
-    fn minimal(name: &str) -> String {
+    /// One `[[category]]` row.
+    fn category(name: &str, label: &str, params: &[&str]) -> String {
+        let params = params
+            .iter()
+            .map(|p| format!("{p:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            r#"
+            [[category]]
+            name = "{name}"
+            label = "{label}"
+            params = [{params}]
+            "#
+        )
+    }
+
+    /// One `[[param]]` row — some `[[category]]` must claim it.
+    fn param(name: &str) -> String {
         format!(
             r#"
             [[param]]
@@ -346,17 +502,68 @@ mod tests {
             frac_bits = 0
             default = [7]
             kind = "integer"
-            category = "volume_leveller"
             access = "settable"
-            label = "Dolby Volume Leveling Amount"
+            label = "Amount"
             description = "Sets how much the leveler adjusts the loudness."
             "#
         )
     }
 
+    /// A document with every `name` under one Volume Leveler category.
+    fn document(names: &[&str]) -> String {
+        names.iter().fold(
+            category("volume_leveller", "Volume Leveler", names),
+            |doc, name| doc + &param(name),
+        )
+    }
+
+    fn minimal(name: &str) -> String {
+        document(&[name])
+    }
+
+    /// Tracer bullet (issue #83): the `[[category]]` table parses in
+    /// table order, each row keeping its label and card order, and every
+    /// param's `category` is derived from the row listing it.
+    #[test]
+    fn parses_categories_in_table_order_and_derives_each_params_category() {
+        let doc = category("build", "Build", &["bver", "bndl"])
+            + &category("license", "License", &["lcmf"])
+            + &param("lcmf")
+            + &param("bndl")
+            + &param("bver");
+        let table = parse(&doc).unwrap();
+        let names: Vec<_> = table.categories.iter().map(|c| c.name).collect();
+        assert_eq!(names, [ParamCategory::Build, ParamCategory::License]);
+        assert_eq!(table.categories[0].label, "Build");
+        assert_eq!(table.categories[1].label, "License");
+        // Card order is the row's, not the `[[param]]` table's.
+        assert_eq!(table.categories[0].params, ["bver", "bndl"]);
+        assert_eq!(table.categories[1].params, ["lcmf"]);
+        let param_names: Vec<_> = table.params.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            param_names,
+            ["lcmf", "bndl", "bver"],
+            "[[param]] order is kept"
+        );
+        let category_of = |name| lookup(&table.params, name).unwrap().category;
+        assert_eq!(category_of("bver"), ParamCategory::Build);
+        assert_eq!(category_of("bndl"), ParamCategory::Build);
+        assert_eq!(category_of("lcmf"), ParamCategory::License);
+    }
+
     #[test]
     fn parses_payload_kinds_and_help() {
         let doc = r#"
+            [[category]]
+            name = "headphone_virtualizer"
+            label = "Headphone Virtualizer"
+            params = ["vdhe"]
+
+            [[category]]
+            name = "volume_leveller"
+            label = "Volume Leveler"
+            params = ["dvli"]
+
             [[param]]
             name = "vdhe"
             length = 1
@@ -365,9 +572,8 @@ mod tests {
             frac_bits = 0
             default = [0]
             kind = { tristate = { on = 2 } }
-            category = "headphone_virtualizer"
             access = "settable"
-            label = "Dolby Headphone Virtualizer Control"
+            label = "Enable"
             description = "Enables the headphone virtualizer."
             help = "0 = off, 1 = on, 2 = auto."
 
@@ -379,16 +585,97 @@ mod tests {
             frac_bits = 4
             default = [-320]
             kind = { decibel = { lkfs = true } }
-            category = "volume_leveller"
             access = "settable"
-            label = "Dolby Volume Leveler Input Target"
+            label = "Input Target"
             description = "The reference input loudness."
             "#;
-        let defs = parse(doc).unwrap();
+        let defs = parse(doc).unwrap().params;
         assert_eq!(defs[0].kind, ParamKind::Tristate { on: 2 });
         assert_eq!(defs[0].help, "0 = off, 1 = on, 2 = auto.");
         assert_eq!(defs[1].kind, ParamKind::Decibel { lkfs: true });
         assert_eq!(defs[1].frac_bits, 4);
+    }
+
+    #[test]
+    fn rejects_a_param_listed_in_no_category() {
+        let doc = category("volume_leveller", "Volume Leveler", &["dvla"])
+            + &param("dvla")
+            + &param("dvle");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(&err, ParseError::UncategorizedParam(name) if name == "dvle"));
+        assert!(err.to_string().contains("dvle"), "unhelpful error: {err}");
+    }
+
+    #[test]
+    fn rejects_a_param_still_carrying_a_category_field() {
+        // The per-param field is gone (ADR-0004 addendum) — a leftover
+        // is a schema error like any unknown field.
+        let doc = minimal("dvla") + "category = \"volume_leveller\"\n";
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(err, ParseError::Toml(_)));
+        assert!(
+            err.to_string().contains("category"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_param_listed_in_two_categories() {
+        let doc = category("volume_leveller", "Volume Leveler", &["dvla", "dvle"])
+            + &category("dialog_enhancer", "Dialog Enhancer", &["dvle"])
+            + &param("dvla")
+            + &param("dvle");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(&err, ParseError::ParamInTwoCategories { name, .. } if name == "dvle"));
+        let message = err.to_string();
+        assert!(
+            message.contains("dvle")
+                && message.contains("volume_leveller")
+                && message.contains("dialog_enhancer"),
+            "unhelpful error: {message}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_category_naming_an_unknown_4cc() {
+        let doc = category("volume_leveller", "Volume Leveler", &["dvla", "mxou"]) + &param("dvla");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(&err, ParseError::UnknownCategoryParam { name, .. } if name == "mxou"));
+        let message = err.to_string();
+        assert!(
+            message.contains("mxou") && message.contains("volume_leveller"),
+            "unhelpful error: {message}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_duplicate_category_name() {
+        let doc = category("volume_leveller", "Volume Leveler", &["dvla"])
+            + &category("volume_leveller", "Leveler again", &["dvle"])
+            + &param("dvla")
+            + &param("dvle");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(
+            err,
+            ParseError::DuplicateCategory(ParamCategory::VolumeLeveller)
+        ));
+        assert!(
+            err.to_string().contains("volume_leveller"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_empty_category() {
+        let doc = category("volume_leveller", "Volume Leveler", &["dvla"])
+            + &category("build", "Build", &[])
+            + &param("dvla");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(
+            err,
+            ParseError::EmptyCategory(ParamCategory::Build)
+        ));
+        assert!(err.to_string().contains("build"), "unhelpful error: {err}");
     }
 
     #[test]
@@ -414,7 +701,7 @@ mod tests {
 
     #[test]
     fn rejects_a_duplicate_name() {
-        let doc = minimal("dvla") + &minimal("dvla");
+        let doc = minimal("dvla") + &param("dvla");
         let err = parse(&doc).unwrap_err();
         assert!(matches!(&err, ParseError::DuplicateName(name) if name == "dvla"));
         assert!(err.to_string().contains("dvla"));
@@ -487,8 +774,7 @@ mod tests {
 
     #[test]
     fn looks_up_by_name() {
-        let doc = minimal("dvla") + &minimal("iea");
-        let defs = parse(&doc).unwrap();
+        let defs = parse(&document(&["dvla", "iea"])).unwrap().params;
         assert_eq!(lookup(&defs, "iea").unwrap().name, "iea");
         assert!(lookup(&defs, "mxou").is_none());
     }
@@ -519,7 +805,7 @@ mod tests {
 
     #[test]
     fn parses_a_minimal_param() {
-        let defs = parse(&minimal("dvla")).unwrap();
+        let defs = parse(&minimal("dvla")).unwrap().params;
         assert_eq!(defs.len(), 1);
         let def = &defs[0];
         assert_eq!(def.name, "dvla");
@@ -531,7 +817,7 @@ mod tests {
         assert_eq!(def.kind, ParamKind::Integer);
         assert_eq!(def.category, ParamCategory::VolumeLeveller);
         assert_eq!(def.access, ParamAccess::Settable);
-        assert_eq!(def.label, "Dolby Volume Leveling Amount");
+        assert_eq!(def.label, "Amount");
         assert!(def.help.is_empty());
     }
 }
