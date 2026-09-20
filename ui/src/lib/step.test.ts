@@ -1,5 +1,12 @@
 import { expect, it } from 'vitest'
-import { clampTo, quantize, stepped, type StepAxis } from './step'
+import {
+  clampTo,
+  fromNorm,
+  quantize,
+  stepped,
+  toNorm,
+  type StepAxis,
+} from './step'
 
 const none = { altKey: false, shiftKey: false }
 const alt = { altKey: true, shiftKey: false }
@@ -52,4 +59,29 @@ it('quantizes to the lattice and clamps, trimming float noise', () => {
   expect(quantize(db, 99)).toBe(30)
   expect(clampTo(db, -200)).toBe(-130)
   expect(clampTo(db, 0.1 + 0.2)).toBe(0.3)
+})
+
+// The Slider's position map (#89): `--norm` is linear over [min, max],
+// log over a strictly positive log axis (200 Hz over 20–20000 sits at
+// 1/3; 632 Hz at 1/2, since 20 · 1000^0.5 = 632.46), unclamped so an
+// out-of-range value reads outside 0–1; the inverse lands on the
+// lattice, clamped. A log axis touching zero maps linearly.
+it('maps value ↔ norm linearly, log on a positive Hz axis, lattice-snapped back', () => {
+  const hz: StepAxis = { min: 20, max: 20000, fine: 1, scale: 'log' }
+  expect(toNorm(hz, 200)).toBeCloseTo(1 / 3, 10)
+  expect(toNorm(hz, 20)).toBe(0)
+  expect(toNorm(hz, 20000)).toBe(1)
+  expect(fromNorm(hz, 0.5)).toBe(632)
+  expect(fromNorm(hz, 1 / 3)).toBe(200)
+  expect(fromNorm(hz, 1.5)).toBe(20000)
+
+  const db: StepAxis = { min: 0, max: 6, fine: 0.0625 }
+  expect(toNorm(db, 3)).toBe(0.5)
+  expect(toNorm(db, 9)).toBe(1.5)
+  expect(fromNorm(db, 0.165)).toBe(1) // 0.99 → the nearest 1/16
+  expect(fromNorm(db, -1)).toBe(0)
+
+  const signed: StepAxis = { min: 0, max: 100, fine: 1, scale: 'log' }
+  expect(toNorm(signed, 50)).toBe(0.5)
+  expect(fromNorm(signed, 0.25)).toBe(25)
 })

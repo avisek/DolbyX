@@ -15,6 +15,7 @@ import {
   paramValues,
 } from '../store/wiring'
 import NumberInput from './NumberInput'
+import Slider from './Slider'
 import Toggle from './Toggle'
 import Tristate, { tristateRadioId } from './Tristate'
 
@@ -60,49 +61,62 @@ function isNumericScalar(def: ParameterDef): boolean {
 }
 
 /**
- * A numeric scalar's control: the box first, then the Slider slot (#89
- * fills it) — the two share `value`, `min`, `max`, `fine`, `scale`,
- * `unit`, all in display units. Writable: typing writes live, blur /
- * Enter commits, both through the Source rule as raw clamped to the
- * def's range; the Scrub (#88) rides the same two paths.
- * Read-only: the same box, `readonly`, mirroring the store — Readouts
- * for ReadOnly-Static — so the column reads uniformly.
+ * A numeric scalar's control: the box, then the Slider (#89) — the two
+ * share `value`, `min`, `max`, `fine`, `scale`, `unit`, all in display
+ * units, and the same two write paths. Writable: typing, keys, the
+ * Scrub (#88) and the drag write live; blur / Enter / release commit —
+ * both through the Source rule as raw clamped to the def's range.
+ * Read-only: the same box, `readonly`, and a disabled Slider, both
+ * mirroring the store — Readouts for ReadOnly-Static — so the column
+ * reads uniformly.
  */
 const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
   // Static per card, like the factory's `def`.
   // eslint-disable-next-line solid/reactivity
   const def = props.def
   const writable = isWritable(def)
+  const value = () => displayValue(def, head(def))
+  const shared = {
+    min: displayValue(def, def.min),
+    max: displayValue(def, def.max),
+    fine: fineStep(def),
+    scale: scaleOf(def),
+    unit: unitLabel(def.kind),
+  }
+  const onLive = writable
+    ? (next: number) => {
+        liveParam(def, [rawValue(def, next)])
+      }
+    : undefined
+  const onCommit = writable
+    ? (next: number) => {
+        // Store truth is raw: `0.62` typed over a box showing `0.63` is
+        // the same 1/16-dB step — nothing to commit.
+        const raw = rawValue(def, next)
+        if (raw !== head(def)) commitParam(def, [raw])
+      }
+    : undefined
   return (
-    <NumberInput
-      id={controlId(def)}
-      name={props.name}
-      value={() => displayValue(def, head(def))}
-      min={displayValue(def, def.min)}
-      max={displayValue(def, def.max)}
-      fine={fineStep(def)}
-      scale={scaleOf(def)}
-      unit={unitLabel(def.kind)}
-      readOnly={!writable}
-      scrub={writable}
-      onLive={
-        writable
-          ? (value) => {
-              liveParam(def, [rawValue(def, value)])
-            }
-          : undefined
-      }
-      onCommit={
-        writable
-          ? (value) => {
-              // Store truth is raw: `0.62` typed over a box showing
-              // `0.63` is the same 1/16-dB step — nothing to commit.
-              const raw = rawValue(def, value)
-              if (raw !== head(def)) commitParam(def, [raw])
-            }
-          : undefined
-      }
-    />
+    <>
+      <NumberInput
+        id={controlId(def)}
+        name={props.name}
+        value={value}
+        {...shared}
+        readOnly={!writable}
+        scrub={writable}
+        onLive={onLive}
+        onCommit={onCommit}
+      />
+      <Slider
+        name={props.name}
+        value={value}
+        {...shared}
+        disabled={!writable}
+        onLive={onLive}
+        onCommit={onCommit}
+      />
+    </>
   )
 }
 

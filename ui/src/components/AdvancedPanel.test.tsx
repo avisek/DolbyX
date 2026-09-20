@@ -1274,3 +1274,322 @@ it('the compat click after a scrub re-selects the text; a plain click does not',
   fireEvent.click(box(amount))
   expect(fullySelected(amount)).toBe(false)
 })
+
+// — Slider (#89) —
+
+const slider = (name: string) => screen.getByRole('slider', { name })
+
+/** Presses one key on a focused slider, with modifiers. */
+function pressSlider(
+  node: HTMLElement,
+  key: string,
+  mods: { altKey?: boolean; shiftKey?: boolean } = {},
+): KeyboardEvent {
+  node.focus()
+  const event = new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+    ...mods,
+  })
+  node.dispatchEvent(event)
+  return event
+}
+
+// Tracer bullet (#89): → on `dhsb`'s Slider is one step under the Step
+// rule — +1 dB, raw 48 + 16 — a live 1-entry `edit_profile` on the
+// active profile, the key consumed.
+it('→ on the dhsb slider sends one live edit_profile carrying raw 64', () => {
+  renderOpen()
+  const socket = connect()
+  const right = pressSlider(
+    slider('Headphone Virtualizer Surround Boost'),
+    'ArrowRight',
+  )
+  expect(right.defaultPrevented).toBe(true)
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dhsb: [64] },
+    },
+  ])
+})
+
+/** A slider's published var, as a number. */
+const sliderVar = (node: HTMLElement, name: '--value' | '--norm') =>
+  Number(node.style.getPropertyValue(name))
+
+// Behavior 4 (#89): `--norm` is the track position — a FrequencyHz
+// slider at 200 Hz over 20–20000 sits at 1/3 (log: 200 is one decade
+// of three above 20), a linear axis at its midpoint at 0.5; `--value`
+// is the display value.
+it('publishes --norm log for Hz (200 Hz → 1/3) and linear otherwise (midpoint → 0.5)', () => {
+  renderOpen()
+  applySnapshot(fixtureStateWithParams({ dssf: [200] }))
+  const start = slider('Speaker Virtualizer Start Frequency')
+  expect(sliderVar(start, '--norm')).toBeCloseTo(1 / 3, 10)
+  expect(sliderVar(start, '--value')).toBe(200)
+
+  const boost = slider('Headphone Virtualizer Surround Boost') // 0–6 dB, Music 3
+  expect(sliderVar(boost, '--norm')).toBe(0.5)
+  expect(sliderVar(boost, '--value')).toBe(3)
+
+  applySnapshot(fixtureStateWithParams({ dssf: [20], dhsb: [96] }))
+  expect(sliderVar(start, '--norm')).toBe(0)
+  expect(sliderVar(boost, '--norm')).toBe(1)
+})
+
+/** A slider's track, its box mocked to `left 0, width 200` — happy-dom
+ * lays nothing out; the drag math reads this rect. */
+function mockTrack(node: HTMLElement): HTMLElement {
+  const track = node.querySelector<HTMLElement>('.adv-slider__track')
+  if (!track) throw new Error('slider without a track')
+  vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    width: 200,
+  } as DOMRect)
+  return track
+}
+
+/** A press on a slider's track at `clientX`, pointer 1, button 0. */
+const pressTrack = (node: HTMLElement, clientX: number) =>
+  fireEvent.pointerDown(node, { pointerId: 1, button: 0, clientX })
+
+// Behavior 5 (#89): a press maps absolute x over the track — x 100 of
+// 200 on `dhsb` (0–6 dB) is 3 dB, raw 48 on the 1/16-dB lattice — one
+// live frame; the release commits the last value once (observable
+// when a peer moved the truth mid-drag; the live write already
+// applied). The slider takes focus, the box does not.
+it('a press at the track midpoint writes the lattice-snapped raw live; release commits; slider focused', () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dhsb: [0] }))
+  const boost = slider('Headphone Virtualizer Surround Boost')
+  mockTrack(boost)
+  pressTrack(boost, 100)
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dhsb: [48] },
+    },
+  ])
+  expect(document.activeElement).toBe(boost)
+  expect(document.activeElement).not.toBe(
+    field('Headphone Virtualizer Surround Boost'),
+  )
+
+  applySnapshot(fixtureStateWithParams({ dhsb: [80] })) // a peer's edit
+  fireEvent.pointerUp(boost, { pointerId: 1, button: 0 })
+  expect(sentParams(socket)).toEqual([
+    { dhsb: [48] }, // live
+    { dhsb: [48] }, // the release commit, against the changed truth
+  ])
+  // Released: further moves write nothing.
+  fireEvent.pointerMove(boost, { pointerId: 1, clientX: 150 })
+  expect(sentEdits(socket)).toHaveLength(2)
+})
+
+// Behavior 5 (#89): a move while pressed follows x — one live frame
+// per change, none for a move that lands on the same lattice value.
+it('moves while pressed write live on change only', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = slider('Volume Leveler Amount') // dvla, 0–10, Music 4
+  mockTrack(amount)
+  pressTrack(amount, 0)
+  fireEvent.pointerMove(amount, { pointerId: 1, clientX: 60 })
+  fireEvent.pointerMove(amount, { pointerId: 1, clientX: 61 })
+  fireEvent.pointerMove(amount, { pointerId: 1, clientX: 400 }) // past the end
+  expect(sentParams(socket)).toEqual([
+    { dvla: [0] },
+    { dvla: [3] },
+    { dvla: [10] },
+  ])
+})
+
+// Behavior 7 (#89): a log drag — x at 50 % of a 20–20000 track is
+// 20 · 1000^0.5 = 632.46 Hz, rounded to the integer lattice: raw 632.
+it('a press at 50 % of a Hz track writes raw 632', () => {
+  renderOpen()
+  const socket = connect()
+  const start = slider('Speaker Virtualizer Start Frequency') // dssf
+  mockTrack(start)
+  pressTrack(start, 100)
+  expect(sentParams(socket)).toEqual([{ dssf: [632] }])
+})
+
+// Behavior 9 (#89): a read-only scalar's slider is disabled —
+// `adv-slider--disabled`, `aria-disabled`, out of the tab order — keys
+// and pointer write nothing, and `--norm` is still published so the
+// skin can show the value muted. An Opaque scalar (`lcpt`) is the same.
+it('read-only scalars render a disabled slider that never writes but publishes --norm', () => {
+  renderOpen()
+  const socket = connect()
+  const count = slider('Visualizer Native Band Count') // vnnb, 1–20, reads 20
+  expect(count.classList).toContain('adv-slider--disabled')
+  expect(count.getAttribute('aria-disabled')).toBe('true')
+  expect(count.tabIndex).toBe(-1)
+  expect(sliderVar(count, '--norm')).toBe(1)
+  expect(sliderVar(count, '--value')).toBe(20)
+
+  const left = pressSlider(count, 'ArrowLeft')
+  pressSlider(count, 'Home')
+  expect(left.defaultPrevented).toBe(false)
+  mockTrack(count)
+  pressTrack(count, 0)
+  fireEvent.pointerMove(count, { pointerId: 1, clientX: 100 })
+  fireEvent.pointerUp(count, { pointerId: 1, button: 0 })
+  expect(sentEdits(socket)).toEqual([])
+
+  const pointer = slider('License Data Pointer') // lcpt, opaque, 0–255
+  expect(pointer.classList).toContain('adv-slider--disabled')
+  expect(sliderVar(pointer, '--norm')).toBe(0)
+  expect(slider('Volume Leveler Amount').tabIndex).toBe(0)
+  expect(slider('Volume Leveler Amount').classList).not.toContain(
+    'adv-slider--disabled',
+  )
+})
+
+// Behavior 1 (#89): every numeric scalar card is the box followed by
+// the Slider — 30 in the shipped table — and no native range input
+// exists anywhere in the panel: the Slider is the skinnable control.
+it('every numeric scalar renders the box then a role=slider; no input[type=range]', () => {
+  const panel = renderOpen()
+  const sliders = panel.querySelectorAll('[role=slider]')
+  expect(sliders).toHaveLength(30)
+  for (const node of sliders) {
+    expect(node.tagName).toBe('DIV')
+    expect(node.classList).toContain('adv-slider')
+    const box = node.previousElementSibling
+    expect(box?.querySelector('.adv-input__field')).not.toBeNull()
+    expect(node.parentElement?.classList).toContain('adv-card__control')
+    const track = node.querySelector('.adv-slider__track')
+    expect(track?.getAttribute('aria-hidden')).toBe('true')
+    expect(track?.querySelector('.adv-slider__fill')).not.toBeNull()
+    expect(track?.querySelector('.adv-slider__thumb')).not.toBeNull()
+  }
+  expect(panel.querySelectorAll('input[type=range]')).toHaveLength(0)
+  // The box stays the card's `for` target.
+  expect(card(panel, 'dhsb').getAttribute('for')).toBe('adv-dhsb')
+})
+
+// Behavior 2 (#89): `aria-valuemin / max / now` are display units and
+// `aria-valuetext` reads `3 dB` for a Decibel at raw 48; a unit-less
+// kind has no valuetext.
+it('aria-value* are display units; valuetext carries the unit', () => {
+  renderOpen()
+  const boost = slider('Headphone Virtualizer Surround Boost') // dhsb 0–96 raw
+  expect(boost.getAttribute('aria-valuemin')).toBe('0')
+  expect(boost.getAttribute('aria-valuemax')).toBe('6')
+  expect(boost.getAttribute('aria-valuenow')).toBe('3')
+  expect(boost.getAttribute('aria-valuetext')).toBe('3 dB')
+
+  const amount = slider('Volume Leveler Amount') // dvla, 0–10
+  expect(amount.getAttribute('aria-valuemax')).toBe('10')
+  expect(amount.getAttribute('aria-valuenow')).toBe('4')
+  expect(amount.hasAttribute('aria-valuetext')).toBe(false)
+
+  applySnapshot(fixtureStateWithParams({ dhsb: [66] }))
+  expect(boost.getAttribute('aria-valuenow')).toBe('4.13')
+  expect(boost.getAttribute('aria-valuetext')).toBe('4.13 dB')
+})
+
+// Behavior 3 (#89): the keys, each a live write from the store's
+// (optimistically applied) truth on `vol` (−130…30 dB, `frac_bits =
+// 4`, Music 0): ← −1 dB, Shift+← −10, Alt+← −0.125 (2 raw), PageUp the
+// Shift step whatever is held, Home / End the bounds; ↑ / ↓ are → / ←.
+// Every handled key is consumed; an unhandled one is not.
+it('slider keys step live: ← −1, Shift −10, Alt −0.125, PageUp +10, Home/End bounds', () => {
+  renderOpen()
+  const socket = connect()
+  const vol = slider('Endpoint Volume Volume')
+  pressSlider(vol, 'ArrowLeft')
+  pressSlider(vol, 'ArrowLeft', { shiftKey: true })
+  pressSlider(vol, 'ArrowLeft', { altKey: true })
+  pressSlider(vol, 'PageUp', { altKey: true })
+  pressSlider(vol, 'PageDown')
+  pressSlider(vol, 'ArrowUp')
+  pressSlider(vol, 'ArrowDown', { shiftKey: true })
+  const home = pressSlider(vol, 'Home')
+  pressSlider(vol, 'End')
+  const tab = pressSlider(vol, 'Tab')
+  expect(sentParams(socket)).toEqual([
+    { vol: [-16] }, // −1 dB
+    { vol: [-176] }, // −11
+    { vol: [-178] }, // −11.125
+    { vol: [-18] }, // −1.125
+    { vol: [-178] }, // −11.125
+    { vol: [-162] }, // −10.125
+    { vol: [-322] }, // −20.125
+    { vol: [-2080] }, // −130
+    { vol: [480] }, // 30
+  ])
+  expect(sentEdits(socket).every((frame) => frame.cmd === 'edit_profile')).toBe(
+    true,
+  )
+  expect(home.defaultPrevented).toBe(true)
+  expect(tab.defaultPrevented).toBe(false)
+  expect(vol.getAttribute('aria-valuenow')).toBe('30')
+  expect(document.activeElement).toBe(vol)
+})
+
+// Behavior 6 (#89): a press on the slider never reaches the box — the
+// slider cancels its `click`, so the card `<label>` forwards nothing:
+// the slider keeps the focus it took, the box never gets it.
+it('a press + click on the slider keeps focus on the slider, never the box', () => {
+  renderOpen()
+  const socket = connect()
+  const boost = slider('Headphone Virtualizer Surround Boost')
+  const box = field('Headphone Virtualizer Surround Boost')
+  mockTrack(boost)
+  const down = new PointerEvent('pointerdown', {
+    pointerId: 1,
+    button: 0,
+    clientX: 100,
+    bubbles: true,
+    cancelable: true,
+  })
+  expect(boost.dispatchEvent(down)).toBe(false)
+  fireEvent.pointerUp(boost, { pointerId: 1, button: 0 })
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+  expect(boost.dispatchEvent(click)).toBe(false)
+  expect(document.activeElement).toBe(boost)
+  expect(document.activeElement).not.toBe(box)
+  // Music's dhsb is already 3 dB: the press wrote the midpoint live,
+  // the release had nothing left to commit.
+  expect(sentParams(socket)).toEqual([{ dhsb: [48] }])
+})
+
+// Behavior 8 (#89): the Source rule — a preset-carried slider writes
+// `edit_eq_preset` on the selected EQ preset (`iea`, Rich 0.625, Alt+←
+// = −0.125 → raw 8); with `None` selected, `edit_profile`.
+it('a preset-carried slider writes the preset while one is selected, else the profile', () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(selectingState('rich'))
+  const amount = slider('Intelligent Equalizer Amount')
+  expect(amount.getAttribute('aria-valuenow')).toBe('0.63')
+  pressSlider(amount, 'ArrowLeft', { altKey: true })
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      params: { iea: [8] },
+    },
+  ])
+
+  applySnapshot(selectingState(null))
+  expect(amount.getAttribute('aria-valuenow')).toBe('0.63') // Music's own iea=10
+  pressSlider(amount, 'End')
+  expect(sentEdits(socket)[1]).toEqual({
+    cmd: 'edit_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    params: { iea: [16] },
+  })
+})

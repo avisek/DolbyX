@@ -72,6 +72,27 @@ export const quantize = (axis: StepAxis, value: number): number =>
   clampTo(axis, Math.round(value / axis.fine) * axis.fine)
 
 /**
+ * `value` as a 0–1 track position — the Slider's `--norm` (#89):
+ * `(v − min) / (max − min)` linear, `ln(v / min) / ln(max / min)` on a
+ * log axis, so 20 Hz–20 kHz spreads bass and treble evenly. Unclamped:
+ * a value outside the range (a power-on default) reads outside 0–1.
+ */
+export const toNorm = (axis: StepAxis, value: number): number =>
+  isLog(axis)
+    ? Math.log(value / axis.min) / Math.log(axis.max / axis.min)
+    : (value - axis.min) / (axis.max - axis.min || 1)
+
+/** A 0–1 track position as a lattice value — `toNorm`'s inverse
+ * (`min · (max / min)^norm` on a log axis), quantized and clamped. */
+export const fromNorm = (axis: StepAxis, norm: number): number =>
+  quantize(
+    axis,
+    isLog(axis)
+      ? axis.min * (axis.max / axis.min) ** norm
+      : axis.min + norm * (axis.max - axis.min),
+  )
+
+/**
  * `value` moved `steps` steps (signed; the scrub accumulates several)
  * under `mods`, quantized and clamped.
  */
