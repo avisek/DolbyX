@@ -57,9 +57,9 @@ Deliberate choices a reader might otherwise "fix":
   deviated identically). One rule, three consumers: curve vertices,
   thumb Ys, the touch math's reference gain.
 - **The drag surface is the field, not the thumbs.** Pointer-down
-  anywhere edits immediately; x snaps to the nearest visible slider;
+  anywhere edits immediately; x snaps to the nearest visible EQ slider;
   moves sweep across bands — the original's finger-painting feel.
-  Thumbs are visual; keyboard edits are per-slider (`role="slider"`).
+  Thumbs are visual; keyboard edits are per EQ slider (`role="slider"`).
 - **Editor visibility is skin policy.** The component publishes
   `visualizer--eq-drag` while a pointer is captured — no timers, no
   visibility state. Classic reveals on `:hover` / `:focus-within` /
@@ -110,7 +110,7 @@ z-order is entirely skin CSS. DOM order carries no z meaning.
   blue (`ROWS_RED = 12`, `ROWS_YELLOW = 6`).
 - Classic z — the painters' own paint order: `background < fills <
   lattice < pips < tracks < thumbs < curve` (bricks then pip per
-  column; per-slider track then thumb; curve last). The lattice chrome
+  column; per-EQ-slider track then thumb; curve last). The lattice chrome
   reproduces the original's 1-px brick insets per column; the pip
   stays continuous (`--gain-step`: the wire's 1/16-dB quantum —
   rounding to the data's own resolution is an exact identity) and
@@ -140,13 +140,13 @@ z-order is entirely skin CSS. DOM order carries no z meaning.
   round joins (`CornerPathEffect(10)` at these widths), butt caps —
   the glow's round ends swallow them. Flat edge extensions to both
   field edges; vertices at column centers. Thumbs `eq_thumb`; the
-  active slider (`eq-slider--active`) `eq_thumb_touch_state` — the
+  active EQ slider (`eq-slider--active`) `eq_thumb_touch_state` — the
   original's Bright1/2/3 cascade collapses (only distance 0 is
   distinct).
 - Element vocabulary, with provenance: **brick** (`mock_gv_brick*`),
   **rows** (`ROWS_*`), **background** (`eq_background`), **pip**
-  (`brick_blue_light`), **slider** (`mSliderThumb`/`mSliderBg`),
-  **thumb** (`eq_thumb`), **track** (their `eq_bar` — slider chrome),
+  (`brick_blue_light`), **EQ slider** (`mSliderThumb`/`mSliderBg`),
+  **thumb** (`eq_thumb`), **track** (their `eq_bar` — EQ slider chrome),
   **curve** (`mPaintCurve*`); **lattice** is ours — the original
   leaves the gutter lines unnamed, and "grid" is taken by the band
   layouts. _Avoid_ "bar": the original overloads it (brick bitmaps,

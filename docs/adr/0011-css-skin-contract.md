@@ -44,3 +44,46 @@ stays component-side — it changes what the data *is*; timed
 *appearance* (the linger, the descent) is the skin's.
 Consequence: jsdom tests see only the var/class seam;
 rendered-geometry truth needs a real browser (Playwright).
+
+## Addendum (2026-09-20) — lessons from the Advanced panel prototype
+
+Third instance — the Advanced panel, prototyped as one **skeleton**
+under three skins (branch `proto/advanced-panel`). It held: no per-skin
+TSX exists, and every look below is CSS only. What a skin author must
+know:
+
+**Layout is nested subgrid, never `display: contents`.** Sections keep
+their boxes (aligned to the outer tracks through `subgrid`), so a fold
+can animate and the accessibility tree keeps its regions; `contents`
+removes the box, and with it both. Masonry (multicol today, native when
+Chromium ships it), anchor positioning, `transform`, `z-index`, and
+`@property` are skin-side tools — the component never reaches for them.
+
+**Collapsed content is state; revealed chrome is appearance.** A fold
+publishes `--collapsed`; the skin animates the body's track and may take
+the content out of the tab order with a *delayed* `visibility`
+transition once the fold lands. Hover- or focus-revealed chrome (the
+first instance's rule) still hides with `opacity` only. Hover rules stay
+below focus weight — wrap the hover selector in `:where()` — so a
+focused control always wins the style contest.
+
+**The component publishes; the skin reads.** Kind, access, and state
+arrive as BEM modifiers (`--exp`, `--ro`, `--preset`, `--diverged`,
+`--collapsed`, `--active`, `--editing`, `--live`, …), continuous data as
+custom properties in real units (`--value`, `--norm` over `[min, max]`,
+`--count`). Badges have no elements: a skin colour-codes the 4-CC by
+access or synthesizes badge and icon text via pseudo-element `content`.
+Screen readers and localization are deliberately out of scope; keyboard
+accessibility is first-class and component-owned.
+
+**State-carrying chrome is one real `button`.** The reset marker is a
+button `disabled` while the value equals its baseline — focusable exactly
+when it means something — and the skin morphs it from a resting dot into
+↺ on hover or focus. No dot elements, no duplicate indicators.
+
+**One skin entry point.** A single stylesheet imports every component's
+BEM CSS; components import no CSS. The skin's vocabulary is a token
+scale — spacing, `--control-h`, radius, access hues, fold timing, focus
+ring — that components never read. Chromium is the v2.0 target:
+subgrid, anchor positioning, `@property`, and `overflow: clip` are fair
+game.

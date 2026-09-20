@@ -257,7 +257,7 @@ _Avoid_: restore defaults, factory reset (reset isn't factory-only).
 `geon` (enable).
 
 **GEQ editor**:
-The EQ editing surface inside the visualizer — the sliders and curve
+The EQ editing surface inside the visualizer — the EQ sliders and curve
 riding the `vis` feed; revealed and hidden per skin policy (Classic:
 hover / focus / drag, 5 s linger).
 _Avoid_: eq overlay ("overlay" is taken — an EQ preset shadowing a
@@ -280,6 +280,22 @@ _Avoid_: theme (reads as light/dark color scheme).
 **Classic skin**:
 The factory skin — the faithful transcription of the original DDP look.
 
+**Skeleton**:
+The fixed component structure a skin styles — semantic elements, BEM
+modifiers for state, CSS custom properties for data; identical under
+every skin.
+_Avoid_: markup, template, layout (that's the skin's).
+
+**Skin entry point**:
+The single stylesheet that imports every component's skin styles;
+swapping it swaps the skin.
+_Avoid_: stylesheet bundle, theme file.
+
+**Token**:
+A skin-level CSS custom property naming a design value — spacing step,
+control height, access hue; components never read one.
+_Avoid_: variable (ambiguous with published data vars), theme value.
+
 **Lattice**:
 The per-column chrome surface whose separator lines carve the column's
 fill into bricks; the pieces tile into the field-wide grid (the
@@ -294,11 +310,12 @@ continuous, like the original.
 _Avoid_: bar (the original overloads it: brick bitmaps, column width, EQ
 track).
 
-**Slider**:
-The per-visible-band EQ control unit — track chrome + draggable thumb
-(the original's `mSliderBg`/`mSliderThumb`), riding a fractional `gebf`
-index; visible count `N ∈ [2, genb]`, default 5.
-_Avoid_: band (sliders sit at fractional indices, between bands).
+**EQ slider**:
+The GEQ editor's per-visible-band control unit — track chrome +
+draggable thumb (the original's `mSliderBg`/`mSliderThumb`), riding a
+fractional `gebf` index; visible count `N ∈ [2, genb]`, default 5.
+_Avoid_: Slider (bare — the Advanced panel's generic control), band
+handle, band (EQ sliders sit at fractional indices, between bands).
 
 **Vis idle**:
 The feed state entered 250 ms after the last `vis` event — feed death
@@ -321,3 +338,78 @@ pseudoinverse, so the convolution reproduces that curve exactly and the
 next stroke continues it without a jump — run whenever the active
 `gebg` changes by any path other than the smoother's own write.
 _Avoid_: inverse smoothing (the mechanism, not the purpose).
+
+### Advanced panel
+
+**Advanced panel**:
+The main screen's collapsible section rendering every AK parameter from
+Bootstrap metadata, grouped by Parameter category.
+_Avoid_: settings page, all-params view, "Basic panel" (see Master
+control).
+
+**Parameter category**:
+One `[[category]]` row of `parameters.toml` — an id, a label, and the
+ordered 4-CC list it owns; every root leaf belongs to exactly one. Table
+order is section order
+([ADR-0004](docs/adr/0004-parameter-metadata-as-single-source-of-truth.md)).
+_Avoid_: group, section (the DOM), feature (the engine's module).
+
+**Fold**:
+A category's collapsed / expanded state, published as a modifier and
+remembered per browser; the animation is the skin's.
+_Avoid_: accordion (the widget pattern), collapse (ambiguous with the
+panel's own disclosure).
+
+**Source rule**:
+Which item a card reads and writes — a preset-carried param while the
+profile has an EQ selection ⇒ the selected EQ preset; otherwise the
+active profile. The GEQ editor's rule, applied to every card.
+_Avoid_: write routing, seat rule.
+
+**Source item**:
+The profile or EQ preset the Source rule picks for a card; its value,
+divergence, and Reset all follow it.
+_Avoid_: target item, owner, write target.
+
+**Reset marker**:
+The single button per card and per category that is both the divergence
+indicator and the Reset control — disabled while resolved equals
+Baseline.
+_Avoid_: dot, badge, dirty flag.
+
+**Slider**:
+The Advanced panel's numeric range control, paired after every numeric
+field — a track + thumb stepping by the Step rule, log-positioned for
+frequencies.
+_Avoid_: Value slider, range input, EQ slider (the GEQ editor's unit).
+
+**Step rule**:
+The one increment law for every numeric gesture — one display unit, Alt
+0.1× (never under one raw unit), Shift 10×; semitone / tenth-semitone /
+octave on frequency axes.
+_Avoid_: nudge size, fine/coarse mode.
+
+**Scrub**:
+Adjusting a numeric field by dragging vertically with the pointer
+locked; the field stays focused and selected throughout.
+_Avoid_: drag-to-change, spin.
+
+**Band strip**:
+The single control shape for every multi-value AK parameter — a row of
+bands, each publishing its value, sized to the group's live band count
+(`*nb`), not its allocation.
+_Avoid_: array widget, bar chart, strip (unqualified).
+
+**Live array**:
+A band strip fed by the `vis` event — the four ReadOnly-Dynamic arrays;
+holds the last frame, no idle state (Vis idle is the visualizer's).
+_Avoid_: vis card, live plot.
+
+**Paint**:
+A drag across a band strip that sets each crossed band from the
+pointer's height, interpolating skipped bands, writing live.
+_Avoid_: brush (Brush buffer is the GEQ smoother's), draw.
+
+**Band editor**:
+The popover field opened on one band by click, Enter, or a digit.
+_Avoid_: inline input, cell.

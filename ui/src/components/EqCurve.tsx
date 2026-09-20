@@ -32,7 +32,7 @@ const px = (value: number) => String(Math.round(value * 100) / 100)
 /** Clamps a display dB to the edit window. */
 const clampDb = (dB: number) => Math.min(EDIT_MAX_DB, Math.max(EDIT_MIN_DB, dB))
 
-/** One resolved touch: the snapped Slider, its splat band, the dB.
+/** One resolved touch: the snapped EQ slider, its splat band, the dB.
  * (Named clear of the DOM's own `Touch`.) */
 interface EditorTouch {
   readonly slider: number
@@ -57,7 +57,7 @@ interface EditorTouch {
  * appearance here.
  *
  * The hand (part C): the pointer surface is the field — down/move
- * snap to the nearest visible Slider and enqueue into the
+ * snap to the nearest visible EQ slider and enqueue into the
  * {@link GainSmoother}; a rAF tick loop pumps it, each non-`null`
  * tick one optimistic live edit routed to the active preset or the
  * profile. Preset/profile switches rehydrate the smoother so the next
@@ -78,14 +78,14 @@ const EqCurve: Component = () => {
   /** The resolved band centre frequencies, for the slider labels. */
   const bandFreqs = () => resolvedEqParam('gebf') ?? []
 
-  /** Visible Slider count — the display pref capped by `genb`. */
+  /** Visible EQ slider count — the display pref capped by `genb`. */
   const sliderCount = () => visibleSliderCount(bandCount())
 
-  /** Fractional band step between visible Sliders. */
+  /** Fractional band step between visible EQ sliders. */
   const sliderStep = () =>
     sliderCount() > 1 ? (bandCount() - 1) / (sliderCount() - 1) : 0
 
-  /** Slider `i`'s fractional band index. */
+  /** EQ slider `i`'s fractional band index. */
   const sliderIndex = (i: number) => i * sliderStep()
 
   /**
@@ -200,7 +200,7 @@ const EqCurve: Component = () => {
   const [activeSlider, setActiveSlider] = createSignal<number | null>(null)
 
   /**
-   * Resolves a pointer position: x → the nearest visible Slider, splat
+   * Resolves a pointer position: x → the nearest visible EQ slider, splat
    * center = round of its fractional index (the original's mobile
    * formula generalized — centers {0, 5, 10, 14, 19} at N = 5); y → dB
    * via the padded mapping, clamped. Capture + clamp: dragging past
