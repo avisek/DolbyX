@@ -10,6 +10,7 @@ import {
   fixtureBootstrap,
   fixtureCategories,
   fixtureState,
+  fixtureStateWithParams,
   fixtureVis,
 } from '../test/fixture'
 import { MockWebSocket } from '../test/mock-ws'
@@ -163,20 +164,24 @@ it('publishes --ro / --exp / --array and a reset marker on writable cards only',
 const readout = (panel: HTMLElement, code: string) =>
   card(panel, code).querySelector('.adv-readout')?.textContent
 
-// Behavior 9 (#85): every card reads through the Source rule and shows
-// its value as a plain readout — ReadOnly-Static from the snapshot's
-// Readouts, writable from the active profile — `frac_bits` applied and
-// the kind's unit appended.
+/** A scalar card's numeric box text. */
+const boxText = (panel: HTMLElement, code: string) =>
+  card(panel, code).querySelector<HTMLInputElement>('.adv-input__field')?.value
+
+// Behavior 9 (#85): every card reads through the Source rule —
+// ReadOnly-Static from the snapshot's Readouts, writable from the
+// active profile — `frac_bits` applied. Arrays are still the plain
+// readout (#90); scalars read in the numeric box (#87).
 it('reads Readouts on static cards and the active profile on writable ones', () => {
   const panel = renderOpen()
-  expect(readout(panel, 'vnnb')).toBe('20')
+  expect(boxText(panel, 'vnnb')).toBe('20')
   expect(readout(panel, 'bver')).toBe('4, 28, 9, 0, 0')
-  expect(readout(panel, 'dvla')).toBe('4') // Music
-  expect(readout(panel, 'dhsb')).toBe('3 dB') // raw 48, 1/16 dB
+  expect(boxText(panel, 'dvla')).toBe('4') // Music
+  expect(boxText(panel, 'dhsb')).toBe('3') // raw 48, 1/16 dB
 
   applySnapshot(fixtureState({ selected_profile: 'voice' }))
-  expect(readout(panel, 'dvla')).toBe('0')
-  expect(readout(panel, 'dhsb')).toBe('0 dB')
+  expect(boxText(panel, 'dvla')).toBe('0')
+  expect(boxText(panel, 'dhsb')).toBe('0')
 })
 
 /** Completes the background WS handshake — the `vis` feed's door. */
@@ -545,8 +550,10 @@ it('card label text toggles the switch once; a tristate card targets its checked
     expect(auto.checked).toBe(true)
   })
   expect(speaker.getAttribute('for')).toBe(auto.id)
-  // Readouts have no control yet: no `for`.
-  expect(card(panel, 'vnnb').hasAttribute('for')).toBe(false)
+  // A read-only scalar's `for` is its readonly box (select / copy);
+  // array readouts have no control yet: no `for` (#90).
+  expect(card(panel, 'vnnb').getAttribute('for')).toBe('adv-vnnb')
+  expect(card(panel, 'vnbf').hasAttribute('for')).toBe(false)
 })
 
 // Behavior 7 (#86): a click inside a control that manages its own focus
@@ -590,4 +597,213 @@ it('an error reply leaves the switch unflipped and reconciles', async () => {
     expect(after.map((frame) => frame.cmd)).toEqual(['get_state'])
   })
   expect(enable.checked).toBe(false)
+})
+
+// — Numeric input: typing, unit overlay, readonly (#87 part 1) —
+
+const field = (name: string) =>
+  screen.getByRole<HTMLInputElement>('textbox', { name })
+
+/** Types `text` into a focused field the way a keyboard would land it. */
+function type(input: HTMLInputElement, text: string): void {
+  input.focus()
+  input.value = text
+  input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+}
+
+// Behavior 2 (#87): typing a complete number is one live 1-entry
+// `edit_profile` against the active profile, in raw units — `3` dB on a
+// `frac_bits = 4` param is `[48]` — the slice's tracer bullet.
+it('typing 3 into a dB field sends one live edit_profile carrying the raw 48', () => {
+  renderOpen()
+  const socket = connect()
+  type(field('Headphone Virtualizer Surround Boost'), '3')
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { dhsb: [48] },
+    },
+  ])
+})
+
+// Behavior 3 (#87): out of range, the wire carries the clamped raw while
+// the text stays exactly as typed; blur re-syncs the text to store truth
+// and, the value already applied live, commits nothing more.
+it('clamps an out-of-range typed value on the wire, keeps the text, re-syncs on blur', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount') // dvla, 0–10
+  type(amount, '500')
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dvla: [10] },
+  ])
+  expect(amount.value).toBe('500')
+
+  amount.blur()
+  expect(amount.value).toBe('10')
+  expect(sentEdits(socket)).toHaveLength(1)
+})
+
+// Behavior 5 (#87): Enter is blur — the clamped value stands committed
+// and the text re-syncs, the field no longer focused; Esc reverts the
+// text to store truth without a write.
+it('Enter commits and re-syncs; Esc reverts the text without a write', () => {
+  renderOpen()
+  const socket = connect()
+  const amount = field('Volume Leveler Amount')
+  type(amount, '500')
+  amount.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+  )
+  expect(amount.value).toBe('10')
+  expect(document.activeElement).not.toBe(amount)
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dvla: [10] },
+  ])
+
+  type(amount, '7.') // a partial: nothing written yet
+  amount.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  )
+  expect(amount.value).toBe('10')
+  expect(document.activeElement).not.toBe(amount)
+  expect(sentEdits(socket)).toHaveLength(1)
+})
+
+// Behavior 4 (#87): partials write nothing; the first complete number
+// writes once.
+it('ignores partials and writes once on the completed number', () => {
+  renderOpen()
+  const socket = connect()
+  const boost = field('Headphone Virtualizer Surround Boost')
+  type(boost, '-')
+  type(boost, '1.')
+  expect(sentEdits(socket)).toEqual([])
+  type(boost, '1.5')
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dhsb: [24] },
+  ])
+})
+
+// Behavior 8 (#87): a read-only scalar is the same box, `readonly`,
+// showing its Readouts value; an Opaque scalar (`lcpt`) reads as a
+// read-only Integer. Typing into either writes nothing.
+it('read-only scalars render a readonly box that never writes', () => {
+  renderOpen()
+  const socket = connect()
+  const count = field('Visualizer Native Band Count') // vnnb
+  expect(count.readOnly).toBe(true)
+  expect(count.value).toBe('20')
+  type(count, '5')
+  count.blur()
+  expect(sentEdits(socket)).toEqual([])
+
+  const pointer = field('License Data Pointer') // lcpt, opaque
+  expect(pointer.readOnly).toBe(true)
+  expect(pointer.closest('.adv-input')).not.toBeNull()
+})
+
+// Behavior 1 (#87): the box's DOM contract — the skin's seam — and its
+// place: first inside `adv-card__control`, the Slider slot after it.
+it('renders a writable dB scalar as the numeric box with a unit overlay, first in the control', () => {
+  const panel = renderOpen()
+  const boost = field('Headphone Virtualizer Surround Boost')
+  expect(boost.type).toBe('text')
+  expect(boost.getAttribute('inputmode')).toBe('decimal')
+  expect(boost.id).toBe('adv-dhsb')
+  expect(boost.readOnly).toBe(false)
+  expect(boost.value).toBe('3') // Music: raw 48, frac_bits 4
+
+  const box = boost.parentElement
+  expect(box?.tagName).toBe('SPAN')
+  expect(box?.classList).toContain('adv-input')
+  const unit = box?.querySelector('.adv-input__unit')
+  expect(unit?.textContent).toBe('dB')
+  const control = card(panel, 'dhsb').querySelector('.adv-card__control')
+  expect(control?.firstElementChild).toBe(box)
+  expect(card(panel, 'dhsb').getAttribute('for')).toBe('adv-dhsb')
+})
+
+// Behavior 9 (#87): the unit overlay is inert chrome — `aria-hidden`,
+// present only on unit-bearing kinds — and every numeric box shares the
+// one class contract the skin sizes uniformly (geometry: Playwright).
+it('unit overlays are aria-hidden and every numeric box shares the class contract', () => {
+  const panel = renderOpen()
+  const boxes = [...panel.querySelectorAll<HTMLElement>('.adv-input')]
+  expect(boxes.length).toBeGreaterThan(20)
+  for (const box of boxes) {
+    expect(box.querySelector('.adv-input__field')).not.toBeNull()
+    const unit = box.querySelector('.adv-input__unit')
+    if (unit) expect(unit.getAttribute('aria-hidden')).toBe('true')
+  }
+  const unitOf = (code: string) =>
+    card(panel, code).querySelector('.adv-input__unit')?.textContent ?? null
+  expect(unitOf('dhsb')).toBe('dB')
+  expect(unitOf('vol')).toBe('dB')
+  expect(unitOf('dvla')).toBeNull() // integer: no overlay
+  expect(unitOf('vnnb')).toBeNull()
+})
+
+// Behavior 6 (#87): the Source rule's live half — a preset-carried
+// numeric param writes `edit_eq_preset` on the selected EQ preset;
+// with `None` selected, `edit_profile`.
+it('a preset-carried numeric writes the preset while one is selected, else the profile', () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(selectingState('rich'))
+  const amount = field('Intelligent Equalizer Amount') // iea, 0–16 raw, frac_bits 4
+  expect(amount.value).toBe('0.63') // Rich ships iea=10
+  type(amount, '0.5')
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      params: { iea: [8] },
+    },
+  ])
+  amount.blur()
+
+  applySnapshot(selectingState(null))
+  type(amount, '1')
+  expect(sentEdits(socket)[1]).toEqual({
+    cmd: 'edit_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    params: { iea: [16] },
+  })
+})
+
+// Behavior 7 (#87): the field is uncontrolled while focused — a store
+// update never clobbers the typing; on blur the typed value commits
+// against the new truth and the field mirrors the store.
+it('a store update while focused leaves the typed text; blur re-syncs', () => {
+  renderOpen()
+  const socket = connect()
+  const boost = field('Headphone Virtualizer Surround Boost')
+  type(boost, '2')
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dhsb: [32] },
+  ])
+  applySnapshot(fixtureStateWithParams({ dhsb: [80] })) // 5 dB
+  expect(boost.value).toBe('2')
+
+  boost.blur()
+  expect(boost.value).toBe('5')
+  expect(sentEdits(socket).map((frame) => frame.params)).toEqual([
+    { dhsb: [32] },
+    { dhsb: [32] }, // the blur commit, against the changed truth
+  ])
+})
+
+// Behavior 10 (#87): selected text never starts a drag — `dragstart`
+// on the field is default-prevented (the scrub, #88, depends on it).
+it('default-prevents dragstart on the field', () => {
+  renderOpen()
+  const boost = field('Headphone Virtualizer Surround Boost')
+  const drag = new Event('dragstart', { bubbles: true, cancelable: true })
+  expect(boost.dispatchEvent(drag)).toBe(false)
+  expect(drag.defaultPrevented).toBe(true)
 })

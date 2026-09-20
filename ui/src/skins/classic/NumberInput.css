@@ -1,0 +1,76 @@
+/* The shared numeric box (#87): the field fills the wrapper edge to
+   edge; the unit is an inert overlay the field pads for. Every box is
+   the same width, unit or not — 5ch of digits + the unit slot + padding
+   — so columns line up. The two lengths are registered so `ch` / `em`
+   resolve on the wrapper once and inherit as absolute lengths (the unit
+   uses a smaller font). Control-height, hover under focus weight. */
+
+@property --adv-unit-w {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --adv-pad-x {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+.adv-input {
+  --adv-unit-w: 4ch;
+  --adv-pad-x: 0.5em;
+
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: calc(5ch + var(--adv-unit-w) + 2 * var(--adv-pad-x));
+  font-size: 0.8rem;
+}
+
+.adv-input__field {
+  display: block;
+  width: 100%;
+  height: var(--control-h);
+  margin: 0;
+  padding: 0 calc(var(--adv-unit-w) + var(--adv-pad-x)) 0 var(--adv-pad-x);
+  border: 1px solid var(--color-bg);
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  text-align: right;
+  transition: border-color 0.12s ease;
+}
+
+/* Hover under focus weight: the card label forwards hover; a focused
+   field always wins. Readonly fields get no lift. */
+:where(.adv-card:hover) .adv-input__field:read-write {
+  border-color: var(--hover-line);
+}
+
+.adv-input__field:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.adv-input__field:read-only {
+  color: var(--color-text-muted);
+}
+
+/* The unit: inside the box, never selectable — a click on it lands in
+   the field. */
+.adv-input__unit {
+  position: absolute;
+  top: 0;
+  right: var(--adv-pad-x);
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  width: var(--adv-unit-w);
+  padding-left: 0.35em;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  pointer-events: none;
+  user-select: none;
+}
