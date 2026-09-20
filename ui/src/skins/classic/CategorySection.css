@@ -1,0 +1,165 @@
+/* One category card (#85): a two-row grid — header over a folding body.
+   The Fold is state (`adv-cat--collapsed`, ADR-0011 addendum): only the
+   body's row track animates (1fr ↔ 0fr); margins and paddings never
+   move. The body keeps its full height and spills past the shrinking
+   row; the section clips the spill, and the body leaves the tab order
+   once the fold lands (delayed `visibility`). */
+
+.adv-cat {
+  --head-x: var(--space-4);
+  --reset-w: 1.4rem;
+
+  display: grid;
+  /*   minmax(0, …)         the row may shrink to nothing
+       align-content: start leftover space stays empty, head never grows
+       align-items: start   the body keeps full height, spills past its row
+       overflow: hidden     this box clips the spill */
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: start;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  overflow: hidden;
+  break-inside: avoid;
+  transition: grid-template-rows var(--fold-ms) var(--fold-ease);
+}
+
+/* Under native masonry the panel body's gap spaces the cards. */
+@supports (grid-template-rows: masonry) or (display: masonry) {
+  .adv-cat {
+    margin-bottom: 0;
+  }
+}
+
+.adv-cat--collapsed {
+  grid-template-rows: auto minmax(0, 0fr);
+}
+
+/* — Header: the toggle IS the header's box, edge to edge; the reset
+   marker floats over its right end, inside the padding the toggle
+   reserves — */
+
+.adv-cat__head {
+  position: relative;
+}
+
+.adv-cat__toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) calc(var(--head-x) + var(--reset-w) + var(--space-1))
+    var(--space-2) var(--head-x);
+  border: none;
+  border-bottom: 1px solid var(--color-bg);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color var(--fold-ms) var(--fold-ease),
+    border-radius var(--fold-ms) var(--fold-ease);
+}
+
+/* Hover under focus weight: a focused header always wins. */
+:where(.adv-cat__head:hover) .adv-cat__toggle {
+  background: rgb(255 255 255 / 4%);
+}
+
+.adv-cat__toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* Folded: the divider fades and the header takes the card's full
+   rounding — the same clock as the fold. */
+.adv-cat--collapsed .adv-cat__toggle {
+  border-bottom-color: transparent;
+  border-radius: var(--radius-2);
+}
+
+.adv-cat__chevron {
+  flex: none;
+  width: 1.3rem;
+  color: var(--color-accent);
+  font-size: 1.3rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.adv-cat__chevron::before {
+  content: '▾';
+  display: inline-block;
+  transition: transform var(--fold-ms) var(--fold-ease);
+}
+
+.adv-cat--collapsed .adv-cat__chevron::before {
+  transform: rotate(-90deg);
+}
+
+.adv-cat__title {
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.adv-cat__count {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.adv-cat__count::after {
+  content: ' params';
+}
+
+/* The reset marker: bare chrome sized for its slot; the dot / ↺ morph
+   arrives with divergence (#92). Clean ⇒ invisible, slot kept. */
+.adv-cat__reset {
+  position: absolute;
+  top: 50%;
+  right: var(--head-x);
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  border: none;
+  background: none;
+  translate: 0 -50%;
+}
+
+.adv-cat__reset:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* — Body: the card's block spacing lives here, so it folds with the
+   body and the clip edge is the header's bottom once folded — */
+
+.adv-cat__body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  transition: visibility 0s linear 0s;
+}
+
+/* Collapsed content leaves the tab order — after the fold, so the
+   animation never runs over an already-vanished body. */
+.adv-cat--collapsed .adv-cat__body {
+  visibility: hidden;
+  transition-delay: var(--fold-ms);
+}
+
+/* Part 1 placeholder: the category's 4-CCs as chips (Part 2 → cards). */
+.adv-cat__body > code {
+  padding: 0.12rem 0.38rem;
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+}
