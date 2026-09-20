@@ -95,7 +95,7 @@ export interface ParameterDef {
 // The table is static per page load (parsed at daemon startup, injected
 // at request time); absent only on a direct :5173 visit, where main.tsx
 // redirects before anything resolves against it.
-const table: readonly ParameterDef[] = window.__BOOTSTRAP__?.params ?? []
+const paramTable: readonly ParameterDef[] = window.__BOOTSTRAP__?.params ?? []
 const categoryTable: readonly CategoryDef[] =
   window.__BOOTSTRAP__?.categories ?? []
 
@@ -105,7 +105,7 @@ const categoryTable: readonly CategoryDef[] =
  * caught by the first render.
  */
 export function paramDef(name: string): ParameterDef {
-  const def = table.find((entry) => entry.name === name)
+  const def = paramTable.find((entry) => entry.name === name)
   if (!def) throw new Error(`parameter \`${name}\` missing from bootstrap`)
   return def
 }
@@ -126,7 +126,7 @@ export function categories(): readonly CategoryDef[] {
  * (issue #26).
  */
 export function presetCarried(): readonly string[] {
-  return table
+  return paramTable
     .filter((def) => def.category === 'ieq' || def.category === 'geq')
     .map((def) => def.name)
 }

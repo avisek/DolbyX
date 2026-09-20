@@ -12,6 +12,7 @@
 //! param's `category` derives from it (ADR-0004 addendum).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Metadata for one AK parameter (one root leaf of the engine's AK tree).
 /// (`Serialize` feeds the UI bootstrap; the wire shape mirrors the TOML
@@ -99,7 +100,7 @@ pub struct CategoryDef {
 }
 
 /// A parsed `parameters.toml`: both tables, each in file order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ParameterTable {
     /// `[[param]]` rows — pinned to the param twin's order.
     pub params: Vec<ParameterDef>,
@@ -201,7 +202,8 @@ pub(crate) fn splice_head(
     current[..values.len()].copy_from_slice(values);
 }
 
-/// UI grouping.
+/// Parameter category id — closed: a `[[category]] name` outside it is a
+/// schema error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamCategory {
@@ -318,14 +320,15 @@ pub enum ParseError {
     /// A `[[param]]` no `[[category]]` lists.
     #[error("parameter `{0}` is listed in no category")]
     UncategorizedParam(String),
-    /// A 4-CC two `[[category]]` rows list.
-    #[error("parameter `{name}` is listed in two categories: `{first}` and `{second}`")]
-    ParamInTwoCategories {
+    /// A 4-CC listed twice across the `[[category]]` rows (possibly
+    /// within one row).
+    #[error("parameter `{name}` is listed twice: in `{first}` and `{second}`")]
+    ParamListedTwice {
         /// The offending parameter.
         name: String,
-        /// The first category listing it.
+        /// The row of its first listing.
         first: ParamCategory,
-        /// The second.
+        /// The row of its second.
         second: ParamCategory,
     },
     /// A `[[category]]` lists a 4-CC no `[[param]]` declares.
@@ -363,8 +366,7 @@ struct Document {
 pub fn parse(document: &str) -> Result<ParameterTable, ParseError> {
     let document: Document = toml::from_str(document)?;
     let categories = document.category;
-    let mut owner: std::collections::HashMap<&str, ParamCategory> =
-        std::collections::HashMap::new();
+    let mut owner: HashMap<&str, ParamCategory> = HashMap::new();
     for (i, row) in categories.iter().enumerate() {
         if categories[..i].iter().any(|prior| prior.name == row.name) {
             return Err(ParseError::DuplicateCategory(row.name));
@@ -374,7 +376,7 @@ pub fn parse(document: &str) -> Result<ParameterTable, ParseError> {
         }
         for name in &row.params {
             if let Some(first) = owner.insert(name, row.name) {
-                return Err(ParseError::ParamInTwoCategories {
+                return Err(ParseError::ParamListedTwice {
                     name: name.clone(),
                     first,
                     second: row.name,
@@ -626,7 +628,7 @@ mod tests {
             + &param("dvla")
             + &param("dvle");
         let err = parse(&doc).unwrap_err();
-        assert!(matches!(&err, ParseError::ParamInTwoCategories { name, .. } if name == "dvle"));
+        assert!(matches!(&err, ParseError::ParamListedTwice { name, .. } if name == "dvle"));
         let message = err.to_string();
         assert!(
             message.contains("dvle")
@@ -645,6 +647,19 @@ mod tests {
         assert!(
             message.contains("mxou") && message.contains("volume_leveller"),
             "unhelpful error: {message}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_unknown_category_name() {
+        // The enum is closed — `build_license` split into `build` +
+        // `license` (ADR-0004 addendum).
+        let doc = category("build_license", "Build", &["bver"]) + &param("bver");
+        let err = parse(&doc).unwrap_err();
+        assert!(matches!(err, ParseError::Toml(_)));
+        assert!(
+            err.to_string().contains("build_license"),
+            "unhelpful error: {err}"
         );
     }
 

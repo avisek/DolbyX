@@ -40,10 +40,10 @@ fn spot_checks_dvla_and_scpe() {
         lookup(&defs, "scpe").unwrap().access,
         ParamAccess::Experimental
     );
-    assert_eq!(
-        lookup(&defs, "bndl").unwrap().category,
-        ParamCategory::Build
-    );
+    let category_of = |name| lookup(&defs, name).unwrap().category;
+    assert_eq!(category_of("bndl"), ParamCategory::Build);
+    assert_eq!(category_of("lcmf"), ParamCategory::License);
+    assert_eq!(category_of("dvla"), ParamCategory::VolumeLeveller);
 }
 
 /// The `[[category]]` table (issue #83): fifteen Parameter categories in
@@ -186,7 +186,10 @@ fn stays_within_the_engine_envelope() {
         .map(|p| p["name"].as_str().expect("twin name"))
         .collect();
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, twin_names, "[[param]] order must match the twin");
+    assert_eq!(
+        names, twin_names,
+        "[[param]] order must match the param twin"
+    );
 
     for entry in twin {
         let name = entry["name"].as_str().unwrap();

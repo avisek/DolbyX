@@ -32,7 +32,27 @@ async fn get_root_serves_html_with_a_valid_bootstrap() {
     let categories = bootstrap["categories"]
         .as_array()
         .expect("categories array");
-    assert_eq!(categories.len(), 15);
+    let names: Vec<_> = categories.iter().map(|c| &c["name"]).collect();
+    assert_eq!(
+        names,
+        [
+            "volume_leveller",
+            "ieq",
+            "geq",
+            "dialog_enhancer",
+            "volume_maximizer",
+            "speaker_virtualizer",
+            "headphone_virtualizer",
+            "next_gen_surround",
+            "audio_regulator",
+            "audio_optimizer",
+            "peak_limiter",
+            "endpoint_volume",
+            "visualizer",
+            "build",
+            "license",
+        ]
+    );
     assert_eq!(
         categories[0],
         serde_json::json!({
@@ -41,8 +61,6 @@ async fn get_root_serves_html_with_a_valid_bootstrap() {
             "params": ["dvla", "dvli", "dvlo", "dvle", "dvmc", "dvme"],
         })
     );
-    assert_eq!(categories[14]["name"], "license");
-
     let state = &bootstrap["state"];
     assert_eq!(state["power"], true);
     assert_eq!(state["selected_profile"], "music");

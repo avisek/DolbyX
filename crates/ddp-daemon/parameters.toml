@@ -15,7 +15,7 @@
 # [[category]] is the Advanced panel's composition: table order = section
 # order, `params` order = card order; every param sits in exactly one
 # category (parser-enforced), and its `category` is derived from here.
-# [[param]] order is pinned to the twin — never reorder it. `label` is
+# [[param]] order is pinned to the param twin — never reorder it. `label` is
 # short and category-relative ("Enable", "Amount"); `description` keeps
 # the engine's full phrasing.
 
