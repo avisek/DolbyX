@@ -1,10 +1,11 @@
 /**
  * A def's scalar values in display units — `units.ts` applied per
  * `frac_bits` (the epic's invariant: i16 end-to-end, only the UI
- * converts). What every numeric control shows and writes; #87 part 2
- * adds the step axis (`fine`, `scale`) here.
+ * converts) — and its step axis (`fine`, `scale`) for the Step rule.
+ * What every numeric control shows, writes, and steps by.
  */
 import type { ParameterDef } from './parameters'
+import type { StepScale } from './step'
 import { displayToRaw, rawToDisplay } from './units'
 
 /** One raw value in display units, float noise trimmed to 2 places. */
@@ -18,4 +19,14 @@ export function rawValue(def: ParameterDef, value: number): number {
     def.max,
     Math.max(def.min, displayToRaw(value, def.frac_bits)),
   )
+}
+
+/** The step lattice: one raw unit in display units. */
+export function fineStep(def: ParameterDef): number {
+  return rawToDisplay(1, def.frac_bits)
+}
+
+/** The step / Slider scale by kind: frequencies live on a log axis. */
+export function scaleOf(def: ParameterDef): StepScale {
+  return def.kind === 'frequency_hz' ? 'log' : 'linear'
 }
