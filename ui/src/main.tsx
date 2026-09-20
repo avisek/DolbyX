@@ -1,7 +1,6 @@
 /* @refresh reload */
 import { render } from 'solid-js/web'
-import './styles/theme.css'
-import './styles/base.css'
+import './skins/classic/index.css'
 import App from './App'
 import { startWs } from './store/ws'
 

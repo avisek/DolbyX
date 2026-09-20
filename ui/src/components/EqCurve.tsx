@@ -19,7 +19,6 @@ import {
 } from '../store/state'
 import { editEqPresetLive, editProfileLive } from '../store/ws'
 import { visFrame, visIdle } from '../store/vis'
-import './EqCurve.css'
 
 /** The GEQ edit window in dB — asymmetric, the engine's own. */
 const EDIT_MIN_DB = -12

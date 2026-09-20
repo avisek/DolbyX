@@ -1,0 +1,16 @@
+/* Classic skin entry point (ADR-0011): the one stylesheet the app
+   imports. Tokens, base, then one BEM file per component (the order the
+   TSX imports once produced) — swapping this file swaps the skin. */
+@import './theme.css';
+@import './base.css';
+@import './ConnectionBadge.css';
+@import './ActionRow.css';
+@import './RenameInput.css';
+@import './EqPresetPicker.css';
+@import './LanToggle.css';
+@import './MasterControls.css';
+@import './PowerToggle.css';
+@import './ProfileTabs.css';
+@import './EqCurve.css';
+@import './Visualizer.css';
+@import './App.css';

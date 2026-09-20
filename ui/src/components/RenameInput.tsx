@@ -1,5 +1,4 @@
 import { onMount, type Component } from 'solid-js'
-import './RenameInput.css'
 
 /**
  * The inline rename field (issue #26), swapped in over the selected

@@ -1,5 +1,5 @@
-/* Resets + typography. Component styles live in BEM files beside their
-   components. */
+/* Resets + typography. Component styles are the Classic skin's BEM
+   files beside this one, imported by index.css. */
 *,
 *::before,
 *::after {

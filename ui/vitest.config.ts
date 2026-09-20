@@ -8,5 +8,11 @@ export default defineConfig({
   // Solid ships separate dev/browser builds — tests need the dev one.
   resolve: { conditions: ['development', 'browser'] },
   // Unit tests only — e2e/*.spec.ts belongs to Playwright (`just e2e`).
-  test: { environment: 'happy-dom', include: ['src/**/*.test.{ts,tsx}'] },
+  test: {
+    environment: 'happy-dom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    // Vitest blanks every CSS module, `?raw` included; src/skin.test.ts
+    // reads the skin's token file as text.
+    css: { include: [/\.css\?raw$/] },
+  },
 })

@@ -1,0 +1,39 @@
+/* Classic skin tokens (ADR-0011): the skin's vocabulary — names are the
+   contract, values are Classic's. Components never read one; a second
+   skin redefines them. */
+:root {
+  /* Color + type */
+  --color-bg: #0c1420; /* dark navy */
+  --color-surface: #16222f;
+  --color-accent: #00b4ff; /* Dolby cyan */
+  --color-text: #e8eef5;
+  --color-text-muted: #8fa1b3;
+  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* One height for input / toggle / tristate / slider */
+  --control-h: 1.7rem;
+
+  /* Radii: controls / cards */
+  --radius-1: 0.35rem;
+  --radius-2: 0.6rem;
+
+  /* Access hues: the skin color-codes the 4-CC by settability bucket */
+  --hue-settable: var(--color-accent);
+  --hue-experimental: #dcae5e; /* amber */
+  --hue-readonly: var(--color-text-muted);
+
+  /* Fold motion (category / panel disclosure) */
+  --fold-ms: 240ms;
+  --fold-ease: ease;
+
+  /* Focus ring: always outranks hover chrome */
+  --focus-ring: 1px solid var(--color-accent);
+}

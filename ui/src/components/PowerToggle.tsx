@@ -1,7 +1,6 @@
 import type { Component } from 'solid-js'
 import { state } from '../store/state'
 import { setPower } from '../store/ws'
-import './PowerToggle.css'
 
 /** The master power toggle: renders store truth, flips local-first on ack. */
 const PowerToggle: Component = () => (

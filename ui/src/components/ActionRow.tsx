@@ -1,5 +1,4 @@
 import { type Component } from 'solid-js'
-import './ActionRow.css'
 
 /**
  * The four CRUD affordances of one action row (issue #26), acting on

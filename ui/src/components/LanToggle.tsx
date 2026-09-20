@@ -2,7 +2,6 @@ import { Show, createMemo, type Component } from 'solid-js'
 import { encode } from 'uqr'
 import { state } from '../store/state'
 import { setLanAccess } from '../store/ws'
-import './LanToggle.css'
 
 /** One `1×1` square per dark module — the QR as a single SVG path. */
 function qrPath(data: boolean[][]): string {

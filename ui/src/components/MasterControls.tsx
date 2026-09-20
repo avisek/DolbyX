@@ -8,7 +8,6 @@ import {
 import { displayToRaw, rawToDisplay } from '../lib/units'
 import { selectedProfile, state } from '../store/state'
 import { editProfile, editProfileLive } from '../store/ws'
-import './MasterControls.css'
 
 /**
  * The three signature DDP controls — a curated UI overlay pairing an
