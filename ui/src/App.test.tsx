@@ -39,6 +39,12 @@ it('renders the DolbyX shell', () => {
   expect(screen.getByRole('heading', { name: 'DolbyX' })).toBeTruthy()
   // Behavior 1 (#22): the master controls sit on the main screen.
   expect(screen.getByRole('region', { name: 'Master controls' })).toBeTruthy()
+  // #85: the Advanced panel sits after them, collapsed.
+  expect(
+    screen
+      .getByRole('button', { name: 'Advanced' })
+      .getAttribute('aria-expanded'),
+  ).toBe('false')
 })
 
 // Behavior 1 (#13): first paint comes fully populated from the

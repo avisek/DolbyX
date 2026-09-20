@@ -1,0 +1,72 @@
+/* The Advanced panel shell (#85): a disclosure over a masonry of
+   category cards. Only categories animate — the body unmounts while the
+   panel is closed. */
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(96vw, 1100px);
+}
+
+.advanced__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.advanced__header:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.advanced__chevron {
+  color: var(--color-accent);
+  line-height: 1;
+}
+
+.advanced__chevron::before {
+  content: '▾';
+  display: inline-block;
+  transition: transform var(--fold-ms) var(--fold-ease);
+}
+
+.advanced--collapsed .advanced__chevron::before {
+  transform: rotate(-90deg);
+}
+
+/* Category cards flow down multi-column masonry; each card decides its
+   own tracks. */
+.advanced__body {
+  columns: 30rem;
+  column-gap: var(--space-3);
+}
+
+/* Native masonry keeps DOM order left-to-right and never reflows a card
+   into another column mid-fold. Dormant: Chromium parses neither syntax
+   yet. */
+@supports (grid-template-rows: masonry) {
+  .advanced__body {
+    display: grid;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+    grid-template-rows: masonry;
+    gap: var(--space-3);
+  }
+}
+
+@supports (display: masonry) {
+  .advanced__body {
+    display: masonry;
+    columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+    gap: var(--space-3);
+  }
+}
