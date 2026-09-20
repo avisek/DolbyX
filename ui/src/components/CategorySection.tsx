@@ -29,7 +29,7 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
       class="adv-cat"
       classList={{
         'adv-cat--collapsed': folded(),
-        'adv-cat--preset': categoryWritesToPreset(props.category.params),
+        'adv-cat--preset': categoryWritesToPreset(props.category),
       }}
       aria-label={props.category.label}
     >

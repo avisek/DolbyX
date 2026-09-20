@@ -3,6 +3,8 @@
    (ADR-0011 addendum). Control-height, hover under focus weight. */
 
 .adv-toggle {
+  --thumb-inset: 3px;
+
   position: relative;
   flex: none;
   width: calc(var(--control-h) * 1.75);
@@ -22,10 +24,10 @@
 .adv-toggle::before {
   content: '';
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: calc(var(--control-h) - 6px);
-  height: calc(var(--control-h) - 6px);
+  top: var(--thumb-inset);
+  left: var(--thumb-inset);
+  width: calc(var(--control-h) - 2 * var(--thumb-inset));
+  height: calc(var(--control-h) - 2 * var(--thumb-inset));
   border-radius: 50%;
   background: var(--color-text-muted);
   transition:

@@ -12,6 +12,7 @@ import { expect, test } from './fixtures'
  */
 async function openAdvanced(page: Page): Promise<void> {
   await page.goto('/')
+  // By class: an open panel's readouts are `status` roles too.
   await expect(page.locator('.connection-badge')).toHaveText('Connected')
   const header = page.getByRole('button', { name: 'Advanced' })
   if ((await header.getAttribute('aria-expanded')) === 'false') {

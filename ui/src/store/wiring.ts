@@ -4,7 +4,12 @@
  * adds divergence and Reset. Nothing per-param (ADR-0004): the bucket
  * and the category decide.
  */
-import { isPresetCarried, paramDef, type ParameterDef } from '../lib/parameters'
+import {
+  isPresetCarried,
+  paramDef,
+  type CategoryDef,
+  type ParameterDef,
+} from '../lib/parameters'
 import {
   resolvedEqParam,
   selectedEqPreset,
@@ -43,22 +48,30 @@ export function paramValues(def: ParameterDef): readonly number[] {
   return selectedProfile()?.params[def.name] ?? def.default
 }
 
-/**
- * Whether a card's Source item is the selected EQ preset — a
+/** A writable card's Source item — the selected EQ preset for a
  * preset-carried param while the active profile has an EQ selection
- * (ADR-0003). Publishes as `adv-card--preset`.
- */
+ * (ADR-0003), else the active profile. */
+function sourceItem(def: ParameterDef): {
+  readonly preset: boolean
+  readonly id: string
+} {
+  const preset = isPresetCarried(def) ? selectedEqPreset() : undefined
+  return preset
+    ? { preset: true, id: preset.id }
+    : { preset: false, id: state.selected_profile }
+}
+
+/** Whether a card writes to the selected EQ preset — `adv-card--preset`. */
 export function writesToPreset(def: ParameterDef): boolean {
-  return isPresetCarried(def) && selectedEqPreset() !== undefined
+  return sourceItem(def).preset
 }
 
 /**
  * Whether any of a category's params writes to the selected EQ preset
- * — `ieq` / `geq` while a preset is selected. Publishes as
- * `adv-cat--preset`.
+ * — `ieq` / `geq` while a preset is selected — `adv-cat--preset`.
  */
-export function categoryWritesToPreset(params: readonly string[]): boolean {
-  return params.some((name) => writesToPreset(paramDef(name)))
+export function categoryWritesToPreset(category: CategoryDef): boolean {
+  return category.params.some((name) => writesToPreset(paramDef(name)))
 }
 
 /**
@@ -70,12 +83,9 @@ export function commitParam(
   def: ParameterDef,
   values: readonly number[],
 ): void {
-  const preset = selectedEqPreset()
-  if (isPresetCarried(def) && preset) {
-    editEqPreset(preset.id, { [def.name]: values })
-  } else {
-    editProfile(state.selected_profile, { [def.name]: values })
-  }
+  const item = sourceItem(def)
+  const edit = item.preset ? editEqPreset : editProfile
+  edit(item.id, { [def.name]: values })
 }
 
 /**
@@ -84,10 +94,7 @@ export function commitParam(
  * round trip (ADR-0005).
  */
 export function liveParam(def: ParameterDef, values: readonly number[]): void {
-  const preset = selectedEqPreset()
-  if (isPresetCarried(def) && preset) {
-    editEqPresetLive(preset.id, { [def.name]: values })
-  } else {
-    editProfileLive(state.selected_profile, { [def.name]: values })
-  }
+  const item = sourceItem(def)
+  const edit = item.preset ? editEqPresetLive : editProfileLive
+  edit(item.id, { [def.name]: values })
 }

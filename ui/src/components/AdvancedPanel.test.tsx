@@ -322,7 +322,7 @@ it('starts stored categories collapsed and the rest expanded', () => {
   }
 })
 
-// — Discrete controls + write routing (#86) —
+// — Discrete controls + the Source rule's write half (#86) —
 
 /** The `edit_profile` / `edit_eq_preset` frames the client sent. */
 const sentEdits = (socket: MockWebSocket) =>
