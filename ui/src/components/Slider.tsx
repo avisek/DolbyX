@@ -5,7 +5,6 @@ import {
   toNorm,
   type Modifiers,
   type StepAxis,
-  type StepScale,
 } from '../lib/step'
 
 /** PageUp / PageDown step as Shift does, whatever is held. */
@@ -20,8 +19,7 @@ const COARSE: Modifiers = { altKey: false, shiftKey: true }
  * paints track / fill / thumb from `--norm`, the component sets no
  * geometry.
  *
- * Keys follow the Step rule (`fine`, `scale`; Alt / Shift from the
- * event): ← ↓ / → ↑ one step, PageUp / PageDown the Shift step, Home /
+ * Keys follow the Step rule (`axis`; Alt / Shift from the event): ← ↓ / → ↑ one step, PageUp / PageDown the Shift step, Home /
  * End the bounds — each a live write, like the box's ↑ / ↓. Pointer:
  * a press captures, focuses the slider, and maps absolute x over the
  * track to a lattice value, live; moves follow; release commits the
@@ -36,12 +34,9 @@ const Slider: Component<{
   name: string
   /** Store truth, display units. */
   value: () => number
-  min: number
-  max: number
-  /** One raw unit in display units — the step lattice. */
-  fine: number
-  /** `log` for frequencies: log position, multiplicative steps. */
-  scale?: StepScale | undefined
+  /** Range, lattice, and scale — the Step rule's axis, display units;
+   * `log` positions logarithmically. */
+  axis: StepAxis
   /** The kind's unit label — `aria-valuetext` carries it; empty omits. */
   unit: string
   disabled?: boolean | undefined
@@ -50,18 +45,12 @@ const Slider: Component<{
 }> = (props) => {
   let track!: HTMLSpanElement
   const disabled = () => props.disabled === true
-  const axis = (): StepAxis => ({
-    min: props.min,
-    max: props.max,
-    fine: props.fine,
-    scale: props.scale,
-  })
 
   /** Absolute pointer x → lattice value over the track's box. */
   const valueAt = (event: PointerEvent): number => {
     const rect = track.getBoundingClientRect()
     const norm = (event.clientX - rect.left) / (rect.width || 1)
-    return fromNorm(axis(), Math.min(1, Math.max(0, norm)))
+    return fromNorm(props.axis, Math.min(1, Math.max(0, norm)))
   }
 
   let dragging = false
@@ -85,15 +74,15 @@ const Slider: Component<{
       tabindex={disabled() ? -1 : 0}
       aria-label={props.name}
       aria-disabled={disabled() ? 'true' : undefined}
-      aria-valuemin={props.min}
-      aria-valuemax={props.max}
+      aria-valuemin={props.axis.min}
+      aria-valuemax={props.axis.max}
       aria-valuenow={props.value()}
       aria-valuetext={
         props.unit === '' ? undefined : `${String(props.value())} ${props.unit}`
       }
       style={{
         '--value': String(props.value()),
-        '--norm': String(toNorm(axis(), props.value())),
+        '--norm': String(toNorm(props.axis, props.value())),
       }}
       onPointerDown={(event) => {
         if (disabled() || event.button !== 0) return
@@ -126,13 +115,14 @@ const Slider: Component<{
         const from = props.value()
         let next: number
         if (key === 'ArrowRight' || key === 'ArrowUp') {
-          next = stepped(axis(), from, 1, event)
+          next = stepped(props.axis, from, 1, event)
         } else if (key === 'ArrowLeft' || key === 'ArrowDown') {
-          next = stepped(axis(), from, -1, event)
-        } else if (key === 'PageUp') next = stepped(axis(), from, 1, COARSE)
-        else if (key === 'PageDown') next = stepped(axis(), from, -1, COARSE)
-        else if (key === 'Home') next = props.min
-        else if (key === 'End') next = props.max
+          next = stepped(props.axis, from, -1, event)
+        } else if (key === 'PageUp') next = stepped(props.axis, from, 1, COARSE)
+        else if (key === 'PageDown')
+          next = stepped(props.axis, from, -1, COARSE)
+        else if (key === 'Home') next = props.axis.min
+        else if (key === 'End') next = props.axis.max
         else return
         props.onLive?.(next)
         event.preventDefault()

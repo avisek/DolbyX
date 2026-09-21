@@ -1342,10 +1342,11 @@ const pressTrack = (node: HTMLElement, clientX: number) =>
 
 // Behavior 5 (#89): a press maps absolute x over the track — x 100 of
 // 200 on `dhsb` (0–6 dB) is 3 dB, raw 48 on the 1/16-dB lattice — one
-// live frame; the release commits the last value once (observable
-// when a peer moved the truth mid-drag; the live write already
-// applied). The slider takes focus, the box does not.
-it('a press at the track midpoint writes the lattice-snapped raw live; release commits; slider focused', () => {
+// live frame; the slider takes focus, the box does not. The release
+// commits the last value through the box's guarded commit (#87): the
+// live write already landed it, so a plain release sends nothing; a
+// peer's edit mid-drag makes the release re-assert the drag's end.
+it('a press at the track midpoint writes the lattice-snapped raw live; release commits only over a peer edit; slider focused', () => {
   renderOpen()
   const socket = connect()
   applySnapshot(fixtureStateWithParams({ dhsb: [0] }))
@@ -1364,16 +1365,20 @@ it('a press at the track midpoint writes the lattice-snapped raw live; release c
   expect(document.activeElement).not.toBe(
     field('Headphone Virtualizer Surround Boost'),
   )
+  fireEvent.pointerUp(boost, { pointerId: 1, button: 0 })
+  expect(sentParams(socket)).toEqual([{ dhsb: [48] }]) // nothing to commit
 
+  pressTrack(boost, 100)
   applySnapshot(fixtureStateWithParams({ dhsb: [80] })) // a peer's edit
   fireEvent.pointerUp(boost, { pointerId: 1, button: 0 })
   expect(sentParams(socket)).toEqual([
-    { dhsb: [48] }, // live
+    { dhsb: [48] },
+    { dhsb: [48] }, // the second press, live
     { dhsb: [48] }, // the release commit, against the changed truth
   ])
   // Released: further moves write nothing.
   fireEvent.pointerMove(boost, { pointerId: 1, clientX: 150 })
-  expect(sentEdits(socket)).toHaveLength(2)
+  expect(sentEdits(socket)).toHaveLength(3)
 })
 
 // Behavior 5 (#89): a move while pressed follows x — one live frame

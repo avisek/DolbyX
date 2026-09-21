@@ -7,6 +7,7 @@ import {
   type ParameterDef,
 } from '../lib/parameters'
 import { displayValue, fineStep, rawValue, scaleOf } from '../lib/scalar'
+import type { StepAxis } from '../lib/step'
 import { rawToDisplay } from '../lib/units'
 import {
   commitParam,
@@ -62,8 +63,8 @@ function isNumericScalar(def: ParameterDef): boolean {
 
 /**
  * A numeric scalar's control: the box, then the Slider (#89) — the two
- * share `value`, `min`, `max`, `fine`, `scale`, `unit`, all in display
- * units, and the same two write paths. Writable: typing, keys, the
+ * share `value`, the Step rule's `axis`, `unit`, all in display units,
+ * and the same two write paths. Writable: typing, keys, the
  * Scrub (#88) and the drag write live; blur / Enter / release commit —
  * both through the Source rule as raw clamped to the def's range.
  * Read-only: the same box, `readonly`, and a disabled Slider, both
@@ -76,13 +77,13 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
   const def = props.def
   const writable = isWritable(def)
   const value = () => displayValue(def, head(def))
-  const shared = {
+  const axis: StepAxis = {
     min: displayValue(def, def.min),
     max: displayValue(def, def.max),
     fine: fineStep(def),
     scale: scaleOf(def),
-    unit: unitLabel(def.kind),
   }
+  const unit = unitLabel(def.kind)
   const onLive = writable
     ? (next: number) => {
         liveParam(def, [rawValue(def, next)])
@@ -102,7 +103,8 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
         id={controlId(def)}
         name={props.name}
         value={value}
-        {...shared}
+        axis={axis}
+        unit={unit}
         readOnly={!writable}
         scrub={writable}
         onLive={onLive}
@@ -111,7 +113,8 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
       <Slider
         name={props.name}
         value={value}
-        {...shared}
+        axis={axis}
+        unit={unit}
         disabled={!writable}
         onLive={onLive}
         onCommit={onCommit}
