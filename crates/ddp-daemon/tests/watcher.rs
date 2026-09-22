@@ -21,6 +21,12 @@ fn engine_heard(stub: &ddp_engine::StubBackend, param: &str, values: &[i16]) -> 
     })
 }
 
+/// The window rule's ceiling over a measured span: one event per
+/// elapsed [`WINDOW`], plus the leading and trailing edges.
+fn window_ceiling(span: std::time::Duration) -> usize {
+    usize::try_from(span.as_millis() / WINDOW.as_millis()).expect("small") + 2
+}
+
 /// The tracer bullet — behavior 1: an external `config.toml` edit
 /// re-resolves state within ~150 ms, broadcasts a fresh snapshot to
 /// every client, and the live engine session hears the new value.
@@ -138,61 +144,60 @@ async fn root_key_edits_apply_like_mutations() {
 
 /// Behavior 4: rapid successive external writes collapse to one
 /// reload per window — and a sustained external writer tracks at
-/// ~10 Hz: reloads land throughout the stream (never starved to a
-/// single trailing one), and the final value wins.
+/// window cadence: reloads land throughout the stream (never starved
+/// to a single trailing one), and the final value wins.
 #[tokio::test]
 async fn a_sustained_external_writer_tracks_at_window_cadence() {
     let daemon = start_daemon().await;
     let config = daemon.dir.path().join("data").join("config.toml");
     let mut ws = connected(daemon.addr()).await;
 
-    // 41 distinct documents, 20 ms apart (~800 ms) — every write a
-    // fresh value, ending on a 9 sentinel.
+    // 41 distinct documents, 20 ms apart (~800 ms unloaded; a loaded
+    // runner stretches it — the bound below is derived from the
+    // measured span, never assumed). The last write is `dvla = 10`:
+    // the param's max, written once, so it marks the true last reload.
     let path = config.clone();
+    let started = tokio::time::Instant::now();
     let writer = tokio::task::spawn_blocking(move || {
         for value in (0..40).map(|i| i % 10) {
             std::fs::write(&path, format!("[profile.music]\ndvla = {value}\n"))
                 .expect("external write");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        std::fs::write(&path, "[profile.music]\ndvla = 9\n").expect("external write");
+        std::fs::write(&path, "[profile.music]\ndvla = 10\n").expect("external write");
     });
-
-    // Collect reloads until the sentinel lands, then drain the quiet
-    // tail. Bounded by time, not by inter-frame gaps: a loaded runner
-    // can stall the socket past any gap a "settled" heuristic picks.
     writer.await.expect("writer thread");
-    let sentinel = |frame: &serde_json::Value| {
-        profile(frame, "music")["params"]["dvla"] == serde_json::json!([9])
+    let span = started.elapsed();
+
+    // Collect reloads until the final value lands. Bounded by time, not
+    // by inter-frame gaps: a loaded runner can stall the socket past
+    // any gap a "settled" heuristic picks.
+    let is_final = |frame: &serde_json::Value| {
+        profile(frame, "music")["params"]["dvla"] == serde_json::json!([10])
     };
     let mut reloads = Vec::new();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
-    while !reloads.last().is_some_and(sentinel) {
+    while !reloads.last().is_some_and(is_final) {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the final value lands (got {} reloads)",
             reloads.len()
         );
-        let frame = recv_state(&mut ws).await;
-        reloads.push(frame);
+        reloads.push(recv_state(&mut ws).await);
     }
-    while let Some(frame) = try_recv_json(&mut ws, 400).await {
-        assert_eq!(frame["type"], "state");
-        reloads.push(frame);
-    }
-
-    let last = reloads.last().expect("at least one reload");
     assert_eq!(
-        profile(last, "music")["params"]["dvla"],
-        serde_json::json!([9]),
-        "the final value wins"
+        try_recv_json(&mut ws, 400).await,
+        None,
+        "the final value wins: nothing trails its reload"
     );
-    // ~800 ms of writes through 100 ms windows: a handful of reloads —
-    // strictly fewer than the 41 writes (collapse), several (tracking).
+
+    // The window rule over the writer's measured span — against 41
+    // writes (collapse); several, not one trailing (tracking).
+    let n = reloads.len();
+    assert!(n >= 3, "reloads track the stream over {span:?}, got {n}");
     assert!(
-        (3..=14).contains(&reloads.len()),
-        "one reload per window, got {}",
-        reloads.len()
+        n <= window_ceiling(span),
+        "one reload per window over {span:?}, got {n}"
     );
 }
 
@@ -245,15 +250,13 @@ async fn a_mutation_burst_rewrites_at_window_cadence() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // event drain
 
     let replaces = rx.try_iter().count();
-    // One replace per elapsed window, plus the leading and trailing
-    // edges — against 20 mutations.
-    let ceiling = usize::try_from(span.as_millis() / WINDOW.as_millis()).expect("small") + 2;
+    // The window rule over the burst's span — against 20 mutations.
     assert!(
         replaces >= 3,
         "mid-burst rewrites must land (leading edge + windows), got {replaces}"
     );
     assert!(
-        replaces <= ceiling,
+        replaces <= window_ceiling(span),
         "at most one replace per window, got {replaces} over {span:?}"
     );
 }
