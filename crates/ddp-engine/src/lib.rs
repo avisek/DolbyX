@@ -21,11 +21,10 @@ pub use stub::{Call, StubBackend};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(pub u32);
 
-/// The vis tail every `process` reply carries: the four
-/// ReadOnly-Dynamic arrays plus the `gebg` in force for that block
-/// (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe ‖ gebg`, 5 × 20 i16). Pairing `gebg`
-/// with the `vcbg` it produced lets the GEQ editor rebase a touch by
-/// `vcbg − gebg` exactly, whatever the round-trip delay (issue #105).
+/// The vis tail every `process` reply carries (`vnbg ‖ vnbe ‖ vcbg ‖
+/// vcbe ‖ gebg`, 5 × 20 i16): the four ReadOnly-Dynamic arrays plus
+/// the `gebg` the DSP applied in that block
+/// ([`protocol::VIS_TAIL_NAMES`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisFrame {
     /// Native-grid per-band EQ gains.

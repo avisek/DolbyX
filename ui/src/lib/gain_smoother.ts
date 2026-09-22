@@ -122,11 +122,10 @@ export class GainSmoother {
   /**
    * Queues a touch: `dB` for `band`, less `offset` — the band's non-GEQ
    * contribution as the caller measured it (one frame's `vcbg − gebg`,
-   * display dB), so the painted user gain plus that contribution lands
-   * where the finger points. The smoother's own state plays no part in
-   * the rebase (issue #105: reading its last gain against a delayed
-   * frame fed the delay back as oscillation). Re-enqueueing a band
-   * moves it to the drain tail; the last value wins.
+   * display dB), so the painted gain plus that contribution lands where
+   * the finger points. The smoother's own state never enters the
+   * rebase. Re-enqueueing a band moves it to the drain tail; the last
+   * value wins.
    */
   enqueue(band: number, dB: number, offset = 0): void {
     this.queue.delete(band)

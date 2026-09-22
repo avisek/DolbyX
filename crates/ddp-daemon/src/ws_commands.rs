@@ -219,8 +219,7 @@ pub(crate) struct VisParams {
     vcbg: [i16; 20],
     /// Custom-grid per-band spectrum excitations.
     vcbe: [i16; 20],
-    /// The GEQ gains the DSP applied in this block — paired with
-    /// `vcbg` so the editor's rebase is delay-proof (issue #105).
+    /// The GEQ gains the DSP applied in this block.
     gebg: [i16; 20],
 }
 

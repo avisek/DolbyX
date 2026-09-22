@@ -582,17 +582,16 @@ it('a still hold keeps emitting while decay pends, then ticks go quiet', () => {
   expect(edits(socket)).toHaveLength(settledCount)
 })
 
-// Issue #105 — network- and fps-agnostic. The vis round trip is a delay
-// line: the frame the pump reads at tick t reflects the gain sent N
-// ticks earlier. The rebase pairs each frame's `vcbg` with the `gebg`
-// that produced it, so the non-GEQ residual is exact whatever N.
-// Simulated engine: IEQ adds +3 dB (48) on every band — `vcbg[t] =
-// sent[t − N] + 48`, `gebg[t] = sent[t − N]`. A hold at +12 dB (y = 96)
-// on band 10 must send 9 dB (144) on every emitted batch, and the
-// composed curve lands on the finger (192). The superseded `vcbg −
-// smooth[band]` rebase re-applied the UI's own last move per tick —
-// unity-gain feedback through the delay: 9, 18, 27, 36, … rail to rail.
-it.each([1, 3, 8])(
+// Issue #105 — network- and fps-agnostic. The vis round trip is a
+// delay line: the frame the pump reads at tick t reflects the gain
+// sent N ticks earlier — `vcbg[t] = sent[t − N] + IEQ`, `gebg[t] =
+// sent[t − N]`, IEQ +3 dB (48) on every band. Pairing each frame's
+// `vcbg` with its own `gebg` makes the residual exact whatever N: a
+// hold at +12 dB (y = 96) on band 10 sends 9 dB (144) on every emitted
+// batch, and the composed curve lands on the finger (192). N = 1 is
+// the tightest loop, stable even against the smoother's own last gain;
+// from N = 2 that rebase swung rail to rail (9, 18, 18, 9, 0, …).
+it.each([1, 2, 3, 8])(
   'a hold lands where the finger points through an N = %i frame vis delay',
   (delay) => {
     localStorage.setItem('dolbyx.geq.kernel', 'Direct')

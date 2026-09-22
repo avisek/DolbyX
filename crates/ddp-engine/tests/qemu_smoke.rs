@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand, Stdio};
 
 use ddp_engine::protocol::{
-    self, Command, STATUS_INVALID, STATUS_NO_SESSION, STATUS_OK, decode_get_params_reply,
-    param_name, read_reply, write_message,
+    self, Command, STATUS_INVALID, STATUS_NO_SESSION, STATUS_OK, VIS_TAIL_SAMPLES,
+    decode_get_params_reply, param_name, read_reply, write_message,
 };
 use ddp_engine::test_support::staged_engine_dir;
 
@@ -141,7 +141,7 @@ impl Shim {
     }
 
     /// `Process` one block, asserting success and the reply shape —
-    /// the PCM block plus exactly the 200-byte vis tail, on **every**
+    /// the PCM block plus exactly the fixed vis tail, on **every**
     /// reply (bypassed blocks included). Returns `(pcm, vis)`.
     fn process(&mut self, session_id: u32, pcm: &[i16]) -> (Vec<i16>, Vec<i16>) {
         let (status, reply) = self.send(&Command::Process {
@@ -151,7 +151,7 @@ impl Shim {
         assert_eq!(status, STATUS_OK, "Process({session_id})");
         assert_eq!(
             reply.len(),
-            pcm.len() * 2 + 200,
+            (pcm.len() + VIS_TAIL_SAMPLES) * 2,
             "reply carries the block plus the fixed vis tail"
         );
         let mut samples: Vec<i16> = reply
@@ -499,7 +499,7 @@ fn staging_without_the_commit_leaf_still_reshapes() {
     shim.finish();
 }
 
-/// Every `Process` reply carries the fixed 200-byte vis tail —
+/// Every `Process` reply carries the fixed vis tail —
 /// `Shim::process` asserts the exact length on every call, including
 /// the bypassed block here (vis is process-driven, not power-gated).
 /// With a tone playing and one `[vcnb, vcbf, ven]` batch (the custom
@@ -510,7 +510,7 @@ fn staging_without_the_commit_leaf_still_reshapes() {
 /// the native pair goes live and the custom pair mirrors it — the
 /// custom grid here *is* the native table. The fifth array is the
 /// `gebg` in force: the registry's power-on zeros, then the last
-/// `set_params` write verbatim (issue #105).
+/// `set_params` write verbatim.
 #[test]
 #[expect(
     clippy::similar_names,
@@ -558,7 +558,8 @@ fn every_process_reply_carries_the_vis_tail() {
     }
     shim.set_params(session, &[("gebg", &written)]);
     let (_, vis) = shim.process(session, &sine_block(0, 44_100, 8000.0));
-    assert_eq!(vis[80..], written, "gebg slot == the write in force");
+    let (_, gebg) = vis.split_at(vis.len() - 20);
+    assert_eq!(gebg, written, "gebg slot == the write in force");
     shim.finish();
 }
 

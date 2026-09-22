@@ -4,9 +4,8 @@
 //! contract is pinned for every later slice: enabled → deterministic
 //! marker transform (bitwise NOT — ferried audio stays distinguishable
 //! from dry passthrough), disabled → echo (bypass identity), vis tail
-//! fabricated — except its `gebg`, which reports the session's last
-//! `set_params` write, so the `vcbg`/`gebg` pairing is provable
-//! without qemu. A failure plan ([`StubBackend::fail_next`] /
+//! fabricated, `gebg` echoing the session's last `set_params` write.
+//! A failure plan ([`StubBackend::fail_next`] /
 //! [`StubBackend::fail_forever`]) injects backend failures for the
 //! supervisor's recovery paths.
 
@@ -225,11 +224,9 @@ impl Engine for StubBackend {
             output.copy_from_slice(input);
         }
         let mut gebg = [0_i16; 20];
-        for (slot, value) in gebg
-            .iter_mut()
-            .zip(session.params.get("gebg").into_iter().flatten())
-        {
-            *slot = *value;
+        if let Some(written) = session.params.get("gebg") {
+            let n = written.len().min(gebg.len());
+            gebg[..n].copy_from_slice(&written[..n]);
         }
         Ok(VisFrame {
             gebg,

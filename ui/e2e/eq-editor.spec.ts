@@ -359,11 +359,10 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
 
     // Within a block the vis feed reports the engine applying it: the
     // composed response — not a registry echo, so transition slopes
-    // spill between neighbouring bands (3 dB grants that); the held
-    // band converged on the finger (one raw step — the rebase pairs
-    // each frame's `vcbg` with its `gebg`, so the hold never swings,
-    // issue #105), and the once-bypassed filterbank is audibly
-    // engaged.
+    // spill between neighbouring bands (3 dB grants that); the settled
+    // write reads back through band 19's composed response within one
+    // raw step (the hold never swings — #105), and the once-bypassed
+    // filterbank is audibly engaged.
     await expect
       .poll(
         () => {

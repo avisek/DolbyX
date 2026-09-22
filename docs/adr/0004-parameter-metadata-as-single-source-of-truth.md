@@ -33,9 +33,7 @@ and leaves the values to curation. The deliberate divergences:
   full-int16 bounds): the engine's own help pins "scaled by 16 ie.
   16 = 1 dB", ddp/02 the output range `[-192, 576]`. The remaining
   by-ref slots (`vnbf`, build/license identity) stay API-verbatim —
-  nothing consumes their bounds. (The vis tail also carries `gebg` —
-  a Settable param, coded the same — beside them; see CONTEXT.md
-  **Vis tail**.)
+  nothing consumes their bounds.
 
 **Power-on defaults live in the twin**: the fresh-`ak_open` registry
 state (`make dump-defaults`) — deterministic, rate-independent, stable

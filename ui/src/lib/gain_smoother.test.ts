@@ -326,12 +326,11 @@ it('pins the pseudoinverses centro-symmetric', () => {
 })
 
 // Issue #105: `offset` is the band's non-GEQ contribution as the
-// caller measured it (`vcbg − gebg` of one frame) — the touch paints
-// `dB − offset`, and the smoother's own last gain plays no part. With
-// band 5 rehydrated at +10 dB (160), touch 12 dB against offset 3
-// paints 9 dB → 144; the superseded `ref − smooth[band]` rebase would
-// have read 12 − (3 − 10) = 19 dB → 304. Omitting `offset` is the raw
-// path: the touch paints as-is.
+// caller measured it (one frame's `vcbg − gebg`); the touch paints
+// `dB − offset`, the smoother's own last gain playing no part. Band 5
+// rehydrated at +10 dB (160): touch 12 against offset 3 → 9 dB (144);
+// a `ref − smooth[band]` rebase would read 19 dB (304). No offset ⇒
+// the raw path.
 it('paints dB − offset, independent of its own last gain', () => {
   const direct = new GainSmoother('Direct')
   direct.rehydrate([0, 0, 0, 0, 0, 160])

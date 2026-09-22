@@ -230,13 +230,10 @@ const EqCurve: Component = () => {
 
   /**
    * Queues one touch. The offset follows the source rule: sourcing
-   * the feed → the band's non-GEQ contribution, `vcbg − gebg` of one
-   * frame (the composed curve less the `gebg` the DSP applied in that
-   * very block), rebases the touch so the painted Brush-buffer value
-   * plus that contribution lands where the finger points — exact
-   * whatever the round-trip delay, so a held finger never swings
-   * (issue #105); sourcing resolved state → the raw path (the
-   * original's suspended branch).
+   * the feed → one frame's `vcbg − gebg`, the composed curve less the
+   * `gebg` the DSP applied in that block — exact under any round-trip
+   * delay, so a hold never swings (ADR-0008); sourcing resolved state
+   * → the raw path (the original's suspended branch).
    */
   const queueTouch = ({ band, dB }: EditorTouch): void => {
     const frame = liveFrame()
