@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   fixtureBootstrap,
   fixtureCategories,
+  fixtureParams,
   fixtureState,
   fixtureStateWithParams,
   fixtureVis,
@@ -1779,7 +1780,8 @@ function packedAobg(
   channels: readonly { id: number; gains: readonly number[] }[],
 ): number[] {
   const packed = channels.flatMap(({ id, gains }) => [id, ...gains])
-  return [...packed, ...Array<number>(329 - packed.length).fill(0)]
+  const length = fixtureParams().find((def) => def.name === 'aobg')?.length
+  return [...packed, ...Array<number>((length ?? 0) - packed.length).fill(0)]
 }
 
 /** The stereo pair's 20-band gains: L ramps from −10 dB by 1 dB, R sits
@@ -1797,7 +1799,8 @@ const chanText = (row: HTMLElement) =>
 // Behavior 8 (#90): `aobg` under `aocc = 2, aonb = 20` over
 // `[2, g₁…g₂₀, 3, h₁…h₂₀, 0…]` is two channel rows — `ch 2` / `ch 3`
 // from the data, each strip 20 bands — the second row's band 1 showing
-// h₁ (raw −152 = −9.5 dB); the meta reads the channel × band shape.
+// h₁: raw −152 is −9.5 dB, 328 of the 960-wide −480…480 range; the
+// meta reads the channel × band shape.
 it('renders aobg as one row per channel, ids from the data, gains in dB', () => {
   const panel = renderOpen()
   applySnapshot(
@@ -1828,7 +1831,7 @@ it('renders aobg as one row per channel, ids from the data, gains in dB', () => 
   expect(bands(strips[1] as HTMLElement)).toHaveLength(20)
   expect(barVars(bands(strips[1] as HTMLElement)[0] as HTMLElement)).toEqual({
     value: -9.5,
-    norm: (-152 + 480) / 960,
+    norm: 328 / 960,
   })
   expect(barVars(bands(strips[0] as HTMLElement)[0] as HTMLElement).value).toBe(
     -10,
@@ -1883,44 +1886,10 @@ it('renders aobg under aocc = 0 as the empty state with no rows', () => {
   expect(meta(panel, 'aobg')?.textContent).toBe('no channels configured')
 })
 
-// Behavior 13 (#90): the ReadOnly-Dynamic cards are Live arrays — a
-// `vis` event re-values `vcbg`'s bands (raw 40 = 2.5 dB over −12…36:
-// (40 + 192) / 768), a second event overrides, and silence changes
-// nothing: no idle modifier ever, the last frame held.
-it('a vis event re-values the live vcbg bands; the last frame holds through silence', () => {
-  vi.useFakeTimers()
-  try {
-    const panel = renderOpen()
-    const socket = connect()
-    const gains = strip(panel, 'vcbg')
-    expect(gains.closest('.adv-bands')?.classList).toContain('adv-bands--live')
-    const first = () => barVars(bands(gains)[0] as HTMLElement)
-    expect(first()).toEqual({ value: 0, norm: 192 / 768 }) // the table default
-
-    socket.serverMessage({
-      type: 'vis',
-      params: fixtureVis({ vcbg: [40, -8] }),
-    })
-    expect(first()).toEqual({ value: 2.5, norm: 232 / 768 })
-    expect(barVars(bands(gains)[1] as HTMLElement).value).toBe(-0.5)
-
-    socket.serverMessage({ type: 'vis', params: fixtureVis({ vcbg: [-24] }) })
-    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
-
-    vi.advanceTimersByTime(1000)
-    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
-    const classes = [...card(panel, 'vcbg').querySelectorAll('*')].flatMap(
-      (node) => [...node.classList],
-    )
-    expect(classes.some((name) => /idle/.test(name))).toBe(false)
-  } finally {
-    vi.useRealTimers()
-  }
-})
-
-// Behavior 11 (#90): an Opaque blob is the same DOM flagged
+// Behavior 11 (#90): an `opaque` array is the same DOM flagged
 // `--opaque` + `--ro`: readonly editors carrying the raw integers
-// (the skin draws cells), `--norm` still published, the meta counting
+// (the skin draws cells), `--norm` still published — 16708 sits 49476
+// up the 65535-wide i16 range, 80 sits 32848 — the meta counting
 // values; no interaction writes anything.
 it('renders bndl as opaque, read-only cells with raw integers and no writes', () => {
   const panel = renderOpen()
@@ -1935,8 +1904,8 @@ it('renders bndl as opaque, read-only cells with raw integers and no writes', ()
   expect(editors.map((editor) => editor.value)).toEqual(['16708', '80'])
   expect(editors.every((editor) => editor.readOnly)).toBe(true)
   expect(bands(cells).map((band) => barVars(band))).toEqual([
-    { value: 16708, norm: (16708 + 32768) / 65535 },
-    { value: 80, norm: (80 + 32768) / 65535 },
+    { value: 16708, norm: 49476 / 65535 },
+    { value: 80, norm: 32848 / 65535 },
   ])
   expect(meta(panel, 'bndl')?.textContent).toBe('2 values')
 
@@ -1974,4 +1943,39 @@ it('renders vnbf from the snapshot readouts', () => {
   ])
   expect(meta(panel, 'vnbf')?.textContent).toBe('4 of 20 bands · Hz')
   expect(card(panel, 'vnbf').getAttribute('for')).toBe('adv-vnbf-b0')
+})
+
+// Behavior 13 (#90): the ReadOnly-Dynamic cards are Live arrays — a
+// `vis` event re-values `vcbg`'s bands (raw 40 = 2.5 dB over −12…36:
+// (40 + 192) / 768), a second event overrides, and silence changes
+// nothing: no idle modifier ever, the last frame held.
+it('a vis event re-values the live vcbg bands; the last frame holds through silence', () => {
+  vi.useFakeTimers()
+  try {
+    const panel = renderOpen()
+    const socket = connect()
+    const gains = strip(panel, 'vcbg')
+    expect(gains.closest('.adv-bands')?.classList).toContain('adv-bands--live')
+    const first = () => barVars(bands(gains)[0] as HTMLElement)
+    expect(first()).toEqual({ value: 0, norm: 192 / 768 }) // the table default
+
+    socket.serverMessage({
+      type: 'vis',
+      params: fixtureVis({ vcbg: [40, -8] }),
+    })
+    expect(first()).toEqual({ value: 2.5, norm: 232 / 768 })
+    expect(barVars(bands(gains)[1] as HTMLElement).value).toBe(-0.5)
+
+    socket.serverMessage({ type: 'vis', params: fixtureVis({ vcbg: [-24] }) })
+    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
+
+    vi.advanceTimersByTime(1000)
+    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
+    const classes = [...card(panel, 'vcbg').querySelectorAll('*')].flatMap(
+      (node) => [...node.classList],
+    )
+    expect(classes.some((name) => /idle/.test(name))).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
 })

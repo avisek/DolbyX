@@ -1,18 +1,13 @@
-import {
-  For,
-  Index,
-  Show,
-  createSignal,
-  type Accessor,
-  type Component,
-} from 'solid-js'
+import { For, Index, Show, createSignal, type Component } from 'solid-js'
 import { unitLabel, type ParameterDef } from '../lib/parameters'
 import { axisOf, displayValue } from '../lib/scalar'
 import {
   channelRows,
   effectiveCount,
+  isLive,
   isWritable,
   paramValues,
+  type ChannelRow,
 } from '../store/wiring'
 import NumberInput from './NumberInput'
 
@@ -57,7 +52,7 @@ const withUnit = (def: ParameterDef, text: string, sep = ' '): string => {
 }
 
 /** The meta line's `band N · value unit` for one band. */
-const describe = (def: ParameterDef, slot: number, raw: number): string =>
+const bandText = (def: ParameterDef, slot: number, raw: number): string =>
   `band ${String(slot + 1)} · ${withUnit(def, String(displayValue(def, raw)))}`
 
 /**
@@ -75,7 +70,7 @@ const Strip: Component<{
   count: () => number
   raw: (slot: number) => number
   idFor: (slot: number) => string
-  hover: Accessor<Hovered | undefined>
+  hover: () => Hovered | undefined
   onHover: (at: Hovered | undefined) => void
 }> = (props) => {
   // Static per strip, like the factory's `def`.
@@ -148,165 +143,118 @@ const Strip: Component<{
   )
 }
 
-/** The props the two shapes share with their container. */
-interface ShapeProps {
-  def: ParameterDef
-  name: string
-  hover: Accessor<Hovered | undefined>
-  onHover: (at: Hovered | undefined) => void
-}
+/** A source shorter than the count (a snapshot carrying fewer slots
+ * than the allocation) reads the table default for the tail. */
+const rawAt = (def: ParameterDef, slot: number): number =>
+  paramValues(def)[slot] ?? def.default[slot] ?? def.min
 
-/**
- * The plain shape: one row, one strip of `effectiveCount` bands over
- * the Source rule's values; an Opaque blob summarises as `N values`,
- * anything else as `count of length bands`.
- */
-const PlainBands: Component<ShapeProps> = (props) => {
-  // Static per card, like the factory's `def`.
-  // eslint-disable-next-line solid/reactivity
-  const def = props.def
-  const count = (): number => effectiveCount(def)
-  // A source shorter than the count (a snapshot carrying fewer slots
-  // than the allocation) reads the table default for the tail.
-  const raw = (slot: number): number =>
-    paramValues(def)[slot] ?? def.default[slot] ?? def.min
-  const summary = (): string =>
+/** The plain meta: the hovered band, else `count of length bands` —
+ * an `opaque` kind counts `values`. */
+function plainMeta(def: ParameterDef, at: Hovered | undefined): string {
+  if (at) return bandText(def, at.slot, rawAt(def, at.slot))
+  return withUnit(
+    def,
     def.kind === 'opaque'
-      ? withUnit(def, `${String(def.length)} values`, ' · ')
-      : withUnit(
-          def,
-          `${String(count())} of ${String(def.length)} bands`,
-          ' · ',
-        )
-  const meta = (): string => {
-    const at = props.hover()
-    return at ? describe(def, at.slot, raw(at.slot)) : summary()
-  }
-  return (
-    <>
-      <div class="adv-bands__row">
-        <Strip
-          def={def}
-          name={props.name}
-          row={0}
-          count={count}
-          raw={raw}
-          idFor={(slot) => bandInputId(def, slot)}
-          hover={props.hover}
-          onHover={props.onHover}
-        />
-      </div>
-      <div class="adv-bands__meta" aria-live="polite">
-        {meta()}
-      </div>
-    </>
+      ? `${String(def.length)} values`
+      : `${String(effectiveCount(def))} of ${String(def.length)} bands`,
+    ' · ',
   )
 }
 
-/**
- * The `aobg` (`AobgChannelMajor`) shape: one row per packed channel
- * set (`channelRows`), each labelled `ch <id>` from the data, its
- * strip the set's gains; the meta reads `channels × bands`, the
- * hovered band prefixed by its channel. No rows is the empty state.
- */
-const ChannelBands: Component<ShapeProps> = (props) => {
-  // Static per card, like the factory's `def`.
-  // eslint-disable-next-line solid/reactivity
-  const def = props.def
-  const rows = () => channelRows(def)
-  const summary = (): string => {
-    const found = rows()
-    const bands = found[0]?.gains.length
-    if (bands === undefined) return 'no channels configured'
-    return withUnit(
-      def,
-      `${String(found.length)} channels × ${String(bands)} bands`,
-      ' · ',
-    )
+const gainAt = (def: ParameterDef, row: ChannelRow, slot: number): number =>
+  row.gains[slot] ?? def.min
+
+/** The `aobg` meta: the hovered band under its channel, else
+ * `channels × bands`; no rows is the empty state. */
+function channelMeta(def: ParameterDef, at: Hovered | undefined): string {
+  const rows = channelRows(def)
+  const row = at && rows[at.row]
+  if (at && row) {
+    return `ch ${String(row.id)} · ${bandText(def, at.slot, gainAt(def, row, at.slot))}`
   }
-  const meta = (): string => {
-    const at = props.hover()
-    const row = at && rows()[at.row]
-    if (!at || !row) return summary()
-    const gain = row.gains[at.slot] ?? def.min
-    return `ch ${String(row.id)} · ${describe(def, at.slot, gain)}`
-  }
-  return (
-    <>
-      <Index each={rows()}>
-        {(row, chan) => (
-          <div class="adv-bands__row">
-            <span
-              class="adv-bands__chan"
-              title={`engine channel id ${String(row().id)}`}
-            >
-              ch {String(row().id)}
-            </span>
-            <Strip
-              def={def}
-              name={`${props.name} channel ${String(row().id)}`}
-              row={chan}
-              count={() => row().gains.length}
-              raw={(slot) => row().gains[slot] ?? def.min}
-              idFor={(slot) => bandInputId(def, slot, chan)}
-              hover={props.hover}
-              onHover={props.onHover}
-            />
-          </div>
-        )}
-      </Index>
-      <div class="adv-bands__meta" aria-live="polite">
-        {meta()}
-      </div>
-    </>
+  const bands = rows[0]?.gains.length
+  if (bands === undefined) return 'no channels configured'
+  return withUnit(
+    def,
+    `${String(rows.length)} channels × ${String(bands)} bands`,
+    ' · ',
   )
 }
 
 /**
  * The Band strip (#90), a shared control — the one DOM every
  * `length > 1` param renders; kind decides structure, access gates
- * editability. Rows of `role=group` strips — one, or one per `aobg`
- * channel — each band a bar publishing `--value` / `--norm` plus a
- * `readonly`, `tabindex=-1` editor until band editing lands (#91).
- * Hover marks a band and describes it on the meta line; leaving
- * restores the summary. Modifiers from access — `--ro` for either
- * read-only bucket, `--live` for the Live arrays (the last `vis`
- * frame held, no idle state), `--opaque` for the blobs the skin draws
- * as cells. Values through the Source rule (`paramValues`); no layout
+ * editability. Rows of `role=group` strips — one of `effectiveCount`
+ * bands over the Source rule's values, or one per packed `aobg`
+ * channel set (`channelRows`) labelled `ch <id>` from the data — each
+ * band a bar publishing `--value` / `--norm` plus a `readonly`,
+ * `tabindex=-1` editor until band editing lands (#91). Hover marks a
+ * band and describes it on the meta line; leaving restores the
+ * summary. Modifiers from access — `--ro` for either read-only bucket,
+ * `--live` for the Live arrays (the last `vis` frame held, no idle
+ * state), `--opaque` for the blobs the skin draws as cells. No layout
  * policy — the skin lays the bands out (ADR-0011).
  */
 const BandArray: Component<{ def: ParameterDef; name: string }> = (props) => {
   // Static per card, like the factory's `def`.
   // eslint-disable-next-line solid/reactivity
   const def = props.def
+  const channelMajor = isChannelMajor(def)
   const [hover, setHover] = createSignal<Hovered>()
+  const meta = (): string =>
+    channelMajor ? channelMeta(def, hover()) : plainMeta(def, hover())
   return (
     <div
       class="adv-bands"
       classList={{
         'adv-bands--ro': !isWritable(def),
-        'adv-bands--live': def.access === 'read_only_dynamic',
+        'adv-bands--live': isLive(def),
         'adv-bands--opaque': def.kind === 'opaque',
       }}
     >
       <Show
-        when={isChannelMajor(def)}
+        when={channelMajor}
         fallback={
-          <PlainBands
-            def={def}
-            name={props.name}
-            hover={hover}
-            onHover={setHover}
-          />
+          <div class="adv-bands__row">
+            <Strip
+              def={def}
+              name={props.name}
+              row={0}
+              count={() => effectiveCount(def)}
+              raw={(slot) => rawAt(def, slot)}
+              idFor={(slot) => bandInputId(def, slot)}
+              hover={hover}
+              onHover={setHover}
+            />
+          </div>
         }
       >
-        <ChannelBands
-          def={def}
-          name={props.name}
-          hover={hover}
-          onHover={setHover}
-        />
+        <Index each={channelRows(def)}>
+          {(row, chan) => (
+            <div class="adv-bands__row">
+              <span
+                class="adv-bands__chan"
+                title={`engine channel id ${String(row().id)}`}
+              >
+                ch {String(row().id)}
+              </span>
+              <Strip
+                def={def}
+                name={`${props.name} channel ${String(row().id)}`}
+                row={chan}
+                count={() => row().gains.length}
+                raw={(slot) => gainAt(def, row(), slot)}
+                idFor={(slot) => bandInputId(def, slot, chan)}
+                hover={hover}
+                onHover={setHover}
+              />
+            </div>
+          )}
+        </Index>
       </Show>
+      <div class="adv-bands__meta" aria-live="polite">
+        {meta()}
+      </div>
     </div>
   )
 }

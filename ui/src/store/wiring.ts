@@ -30,6 +30,11 @@ export function isWritable(def: ParameterDef): boolean {
   return def.access === 'settable' || def.access === 'experimental'
 }
 
+/** Whether the card is a Live array — ReadOnly-Dynamic, fed by `vis`. */
+export function isLive(def: ParameterDef): boolean {
+  return def.access === 'read_only_dynamic'
+}
+
 /**
  * A card's current raw values (engine-native i16): ReadOnly-Static from
  * the snapshot's Readouts; ReadOnly-Dynamic from the last `vis` frame (a
@@ -42,9 +47,7 @@ export function paramValues(def: ParameterDef): readonly number[] {
   if (def.access === 'read_only_static') {
     return state.readouts[def.name] ?? def.default
   }
-  if (def.access === 'read_only_dynamic') {
-    return visArray(def.name) ?? def.default
-  }
+  if (isLive(def)) return visArray(def.name) ?? def.default
   if (isPresetCarried(def)) return resolvedEqParam(def.name) ?? def.default
   return selectedProfile()?.params[def.name] ?? def.default
 }
