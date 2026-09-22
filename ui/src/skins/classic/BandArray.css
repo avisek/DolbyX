@@ -5,8 +5,9 @@
    Editors are present but hidden with `opacity` (never `display` /
    `visibility`, ADR-0011) — their popover placement is band editing's
    (#91). Hover under focus weight; the strip's focus line is its
-   border. `--ro` muted bars, `--live` / `--opaque` looks arrive with
-   part 2. */
+   border. Access as looks: `--ro` muted bars, `--live` a lighter
+   accent, `--opaque` value cells — the editor box shown, the bar
+   hidden — and `aobg`'s `__chan` gutter before each row. */
 
 .adv-bands {
   display: flex;
@@ -94,6 +95,11 @@
   --bar-color: var(--color-accent);
 }
 
+/* The Live arrays: a lighter accent, the moving data's own hue. */
+.adv-bands--live .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--color-accent) 75%, #fff);
+}
+
 /* The editor: kept in the tree and focusable, out of the column's
    flow, invisible until #91 places it. */
 .adv-bands__editor {
@@ -102,6 +108,63 @@
   left: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Opaque blobs are cells, not bars: the strip loses its chart chrome
+   and wraps as many boxes as it holds; each band is its editor box —
+   the value in mono digits — and the bar is not drawn at all. Focus
+   falls back to an outline, there being no border to light. */
+.adv-bands--opaque .adv-bands__strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.adv-bands--opaque .adv-bands__strip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.adv-bands--opaque .adv-bands__band {
+  flex: none;
+  background: none;
+}
+
+.adv-bands--opaque .adv-bands__bar {
+  display: none;
+}
+
+.adv-bands--opaque .adv-bands__editor {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.adv-bands--opaque .adv-input {
+  --adv-unit-w: 0px;
+  --adv-pad-x: 0.4em;
+
+  display: block;
+  width: auto;
+}
+
+.adv-bands--opaque .adv-input__field {
+  min-width: 4ch;
+  field-sizing: content;
+  font-family: var(--font-mono);
+}
+
+/* `aobg`'s channel gutter: the engine channel id, fixed width so the
+   rows' strips align. */
+.adv-bands__chan {
+  flex: none;
+  min-width: 2.2rem;
+  color: var(--color-accent);
+  font-size: 0.7rem;
 }
 
 .adv-bands__meta {

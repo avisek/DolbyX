@@ -162,21 +162,20 @@ it('publishes --ro / --exp / --array and a reset marker on writable cards only',
   expect(reset(card(panel, 'vnbg'))).toBeNull()
 })
 
-const readout = (panel: HTMLElement, code: string) =>
-  card(panel, code).querySelector('.adv-readout')?.textContent
-
 /** A scalar card's numeric box text. */
 const boxText = (panel: HTMLElement, code: string) =>
   card(panel, code).querySelector<HTMLInputElement>('.adv-input__field')?.value
 
 // Behavior 9 (#85): every card reads through the Source rule —
 // ReadOnly-Static from the snapshot's Readouts, writable from the
-// active profile — `frac_bits` applied. Arrays are still the plain
-// readout (#90); scalars read in the numeric box (#87).
+// active profile — `frac_bits` applied; scalars read in the numeric
+// box (#87), arrays in the Band strip (#90).
 it('reads Readouts on static cards and the active profile on writable ones', () => {
   const panel = renderOpen()
   expect(boxText(panel, 'vnnb')).toBe('20')
-  expect(readout(panel, 'bver')).toBe('4, 28, 9, 0, 0')
+  expect(
+    bands(strip(panel, 'bver')).map((band) => barVars(band).value),
+  ).toEqual([4, 28, 9, 0, 0])
   expect(boxText(panel, 'dvla')).toBe('4') // Music
   expect(boxText(panel, 'dhsb')).toBe('3') // raw 48, 1/16 dB
 
@@ -192,25 +191,6 @@ function connect(): MockWebSocket {
   socket.open()
   return socket
 }
-
-// Behavior 9 (#85): the ReadOnly-Dynamic cards are Live arrays — a
-// `vis` event lands on them, the last frame held (no Vis idle here).
-it('lands a vis event on the ReadOnly-Dynamic cards', () => {
-  const panel = renderOpen()
-  const socket = connect()
-  expect(readout(panel, 'vnbg')).toBe(Array(20).fill('0').join(', ') + ' dB')
-
-  socket.serverMessage({
-    type: 'vis',
-    params: fixtureVis({ vcbg: [40, -8], vcbe: [-52] }),
-  })
-  expect(readout(panel, 'vcbg')).toBe(
-    ['2.5', '-0.5', ...Array<string>(18).fill('0')].join(', ') + ' dB',
-  )
-  expect(readout(panel, 'vcbe')).toBe(
-    ['-3.25', ...Array<string>(19).fill('-12')].join(', ') + ' dB',
-  )
-})
 
 /** The fixture state with Music selecting `presetId`. */
 function selectingState(presetId: string | null) {
@@ -551,10 +531,10 @@ it('card label text toggles the switch once; a tristate card targets its checked
     expect(auto.checked).toBe(true)
   })
   expect(speaker.getAttribute('for')).toBe(auto.id)
-  // A read-only scalar's `for` is its readonly box (select / copy);
-  // array readouts have no control yet: no `for` (#90).
+  // A read-only scalar's `for` is its readonly box (select / copy); a
+  // read-only array's its first band editor (#90).
   expect(card(panel, 'vnnb').getAttribute('for')).toBe('adv-vnnb')
-  expect(card(panel, 'vnbf').hasAttribute('for')).toBe(false)
+  expect(card(panel, 'vnbf').getAttribute('for')).toBe('adv-vnbf-b0')
 })
 
 // Behavior 7 (#86): a click inside a control that manages its own focus
@@ -1789,4 +1769,209 @@ it('a band card carries no row span — no grid-column inline style or class', (
       false,
     )
   }
+})
+
+// — Band arrays: `aobg` rows, opaque cells, live vis, Readouts (#90 part 2) —
+
+/** `aobg` packed as the engine stores it: `aocc` channel sets at stride
+ * `1 + aonb` — `[id, gains…]` each — then the allocation's zero tail. */
+function packedAobg(
+  channels: readonly { id: number; gains: readonly number[] }[],
+): number[] {
+  const packed = channels.flatMap(({ id, gains }) => [id, ...gains])
+  return [...packed, ...Array<number>(329 - packed.length).fill(0)]
+}
+
+/** The stereo pair's 20-band gains: L ramps from −10 dB by 1 dB, R sits
+ * 0.5 dB above it — every slot distinct across rows and bands. */
+const LEFT_GAINS = Array.from({ length: 20 }, (_slot, band) => -160 + band * 16)
+const RIGHT_GAINS = LEFT_GAINS.map((raw) => raw + 8)
+
+const rows = (panel: HTMLElement, code: string) => [
+  ...card(panel, code).querySelectorAll<HTMLElement>('.adv-bands__row'),
+]
+
+const chanText = (row: HTMLElement) =>
+  row.querySelector('.adv-bands__chan')?.textContent
+
+// Behavior 8 (#90): `aobg` under `aocc = 2, aonb = 20` over
+// `[2, g₁…g₂₀, 3, h₁…h₂₀, 0…]` is two channel rows — `ch 2` / `ch 3`
+// from the data, each strip 20 bands — the second row's band 1 showing
+// h₁ (raw −152 = −9.5 dB); the meta reads the channel × band shape.
+it('renders aobg as one row per channel, ids from the data, gains in dB', () => {
+  const panel = renderOpen()
+  applySnapshot(
+    fixtureStateWithParams({
+      aocc: [2],
+      aonb: [20],
+      aobg: packedAobg([
+        { id: 2, gains: LEFT_GAINS },
+        { id: 3, gains: RIGHT_GAINS },
+      ]),
+    }),
+  )
+  const channels = rows(panel, 'aobg')
+  expect(channels).toHaveLength(2)
+  expect(channels.map(chanText)).toEqual(['ch 2', 'ch 3'])
+  expect(
+    channels[0]?.querySelector<HTMLElement>('.adv-bands__chan')?.title,
+  ).toBe('engine channel id 2')
+  const strips = channels.map((row) => {
+    const found = row.querySelector<HTMLElement>('.adv-bands__strip')
+    if (!found) throw new Error('no strip in row')
+    return found
+  })
+  expect(strips.map((node) => node.style.getPropertyValue('--count'))).toEqual([
+    '20',
+    '20',
+  ])
+  expect(bands(strips[1] as HTMLElement)).toHaveLength(20)
+  expect(barVars(bands(strips[1] as HTMLElement)[0] as HTMLElement)).toEqual({
+    value: -9.5,
+    norm: (-152 + 480) / 960,
+  })
+  expect(barVars(bands(strips[0] as HTMLElement)[0] as HTMLElement).value).toBe(
+    -10,
+  )
+  expect(meta(panel, 'aobg')?.textContent).toBe('2 channels × 20 bands · dB')
+})
+
+// Behavior 9 (#90): the parse is honest, never repacked — `aonb = 21`
+// over the same 20-band data reads two rows at stride 22: row 1 swallows
+// the `3` that was row 2's id as its 21st band, row 2's id is h₁'s raw.
+// No exception, no write (the engine help says re-set `aobg` after
+// `aonb` changes; v2.0 documents it, never fixes it).
+it('reads a desynced aobg at the new stride without repacking', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  applySnapshot(
+    fixtureStateWithParams({
+      aocc: [2],
+      aonb: [21],
+      aobg: packedAobg([
+        { id: 2, gains: LEFT_GAINS },
+        { id: 3, gains: RIGHT_GAINS },
+      ]),
+    }),
+  )
+  const channels = rows(panel, 'aobg')
+  expect(channels).toHaveLength(2)
+  // Row 1: id 2, then g₁…g₂₀ and the `3` that was row 2's id.
+  const first = bands(channels[0] as HTMLElement)
+  expect(first).toHaveLength(21)
+  expect(barVars(first[20] as HTMLElement).value).toBe(0.19) // 3/16 dB, 2 places
+  // Row 2: its id is h₁'s slot (raw −152), its bands h₂…h₂₁ — the
+  // 21st reads the zero tail.
+  expect(chanText(channels[1] as HTMLElement)).toBe('ch -152')
+  const second = bands(channels[1] as HTMLElement)
+  expect(second).toHaveLength(21)
+  expect(barVars(second[0] as HTMLElement).value).toBe(-8.5)
+  expect(barVars(second[20] as HTMLElement).value).toBe(0)
+  expect(meta(panel, 'aobg')?.textContent).toBe('2 channels × 21 bands · dB')
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 10 (#90): `aocc = 0` is no channels — the empty-state text
+// on the meta line, no rows at all.
+it('renders aobg under aocc = 0 as the empty state with no rows', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ aocc: [0], aonb: [20] }))
+  expect(rows(panel, 'aobg')).toHaveLength(0)
+  expect(
+    card(panel, 'aobg').querySelectorAll('.adv-bands__strip'),
+  ).toHaveLength(0)
+  expect(meta(panel, 'aobg')?.textContent).toBe('no channels configured')
+})
+
+// Behavior 13 (#90): the ReadOnly-Dynamic cards are Live arrays — a
+// `vis` event re-values `vcbg`'s bands (raw 40 = 2.5 dB over −12…36:
+// (40 + 192) / 768), a second event overrides, and silence changes
+// nothing: no idle modifier ever, the last frame held.
+it('a vis event re-values the live vcbg bands; the last frame holds through silence', () => {
+  vi.useFakeTimers()
+  try {
+    const panel = renderOpen()
+    const socket = connect()
+    const gains = strip(panel, 'vcbg')
+    expect(gains.closest('.adv-bands')?.classList).toContain('adv-bands--live')
+    const first = () => barVars(bands(gains)[0] as HTMLElement)
+    expect(first()).toEqual({ value: 0, norm: 192 / 768 }) // the table default
+
+    socket.serverMessage({
+      type: 'vis',
+      params: fixtureVis({ vcbg: [40, -8] }),
+    })
+    expect(first()).toEqual({ value: 2.5, norm: 232 / 768 })
+    expect(barVars(bands(gains)[1] as HTMLElement).value).toBe(-0.5)
+
+    socket.serverMessage({ type: 'vis', params: fixtureVis({ vcbg: [-24] }) })
+    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
+
+    vi.advanceTimersByTime(1000)
+    expect(first()).toEqual({ value: -1.5, norm: 168 / 768 })
+    const classes = [...card(panel, 'vcbg').querySelectorAll('*')].flatMap(
+      (node) => [...node.classList],
+    )
+    expect(classes.some((name) => /idle/.test(name))).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// Behavior 11 (#90): an Opaque blob is the same DOM flagged
+// `--opaque` + `--ro`: readonly editors carrying the raw integers
+// (the skin draws cells), `--norm` still published, the meta counting
+// values; no interaction writes anything.
+it('renders bndl as opaque, read-only cells with raw integers and no writes', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const cells = strip(panel, 'bndl')
+  expect([...(cells.closest('.adv-bands')?.classList ?? [])].sort()).toEqual([
+    'adv-bands',
+    'adv-bands--opaque',
+    'adv-bands--ro',
+  ])
+  const editors = [...cells.querySelectorAll<HTMLInputElement>('input')]
+  expect(editors.map((editor) => editor.value)).toEqual(['16708', '80'])
+  expect(editors.every((editor) => editor.readOnly)).toBe(true)
+  expect(bands(cells).map((band) => barVars(band))).toEqual([
+    { value: 16708, norm: (16708 + 32768) / 65535 },
+    { value: 80, norm: (80 + 32768) / 65535 },
+  ])
+  expect(meta(panel, 'bndl')?.textContent).toBe('2 values')
+
+  fireEvent.pointerDown(bands(cells)[0] as HTMLElement, {
+    pointerId: 1,
+    button: 0,
+  })
+  fireEvent.pointerMove(bands(cells)[1] as HTMLElement, { pointerId: 1 })
+  fireEvent.pointerUp(bands(cells)[1] as HTMLElement, { pointerId: 1 })
+  press(cells, 'ArrowUp')
+  press(editors[0] as HTMLInputElement, 'ArrowUp')
+  fireEvent.input(editors[0] as HTMLInputElement, { target: { value: '7' } })
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 12 (#90): a ReadOnly-Static array reads the snapshot's
+// Readouts — `vnbf` the Native grid the main session reports, its
+// count `vnnb` from the same map — not the table default (zeros, 20).
+it('renders vnbf from the snapshot readouts', () => {
+  const panel = renderOpen()
+  const seeded = fixtureState()
+  applySnapshot(
+    fixtureState({
+      readouts: {
+        ...seeded.readouts,
+        vnnb: [4],
+        vnbf: [60, 250, 1000, 4000, ...Array<number>(16).fill(0)],
+      },
+    }),
+  )
+  const grid = strip(panel, 'vnbf')
+  expect(grid.closest('.adv-bands')?.classList).toContain('adv-bands--ro')
+  expect(bands(grid).map((band) => barVars(band).value)).toEqual([
+    60, 250, 1000, 4000,
+  ])
+  expect(meta(panel, 'vnbf')?.textContent).toBe('4 of 20 bands · Hz')
+  expect(card(panel, 'vnbf').getAttribute('for')).toBe('adv-vnbf-b0')
 })
