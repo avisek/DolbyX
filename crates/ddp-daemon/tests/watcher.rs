@@ -21,10 +21,10 @@ fn engine_heard(stub: &ddp_engine::StubBackend, param: &str, values: &[i16]) -> 
     })
 }
 
-/// The window rule's ceiling over a measured span: one event per
-/// elapsed [`WINDOW`], plus the leading and trailing edges.
+/// The window rule's ceiling over a measured span: one fire per
+/// elapsed [`WINDOW`], plus the two straddling either end of the span.
 fn window_ceiling(span: std::time::Duration) -> usize {
-    usize::try_from(span.as_millis() / WINDOW.as_millis()).expect("small") + 2
+    usize::try_from(span.as_millis() / WINDOW.as_millis()).expect("span fits usize") + 2
 }
 
 /// The tracer bullet — behavior 1: an external `config.toml` edit
@@ -144,30 +144,30 @@ async fn root_key_edits_apply_like_mutations() {
 
 /// Behavior 4: rapid successive external writes collapse to one
 /// reload per window — and a sustained external writer tracks at
-/// window cadence: reloads land throughout the stream (never starved
-/// to a single trailing one), and the final value wins.
+/// ~10 Hz: reloads land throughout the stream (never starved to a
+/// single trailing one), and the final value wins.
 #[tokio::test]
 async fn a_sustained_external_writer_tracks_at_window_cadence() {
     let daemon = start_daemon().await;
     let config = daemon.dir.path().join("data").join("config.toml");
     let mut ws = connected(daemon.addr()).await;
 
-    // 41 distinct documents, 20 ms apart (~800 ms unloaded; a loaded
-    // runner stretches it — the bound below is derived from the
-    // measured span, never assumed). The last write is `dvla = 10`:
-    // the param's max, written once, so it marks the true last reload.
+    // 41 distinct documents, 20 ms apart (~800 ms; a loaded runner
+    // stretches it, so the bound below uses the measured span). Last
+    // write `dvla = 10`: the max, written once — the true last reload.
     let path = config.clone();
-    let started = tokio::time::Instant::now();
-    let writer = tokio::task::spawn_blocking(move || {
+    let span = tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
         for value in (0..40).map(|i| i % 10) {
             std::fs::write(&path, format!("[profile.music]\ndvla = {value}\n"))
                 .expect("external write");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         std::fs::write(&path, "[profile.music]\ndvla = 10\n").expect("external write");
-    });
-    writer.await.expect("writer thread");
-    let span = started.elapsed();
+        started.elapsed()
+    })
+    .await
+    .expect("writer thread");
 
     // Collect reloads until the final value lands. Bounded by time, not
     // by inter-frame gaps: a loaded runner can stall the socket past
@@ -191,8 +191,8 @@ async fn a_sustained_external_writer_tracks_at_window_cadence() {
         "the final value wins: nothing trails its reload"
     );
 
-    // The window rule over the writer's measured span — against 41
-    // writes (collapse); several, not one trailing (tracking).
+    // The window rule over the writer's span: far fewer than 41 writes
+    // (collapse), yet several — not one trailing reload (tracking).
     let n = reloads.len();
     assert!(n >= 3, "reloads track the stream over {span:?}, got {n}");
     assert!(
