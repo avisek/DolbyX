@@ -731,7 +731,11 @@ it('renders a writable dB scalar as the numeric box with a unit overlay, first i
 // one class contract the skin sizes uniformly (geometry: Playwright).
 it('unit overlays are aria-hidden and every numeric box shares the class contract', () => {
   const panel = renderOpen()
-  const boxes = [...panel.querySelectorAll<HTMLElement>('.adv-input')]
+  // The scalar boxes — direct children of the control; band editors
+  // (#90) nest inside strips.
+  const boxes = [
+    ...panel.querySelectorAll<HTMLElement>('.adv-card__control > .adv-input'),
+  ]
   expect(boxes).toHaveLength(30) // the shipped table's numeric scalars
   for (const box of boxes) {
     expect(box.querySelector('.adv-input__field')).not.toBeNull()
@@ -1580,4 +1584,209 @@ it('a preset-carried slider writes the preset while one is selected, else the pr
     id: 'music',
     params: { iea: [16] },
   })
+})
+
+// — Band arrays: the Band strip, its vars, the effective count (#90 part 1) —
+
+/** A 40-slot ramp from `min`: value = min + band · step. */
+const ramp40 = (min: number, step: number) =>
+  Array.from({ length: 40 }, (_slot, band) => min + band * step)
+
+const strip = (panel: HTMLElement, code: string) => {
+  const found = card(panel, code).querySelector<HTMLElement>(
+    '.adv-bands__strip',
+  )
+  if (!found) throw new Error(`no strip for ${code}`)
+  return found
+}
+
+const bands = (node: HTMLElement) => [
+  ...node.querySelectorAll<HTMLElement>('.adv-bands__band'),
+]
+
+/** The `--value` / `--norm` a band's bar publishes, as numbers. */
+const barVars = (band: HTMLElement) => {
+  const bar = band.querySelector<HTMLElement>('.adv-bands__bar')
+  if (!bar) throw new Error('no bar')
+  return { value: sliderVar(bar, '--value'), norm: sliderVar(bar, '--norm') }
+}
+
+// Behavior 1 (#90): a 40-slot `gebg` under `genb = 10` is one strip
+// carrying `--count: 10` with exactly 10 bands; each bar publishes the
+// display value and the *linear* position over `[min, max]` — band 3
+// at raw −480 on −576…576 dB/16 is −30 dB, (−480 + 576) / 1152.
+it('renders a gebg strip of genb bands publishing --count, --value and --norm', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ genb: [10], gebg: ramp40(-576, 48) }))
+  const gains = strip(panel, 'gebg')
+  expect(gains.style.getPropertyValue('--count')).toBe('10')
+  expect(
+    card(panel, 'gebg').querySelectorAll('.adv-bands__strip'),
+  ).toHaveLength(1)
+  const all = bands(gains)
+  expect(all).toHaveLength(10)
+  expect(barVars(all[2] as HTMLElement)).toEqual({
+    value: -30,
+    norm: 96 / 1152,
+  })
+  expect(barVars(all[0] as HTMLElement)).toEqual({ value: -36, norm: 0 })
+  expect(all[2]?.getAttribute('title')).toBe('gebg[3] = -30 dB')
+})
+
+// Behavior 2 (#90): the count follows the group's `*nb` — a snapshot
+// with `genb = 20` re-renders 20 bands; `45` clamps to the 40-slot
+// allocation.
+it('re-renders the strip on a genb change and clamps to the allocation', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ genb: [10], gebg: ramp40(-576, 48) }))
+  expect(bands(strip(panel, 'gebg'))).toHaveLength(10)
+
+  applySnapshot(fixtureStateWithParams({ genb: [20], gebg: ramp40(-576, 48) }))
+  expect(bands(strip(panel, 'gebg'))).toHaveLength(20)
+  expect(strip(panel, 'gebg').style.getPropertyValue('--count')).toBe('20')
+
+  applySnapshot(fixtureStateWithParams({ genb: [45], gebg: ramp40(-576, 48) }))
+  expect(bands(strip(panel, 'gebg'))).toHaveLength(40)
+  expect(strip(panel, 'gebg').style.getPropertyValue('--count')).toBe('40')
+})
+
+// Behavior 3 (#90): a FrequencyHz array's bars are linear over
+// [20, 20000] — 200 Hz sits at (200 − 20) / 19980 ≈ 0.009, not at
+// the log position (≈ 0.33) the Slider would use.
+it('publishes a linear --norm on a Hz band array', () => {
+  const panel = renderOpen()
+  applySnapshot(
+    fixtureStateWithParams({ gebf: [200, ...ramp40(20, 100).slice(1)] }),
+  )
+  const first = bands(strip(panel, 'gebf'))[0] as HTMLElement
+  expect(barVars(first).value).toBe(200)
+  expect(barVars(first).norm).toBeCloseTo(180 / 19980, 6)
+  expect(barVars(first).norm).toBeLessThan(0.01)
+  expect(first.getAttribute('title')).toBe('gebf[1] = 200 Hz')
+})
+
+/** Music selecting `presetId`, with distinguishable `iebt` curves on
+ * both sides: the profile's ramps up from −30 dB, Rich's from +30. */
+function selectingIebt(presetId: string | null) {
+  const seeded = selectingState(presetId)
+  return {
+    ...seeded,
+    profiles: seeded.profiles.map((profile) =>
+      profile.id === 'music'
+        ? { ...profile, params: { ...profile.params, iebt: ramp40(-480, 16) } }
+        : profile,
+    ),
+    eq_presets: seeded.eq_presets.map((preset) =>
+      preset.id === 'rich'
+        ? { ...preset, params: { ...preset.params, iebt: ramp40(480, -16) } }
+        : preset,
+    ),
+  }
+}
+
+// Behavior 4 (#90): the Source rule — a preset-carried array reads the
+// selected EQ preset's values while one is selected, the profile's own
+// after `None`.
+it('reads a preset-carried band array from the selected EQ preset, else the profile', () => {
+  const panel = renderOpen()
+  applySnapshot(selectingIebt('rich'))
+  const targets = () => bands(strip(panel, 'iebt'))
+  expect(targets()).toHaveLength(20) // Rich's ienb
+  expect(barVars(targets()[0] as HTMLElement).value).toBe(30)
+  expect(barVars(targets()[1] as HTMLElement).value).toBe(29)
+
+  applySnapshot(selectingIebt(null))
+  expect(barVars(targets()[0] as HTMLElement).value).toBe(-30)
+  expect(barVars(targets()[1] as HTMLElement).value).toBe(-29)
+})
+
+const meta = (panel: HTMLElement, code: string) =>
+  card(panel, code).querySelector('.adv-bands__meta')
+
+// Behavior 5 (#90): hovering a band marks it (`--hover`) and puts
+// `band N · value unit` on the meta line; leaving the strip restores
+// the count summary.
+it('hover marks the band and describes it on the meta line; leaving restores the summary', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ genb: [10], gebg: ramp40(-576, 48) }))
+  const gains = strip(panel, 'gebg')
+  const line = meta(panel, 'gebg')
+  expect(line?.getAttribute('aria-live')).toBe('polite')
+  expect(line?.textContent).toBe('10 of 40 bands · dB')
+
+  const fifth = bands(gains)[4] as HTMLElement
+  fireEvent.pointerMove(fifth.querySelector('.adv-bands__bar') as Element)
+  expect(fifth.classList).toContain('adv-bands__band--hover')
+  expect(line?.textContent).toBe('band 5 · -24 dB')
+  expect(
+    bands(gains).filter((band) =>
+      band.classList.contains('adv-bands__band--hover'),
+    ),
+  ).toHaveLength(1)
+
+  fireEvent.pointerMove(bands(gains)[0] as HTMLElement)
+  expect(fifth.classList).not.toContain('adv-bands__band--hover')
+  expect(line?.textContent).toBe('band 1 · -36 dB')
+
+  fireEvent.pointerLeave(gains)
+  expect(
+    bands(gains).some((band) =>
+      band.classList.contains('adv-bands__band--hover'),
+    ),
+  ).toBe(false)
+  expect(line?.textContent).toBe('10 of 40 bands · dB')
+})
+
+/** A section's Tab stops in DOM order — focusable, enabled, in the
+ * sequential order. */
+const tabStops = (section: HTMLElement) =>
+  [
+    ...section.querySelectorAll<HTMLElement>('button, input, [tabindex]'),
+  ].filter(
+    (node) => !(node as HTMLButtonElement).disabled && node.tabIndex >= 0,
+  )
+
+// Behavior 6 (#90): the strip is one Tab stop — `tabindex=0`, named —
+// and every editor inside is `tabindex=-1`, `readonly`: Tab from the
+// previous card lands on the strip, never on a band input.
+it('the strip is the one Tab stop; band editors are readonly and out of the sequence', () => {
+  const panel = renderOpen()
+  const gains = strip(panel, 'gebg')
+  expect(gains.tabIndex).toBe(0)
+  expect(gains.getAttribute('role')).toBe('group')
+  expect(gains.getAttribute('aria-label')).toBe('Graphic Equalizer Band Gains')
+  const editors = [...gains.querySelectorAll<HTMLInputElement>('input')]
+  expect(editors).toHaveLength(20)
+  for (const editor of editors) {
+    expect(editor.tabIndex).toBe(-1)
+    expect(editor.readOnly).toBe(true)
+  }
+  expect(editors[0]?.id).toBe('adv-gebg-b0')
+  expect(card(panel, 'gebg').getAttribute('for')).toBe('adv-gebg-b0')
+
+  // The section's Tab sequence: from `genb`'s Slider to `gebf`'s strip
+  // to `gebg`'s — no band editor anywhere in it.
+  const geq = screen.getByRole('region', { name: 'Graphic Equalizer' })
+  const stops = tabStops(geq)
+  expect(stops.slice(-3)).toEqual([
+    slider('Graphic Equalizer Band Count'),
+    strip(panel, 'gebf'),
+    gains,
+  ])
+  expect(stops.some((node) => node.closest('.adv-bands__band'))).toBe(false)
+})
+
+// Behavior 7 (#90): a band card is a normal card — nothing in it spans
+// the row; layout is the skin's (ADR-0011).
+it('a band card carries no row span — no grid-column inline style or class', () => {
+  const panel = renderOpen()
+  const node = card(panel, 'gebg')
+  expect(node.getAttribute('style')).toBeNull()
+  expect([...node.classList]).toEqual(['adv-card', 'adv-card--array'])
+  for (const child of node.querySelectorAll<HTMLElement>('*')) {
+    expect(child.style.gridColumn).toBe('')
+    expect([...child.classList].some((name) => /span|full/.test(name))).toBe(
+      false,
+    )
+  }
 })
