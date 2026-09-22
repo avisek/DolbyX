@@ -81,15 +81,18 @@ export interface StateSnapshot {
 }
 
 /**
- * A `vis` event's payload: the main session's vis tail — four fixed
- * 20-slot arrays keyed by 4-CC, raw i16 1/16-dB (ADR-0005). The live
- * band count is the `vcnb` state param; the wire never changes shape.
+ * A `vis` event's payload: the main session's vis tail — five fixed
+ * 20-slot arrays keyed by 4-CC, raw i16 1/16-dB (ADR-0005): the four
+ * ReadOnly-Dynamic arrays plus the `gebg` the DSP applied in the block
+ * that produced them (issue #105). The live band count is the `vcnb`
+ * state param; the wire never changes shape.
  */
 export interface VisParams {
   readonly vnbg: readonly number[]
   readonly vnbe: readonly number[]
   readonly vcbg: readonly number[]
   readonly vcbe: readonly number[]
+  readonly gebg: readonly number[]
 }
 
 /** A client → daemon command; the client stamps the `request_id`. */

@@ -44,10 +44,11 @@ interface EditorTouch {
  * `eq-slider`s and the two-pass `eq-curve` riding the engine's `vis`
  * feed, appended into the visualizer root per ADR-0008's tree. One
  * source rule, three consumers (curve vertices, thumb Ys, the touch
- * reference): fresh and `ven ≠ 0` → the latest frame's `vcbg` — the
+ * offset): fresh and `ven ≠ 0` → the latest frame — `vcbg`, the
  * composed curve the DSP applies (the finger leads, the display
- * trails one audio block); Vis idle or `ven = 0` (frozen frames can't
- * follow edits) → the resolved active `gebg`. Geometry is
+ * trails one audio block), paired with the `gebg` that produced it;
+ * Vis idle or `ven = 0` (frozen frames can't follow edits) → the
+ * resolved active `gebg`. Geometry is
  * component-owned pixel space via ResizeObserver — vertices at column
  * centers, flat edge extensions, thumbs at fractional indices, the
  * original's `thumbHeight/4` track padding; paints coalesce to rAF
@@ -92,7 +93,7 @@ const EqCurve: Component = () => {
    * `ven ≠ 0`; under Vis idle or `ven = 0` → `undefined`, consumers
    * fall back to the resolved active state. The source rule's one
    * seat, three consumers: curve vertices, thumb Ys, the touch
-   * reference (ADR-0008).
+   * offset (ADR-0008).
    */
   const liveFrame = () => {
     const frame = visFrame()
@@ -228,11 +229,14 @@ const EqCurve: Component = () => {
   }
 
   /**
-   * Queues one touch. The reference gain follows the source rule:
-   * sourcing `vcbg` → the band's composed value rebases the touch so
-   * the painted Brush-buffer value plus the non-GEQ contribution
-   * lands where the finger points; sourcing resolved state → the raw
-   * path (the original's suspended branch).
+   * Queues one touch. The offset follows the source rule: sourcing
+   * the feed → the band's non-GEQ contribution, `vcbg − gebg` of one
+   * frame (the composed curve less the `gebg` the DSP applied in that
+   * very block), rebases the touch so the painted Brush-buffer value
+   * plus that contribution lands where the finger points — exact
+   * whatever the round-trip delay, so a held finger never swings
+   * (issue #105); sourcing resolved state → the raw path (the
+   * original's suspended branch).
    */
   const queueTouch = ({ band, dB }: EditorTouch): void => {
     const frame = liveFrame()
@@ -240,7 +244,10 @@ const EqCurve: Component = () => {
       smoother.enqueue(
         band,
         dB,
-        rawToDisplay(frame.vcbg[band] ?? 0, DB_FRAC_BITS),
+        rawToDisplay(
+          (frame.vcbg[band] ?? 0) - (frame.gebg[band] ?? 0),
+          DB_FRAC_BITS,
+        ),
       )
     } else {
       smoother.enqueue(band, dB)

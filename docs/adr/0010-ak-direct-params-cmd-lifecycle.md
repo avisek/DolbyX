@@ -19,8 +19,9 @@ straddle bug), gives a **real per-param GET** of the live clamped
 registry (the engine has no cmd 3 GET), is name-based natively, and
 leaves fewer, leaner ARM entry points for the future Unicorn backend.
 The visualizer folds in for free: the shim appends the four
-ReadOnly-Dynamic arrays to every `Process` reply (the **vis tail**), so
-v2 needs no cmd-4 call.
+ReadOnly-Dynamic arrays — plus the `gebg` in force, read from the same
+registry — to every `Process` reply (the **vis tail**), so v2 needs no
+cmd-4 call.
 
 **Why lifecycle stays cmd.** Its complexity is engine-internal
 orchestration the cmd handler already encapsulates: SET_CONFIG

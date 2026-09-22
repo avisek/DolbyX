@@ -360,8 +360,10 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
     // Within a block the vis feed reports the engine applying it: the
     // composed response — not a registry echo, so transition slopes
     // spill between neighbouring bands (3 dB grants that); the held
-    // band converged on the finger (½ dB), and the once-bypassed
-    // filterbank is audibly engaged.
+    // band converged on the finger (one raw step — the rebase pairs
+    // each frame's `vcbg` with its `gebg`, so the hold never swings,
+    // issue #105), and the once-bypassed filterbank is audibly
+    // engaged.
     await expect
       .poll(
         () => {
@@ -373,7 +375,7 @@ test('a drag lands in the engine: the vis-fed curve follows the emitted batch', 
           const top = vis[19] ?? 0
           const held = Math.abs(top - (final[19] ?? 0))
           if (spill > 48) return `spill ${String(spill)}`
-          if (held > 8) return `held band off by ${String(held)}`
+          if (held > 1) return `held band off by ${String(held)}`
           if (top < 128) return `filterbank bypassed: ${String(top)}`
           return 'landed'
         },

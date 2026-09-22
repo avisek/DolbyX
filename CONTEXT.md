@@ -85,9 +85,11 @@ list; sources the `vis` events and the readouts.
 _Avoid_: oldest session, control session, primary session.
 
 **Vis tail** / **`VisFrame`**:
-The four ReadOnly-Dynamic arrays (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`,
-4 × 20 i16) the shim appends to every `Process` reply; surfaced at the
-`Engine` trait as `VisFrame`.
+The five arrays (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe ‖ gebg`, 5 × 20 i16) the
+shim appends to every `Process` reply — the four ReadOnly-Dynamic
+arrays plus the `gebg` the DSP applied in that block, so `vcbg − gebg`
+is the block's exact non-GEQ residual; surfaced at the `Engine` trait
+as `VisFrame`.
 _Avoid_: vis packet; visualizer data (see `vcbg`/`vcbe`).
 
 **Shim**:
@@ -152,7 +154,7 @@ policy (ADR-0012).
 _Avoid_: LAN address (the bind mechanism), QR URL (the QR encodes it).
 
 **`vis` event**:
-The per-block visualizer broadcast — the vis tail's four arrays keyed by
+The per-block visualizer broadcast — the vis tail's five arrays keyed by
 4-CC; a pure event stream (no audio → no events, no client-side
 smoothing; 250 ms without a frame is Vis idle).
 _Avoid_: visualizer data (see `vcbg`/`vcbe`); `vis_suspended` /

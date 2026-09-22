@@ -53,7 +53,7 @@ it('shapes the spread per the selected kernel', () => {
 })
 
 // Behavior 3: Brush-buffer cells outside [−12, +36] dB move toward the
-// violated clamp at a 0.3 s half-life. A 42 dB paint (touch 36, ref −6)
+// violated clamp at a 0.3 s half-life. A 42 dB paint (touch 36, offset −6)
 // halves its 6 dB overshoot per 300 ms: 42 → 39 → 37.5. Band 5 stays
 // clamped at 576 throughout; the off-center bands ride the decay
 // (0.9 · 39 = 35.1 → 562, 0.9 · 37.5 = 33.75 → 540).
@@ -325,12 +325,30 @@ it('pins the pseudoinverses centro-symmetric', () => {
   }
 })
 
-// Behavior 1: a reference gain rebases the touch (`touchDB − (ref −
-// smooth[band])`), which can paint past the window — the emit clamps to
-// −192..+576. Touch 36 dB against ref −5 paints 41 dB: bands 4–6 land
-// past +36 dB and clamp to 576; the spread beyond stays live (26.65 →
-// 426, 14.35 → 230, 4.1 → 66). Touch −12 against ref 3 paints −15 dB:
-// bands 14–16 clamp to −192 (0.9 · −15 = −13.5 dB is already past −12).
+// Issue #105: `offset` is the band's non-GEQ contribution as the
+// caller measured it (`vcbg − gebg` of one frame) — the touch paints
+// `dB − offset`, and the smoother's own last gain plays no part. With
+// band 5 rehydrated at +10 dB (160), touch 12 dB against offset 3
+// paints 9 dB → 144; the superseded `ref − smooth[band]` rebase would
+// have read 12 − (3 − 10) = 19 dB → 304. Omitting `offset` is the raw
+// path: the touch paints as-is.
+it('paints dB − offset, independent of its own last gain', () => {
+  const direct = new GainSmoother('Direct')
+  direct.rehydrate([0, 0, 0, 0, 0, 160])
+  direct.enqueue(5, 12, 3)
+  expect(direct.tick(0)?.[5]).toBe(144)
+  direct.enqueue(5, 12, -3)
+  expect(direct.tick(16)?.[5]).toBe(240)
+  direct.enqueue(5, 12)
+  expect(direct.tick(32)?.[5]).toBe(192)
+})
+
+// Behavior 1: an offset rebases the touch (`touchDB − offset`), which
+// can paint past the window — the emit clamps to −192..+576. Touch 36
+// dB against offset −5 paints 41 dB: bands 4–6 land past +36 dB and
+// clamp to 576; the spread beyond stays live (26.65 → 426, 14.35 →
+// 230, 4.1 → 66). Touch −12 against offset 3 paints −15 dB: bands
+// 14–16 clamp to −192 (0.9 · −15 = −13.5 dB is already past −12).
 it('clamps emitted writes to the edit window', () => {
   const smoother = new GainSmoother('Mobile')
   smoother.enqueue(5, 36, -5)
