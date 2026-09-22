@@ -5,6 +5,7 @@
  * and the category decide.
  */
 import {
+  findParamDef,
   isPresetCarried,
   paramDef,
   type CategoryDef,
@@ -46,6 +47,23 @@ export function paramValues(def: ParameterDef): readonly number[] {
   }
   if (isPresetCarried(def)) return resolvedEqParam(def.name) ?? def.default
   return selectedProfile()?.params[def.name] ?? def.default
+}
+
+/**
+ * A band array's effective count — the bands in effect, not the
+ * allocation (CONTEXT.md: Band strip). The mechanical prefix rule,
+ * no map (ADR-0004): a table row named `<prefix>nb` (the array's
+ * two-char prefix; never the array itself) is the group's band count,
+ * its resolved head value clamped to `[0, length]`; no such row ⇒
+ * the full length. Today: `ie ge ar ao vn vc` → `ienb genb arnb aonb
+ * vnnb vcnb`; `vnnb` is a Readout, read like any static value.
+ */
+export function effectiveCount(def: ParameterDef): number {
+  const gate = findParamDef(`${def.name.slice(0, 2)}nb`)
+  if (!gate || gate.name === def.name) return def.length
+  const raw = paramValues(gate)[0]
+  if (raw === undefined) return def.length
+  return Math.min(def.length, Math.max(0, raw))
 }
 
 /** A writable card's Source item — the selected EQ preset for a

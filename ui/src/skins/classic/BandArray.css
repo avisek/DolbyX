@@ -1,0 +1,108 @@
+/* The Band strip (#90): one row of equal columns — `--count` of them —
+   each a band whose bar rises from the floor to `--norm` (0–1, linear
+   over the def's range); the whole column tints on hover so low bars
+   feel like their tall neighbours. The meta line sits under the strip.
+   Editors are present but hidden with `opacity` (never `display` /
+   `visibility`, ADR-0011) — their popover placement is band editing's
+   (#91). Hover under focus weight; the strip's focus line is its
+   border. `--ro` muted bars, `--live` / `--opaque` looks arrive with
+   part 2. */
+
+.adv-bands {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.adv-bands__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.adv-bands__strip {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(var(--count, 1), 1fr);
+  gap: 2px;
+  min-width: 0;
+  height: 3.4rem;
+  padding: var(--space-1) var(--space-1) 0;
+  border: 1px solid var(--color-bg);
+  border-radius: var(--radius-1);
+  background:
+    repeating-linear-gradient(
+      to top,
+      rgb(255 255 255 / 4%) 0 1px,
+      transparent 1px 25%
+    ),
+    var(--color-bg);
+  transition: border-color 0.12s ease;
+  user-select: none;
+}
+
+:where(.adv-card:hover) .adv-bands__strip {
+  border-color: var(--hover-line);
+}
+
+.adv-bands__strip:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+/* The band column: the hover / focus region, full strip height. */
+.adv-bands__band {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 2px;
+  border-radius: 3px 3px 0 0;
+  transition: background 0.1s ease;
+}
+
+.adv-bands__band--hover {
+  background: rgb(255 255 255 / 7%);
+}
+
+/* The bar: a thin pillar from the column's floor; a floor of 3% keeps
+   a band at `min` visible. */
+.adv-bands__bar {
+  --bar-color: color-mix(
+    in srgb,
+    var(--color-text-muted) 70%,
+    var(--color-accent)
+  );
+
+  height: calc(clamp(0.03, var(--norm, 0), 1) * 100%);
+  margin: 0 28%;
+  border-radius: 2px 2px 0 0;
+  background: var(--bar-color);
+}
+
+.adv-bands--ro .adv-bands__bar {
+  --bar-color: color-mix(in srgb, var(--hue-readonly) 55%, transparent);
+}
+
+.adv-bands__band--hover .adv-bands__bar {
+  --bar-color: var(--color-accent);
+}
+
+/* The editor: kept in the tree and focusable, out of the column's
+   flow, invisible until #91 places it. */
+.adv-bands__editor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adv-bands__meta {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}

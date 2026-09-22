@@ -105,9 +105,18 @@ const categoryTable: readonly CategoryDef[] =
  * caught by the first render.
  */
 export function paramDef(name: string): ParameterDef {
-  const def = paramTable.find((entry) => entry.name === name)
+  const def = findParamDef(name)
   if (!def) throw new Error(`parameter \`${name}\` missing from bootstrap`)
   return def
+}
+
+/**
+ * A 4-CC's row, `undefined` when the table has none — for mechanical
+ * prefix rules (`<prefix>nb` gates a band array's count) that ask
+ * whether a sibling exists rather than assert it.
+ */
+export function findParamDef(name: string): ParameterDef | undefined {
+  return paramTable.find((entry) => entry.name === name)
 }
 
 /**
