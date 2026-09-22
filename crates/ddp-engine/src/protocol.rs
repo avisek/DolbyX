@@ -217,7 +217,7 @@ pub enum Command {
         names: Vec<ParamName>,
     },
     /// 0x30 `[u32 session_id][u32 frames][i16 × frames × 2]` → reply
-    /// `[i16 × frames × 2 pcm][i16 × 80 vis tail]` — the PCM block
+    /// `[i16 × frames × 2 pcm][i16 × 100 vis tail]` — the PCM block
     /// always comes first.
     Process {
         /// The session that processes the block.

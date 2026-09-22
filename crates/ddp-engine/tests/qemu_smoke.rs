@@ -141,7 +141,7 @@ impl Shim {
     }
 
     /// `Process` one block, asserting success and the reply shape —
-    /// the PCM block plus exactly the 160-byte vis tail, on **every**
+    /// the PCM block plus exactly the 200-byte vis tail, on **every**
     /// reply (bypassed blocks included). Returns `(pcm, vis)`.
     fn process(&mut self, session_id: u32, pcm: &[i16]) -> (Vec<i16>, Vec<i16>) {
         let (status, reply) = self.send(&Command::Process {
@@ -151,7 +151,7 @@ impl Shim {
         assert_eq!(status, STATUS_OK, "Process({session_id})");
         assert_eq!(
             reply.len(),
-            pcm.len() * 2 + 160,
+            pcm.len() * 2 + 200,
             "reply carries the block plus the fixed vis tail"
         );
         let mut samples: Vec<i16> = reply
@@ -499,7 +499,7 @@ fn staging_without_the_commit_leaf_still_reshapes() {
     shim.finish();
 }
 
-/// Every `Process` reply carries the fixed 160-byte vis tail —
+/// Every `Process` reply carries the fixed 200-byte vis tail —
 /// `Shim::process` asserts the exact length on every call, including
 /// the bypassed block here (vis is process-driven, not power-gated).
 /// With a tone playing and one `[vcnb, vcbf, ven]` batch (the custom
@@ -508,11 +508,13 @@ fn staging_without_the_commit_leaf_still_reshapes() {
 /// and gates whether the DSP fills the arrays; the "seeded"
 /// identity the probes saw is a side effect of their cmd-3 init flow),
 /// the native pair goes live and the custom pair mirrors it — the
-/// custom grid here *is* the native table.
+/// custom grid here *is* the native table. The fifth array is the
+/// `gebg` in force: the registry's power-on zeros, then the last
+/// `set_params` write verbatim (issue #105).
 #[test]
 #[expect(
     clippy::similar_names,
-    reason = "vnbg/vnbe/vcbg/vcbe are the engine's own 4-CC names"
+    reason = "vnbg/vnbe/vcbg/vcbe/gebg are the engine's own 4-CC names"
 )]
 fn every_process_reply_carries_the_vis_tail() {
     let mut shim = Shim::spawn("vis_tail");
@@ -534,7 +536,8 @@ fn every_process_reply_carries_the_vis_tail() {
     }
     let (vnbg, rest) = vis.split_at(20);
     let (vnbe, rest) = rest.split_at(20);
-    let (vcbg, vcbe) = rest.split_at(20);
+    let (vcbg, rest) = rest.split_at(20);
+    let (vcbe, gebg) = rest.split_at(20);
     assert!(
         vnbg.iter().any(|&gain| gain != 0),
         "native gains are live: {vnbg:?}"
@@ -545,6 +548,17 @@ fn every_process_reply_carries_the_vis_tail() {
     );
     assert_eq!(vcbg, vnbg, "custom grid == native grid ⇒ mirror");
     assert_eq!(vcbe, vnbe, "custom grid == native grid ⇒ mirror");
+    assert_eq!(gebg, [0; 20], "power-on gebg before any write");
+
+    // The gebg slot echoes the last write — the registry value the
+    // DSP applied in the block that produced this tail.
+    let mut written = [0_i16; 20];
+    for (band, gain) in written.iter_mut().enumerate() {
+        *gain = i16::try_from(band).expect("20 bands") * 16 - 96;
+    }
+    shim.set_params(session, &[("gebg", &written)]);
+    let (_, vis) = shim.process(session, &sine_block(0, 44_100, 8000.0));
+    assert_eq!(vis[80..], written, "gebg slot == the write in force");
     shim.finish();
 }
 

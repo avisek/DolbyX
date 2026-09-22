@@ -35,8 +35,8 @@ use crate::{Engine, EngineError, Result, SessionId, VisFrame};
 /// enforces, applied host-side so the engine never sees a bad rate.
 const SUPPORTED_RATES: [u32; 3] = [44_100, 48_000, 32_000];
 
-/// Samples in the fixed vis tail (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`).
-const VIS_TAIL_SAMPLES: usize = 80;
+/// Samples in the fixed vis tail (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe ‖ gebg`).
+const VIS_TAIL_SAMPLES: usize = 100;
 
 /// The live engine subprocess: the child plus its protocol pipes.
 struct Subprocess {
@@ -234,6 +234,7 @@ impl Engine for QemuBackend {
             vnbe: band(),
             vcbg: band(),
             vcbe: band(),
+            gebg: band(),
         })
     }
 }

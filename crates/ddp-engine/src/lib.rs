@@ -21,8 +21,11 @@ pub use stub::{Call, StubBackend};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(pub u32);
 
-/// The four ReadOnly-Dynamic arrays every `process` reply carries
-/// (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`, 4 × 20 i16).
+/// The vis tail every `process` reply carries: the four
+/// ReadOnly-Dynamic arrays plus the `gebg` in force for that block
+/// (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe ‖ gebg`, 5 × 20 i16). Pairing `gebg`
+/// with the `vcbg` it produced lets the GEQ editor rebase a touch by
+/// `vcbg − gebg` exactly, whatever the round-trip delay (issue #105).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisFrame {
     /// Native-grid per-band EQ gains.
@@ -33,6 +36,8 @@ pub struct VisFrame {
     pub vcbg: [i16; 20],
     /// Custom-grid per-band spectrum excitations.
     pub vcbe: [i16; 20],
+    /// The GEQ band gains the DSP applied in this block.
+    pub gebg: [i16; 20],
 }
 
 /// Why a backend call failed.

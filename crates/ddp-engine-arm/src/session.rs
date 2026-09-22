@@ -28,12 +28,15 @@ const COMMIT_GROUPS: [(&[ParamName], ParamName); 4] = [
     (&[*b"arnb", *b"arbf"], *b"arbh"),
 ];
 
-/// The vis tail's four ReadOnly-Dynamic arrays, in reply order.
-const VIS_TAIL_NAMES: [ParamName; 4] = [*b"vnbg", *b"vnbe", *b"vcbg", *b"vcbe"];
+/// The vis tail, in reply order: the four ReadOnly-Dynamic arrays plus
+/// the `gebg` in force for the block — read from the same registry the
+/// DSP just consumed, so `vcbg − gebg` is exact for that block
+/// (issue #105).
+const VIS_TAIL_NAMES: [ParamName; 5] = [*b"vnbg", *b"vnbe", *b"vcbg", *b"vcbe", *b"gebg"];
 
 /// Slots per vis array — fixed 20 at every rate (at 32 kHz only
 /// `vnnb` = 19 are live; the 20th is engine-stale), keeping the tail
-/// a fixed 4 × 20 i16 = 160 bytes.
+/// a fixed 5 × 20 i16 = 200 bytes.
 const VIS_BAND_SLOTS: usize = 20;
 
 /// One live session: the effect handle plus its cached AK refs.
@@ -45,7 +48,7 @@ pub struct Session<'lib> {
     refs: HashMap<ParamName, u32>,
     /// [`VIS_TAIL_NAMES`]' refs, resolved once — `process` reads them
     /// every block.
-    vis_refs: [u32; 4],
+    vis_refs: [u32; 5],
 }
 
 impl<'lib> Session<'lib> {
@@ -146,8 +149,9 @@ impl<'lib> Session<'lib> {
         self.effect.process(input, output)
     }
 
-    /// The block's vis tail — `vnbg ‖ vnbe ‖ vcbg ‖ vcbe`, 4 × 20 i16,
-    /// read locally from the registry the DSP just wrote. Rides every
+    /// The block's vis tail — `vnbg ‖ vnbe ‖ vcbg ‖ vcbe ‖ gebg`,
+    /// 5 × 20 i16, read locally from the registry the DSP just
+    /// wrote (and, for `gebg`, just applied). Rides every
     /// `Process` reply, bypassed blocks included (vis is
     /// process-driven, not power-gated).
     pub fn vis_tail(&self) -> Vec<i16> {
