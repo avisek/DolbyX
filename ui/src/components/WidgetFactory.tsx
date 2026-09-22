@@ -6,8 +6,7 @@ import {
   type ParamKind,
   type ParameterDef,
 } from '../lib/parameters'
-import { displayValue, fineStep, rawValue, scaleOf } from '../lib/scalar'
-import type { StepAxis } from '../lib/step'
+import { axisOf, displayValue, rawValue } from '../lib/scalar'
 import { rawToDisplay } from '../lib/units'
 import {
   commitParam,
@@ -56,9 +55,10 @@ export function primaryControlId(def: ParameterDef): string | undefined {
 }
 
 /**
- * Whether a def renders the Band strip — `length > 1`, whatever the
- * kind or access. Part 1 (#90) seats the writable band arrays; part 2
- * lifts the gate for the read-only sources and `aobg`'s channel rows.
+ * Whether a def renders the Band strip today: a writable `length > 1`
+ * param that isn't `aobg`. The rule's end state is every `length > 1`
+ * param, whatever the kind or access — #90 part 2 lifts the gate for
+ * the read-only sources and `aobg`'s channel rows.
  */
 function isBandArray(def: ParameterDef): boolean {
   return (
@@ -92,12 +92,7 @@ const Numeric: Component<{ def: ParameterDef; name: string }> = (props) => {
   const def = props.def
   const writable = isWritable(def)
   const value = () => displayValue(def, head(def))
-  const axis: StepAxis = {
-    min: displayValue(def, def.min),
-    max: displayValue(def, def.max),
-    fine: fineStep(def),
-    scale: scaleOf(def),
-  }
+  const axis = axisOf(def)
   const unit = unitLabel(def.kind)
   const onLive = writable
     ? (next: number) => {

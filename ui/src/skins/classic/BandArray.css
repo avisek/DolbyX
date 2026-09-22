@@ -42,6 +42,8 @@
     ),
     var(--color-bg);
   transition: border-color 0.12s ease;
+  /* Behavior, not appearance: a drag over the bands never selects the
+     editors' text. Every skin keeps it. */
   user-select: none;
 }
 

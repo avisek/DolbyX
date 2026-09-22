@@ -1,7 +1,6 @@
 import { For, createSignal, type Component } from 'solid-js'
 import { unitLabel, type ParameterDef } from '../lib/parameters'
-import { displayValue, fineStep, scaleOf } from '../lib/scalar'
-import type { StepAxis } from '../lib/step'
+import { axisOf, displayValue } from '../lib/scalar'
 import { effectiveCount, isWritable, paramValues } from '../store/wiring'
 import NumberInput from './NumberInput'
 
@@ -37,22 +36,22 @@ const BandArray: Component<{ def: ParameterDef; name: string }> = (props) => {
   // eslint-disable-next-line solid/reactivity
   const def = props.def
   const unit = unitLabel(def.kind)
-  const withUnit = (text: string): string =>
-    unit === '' ? text : `${text} ${unit}`
+  /** `text` with the unit appended, `sep` between — nothing when the
+   * kind is unit-less. */
+  const withUnit = (text: string, sep = ' '): string =>
+    unit === '' ? text : `${text}${sep}${unit}`
   const count = (): number => effectiveCount(def)
-  const raw = (slot: number): number => paramValues(def)[slot] ?? def.min
+  // A source shorter than the count (a snapshot carrying fewer slots
+  // than the allocation) reads the table default for the tail.
+  const raw = (slot: number): number =>
+    paramValues(def)[slot] ?? def.default[slot] ?? def.min
   const value = (slot: number): number => displayValue(def, raw(slot))
-  const axis: StepAxis = {
-    min: displayValue(def, def.min),
-    max: displayValue(def, def.max),
-    fine: fineStep(def),
-    scale: scaleOf(def),
-  }
+  const axis = axisOf(def)
 
   const [hover, setHover] = createSignal<number>()
   let strip!: HTMLDivElement
 
-  /** The band under an event target, by position in the strip. */
+  /** The band under an event target, by position among the bands. */
   const bandAt = (target: EventTarget | null): number | undefined => {
     const band =
       target instanceof Element ? target.closest('.adv-bands__band') : null
@@ -60,10 +59,8 @@ const BandArray: Component<{ def: ParameterDef; name: string }> = (props) => {
     return slot >= 0 ? slot : undefined
   }
 
-  const summary = (): string => {
-    const text = `${String(count())} of ${String(def.length)} bands`
-    return unit === '' ? text : `${text} · ${unit}`
-  }
+  const summary = (): string =>
+    withUnit(`${String(count())} of ${String(def.length)} bands`, ' · ')
   const meta = (): string => {
     const slot = hover()
     if (slot === undefined) return summary()

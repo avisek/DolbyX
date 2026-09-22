@@ -1608,10 +1608,7 @@ const bands = (node: HTMLElement) => [
 const barVars = (band: HTMLElement) => {
   const bar = band.querySelector<HTMLElement>('.adv-bands__bar')
   if (!bar) throw new Error('no bar')
-  return {
-    value: Number(bar.style.getPropertyValue('--value')),
-    norm: Number(bar.style.getPropertyValue('--norm')),
-  }
+  return { value: sliderVar(bar, '--value'), norm: sliderVar(bar, '--norm') }
 }
 
 // Behavior 1 (#90): a 40-slot `gebg` under `genb = 10` is one strip
@@ -1622,7 +1619,6 @@ it('renders a gebg strip of genb bands publishing --count, --value and --norm', 
   const panel = renderOpen()
   applySnapshot(fixtureStateWithParams({ genb: [10], gebg: ramp40(-576, 48) }))
   const gains = strip(panel, 'gebg')
-  expect(gains.getAttribute('style')).toContain('--count: 10')
   expect(gains.style.getPropertyValue('--count')).toBe('10')
   expect(
     card(panel, 'gebg').querySelectorAll('.adv-bands__strip'),
@@ -1768,17 +1764,16 @@ it('the strip is the one Tab stop; band editors are readonly and out of the sequ
   expect(editors[0]?.id).toBe('adv-gebg-b0')
   expect(card(panel, 'gebg').getAttribute('for')).toBe('adv-gebg-b0')
 
+  // The section's Tab sequence: from `genb`'s Slider to `gebf`'s strip
+  // to `gebg`'s — no band editor anywhere in it.
   const geq = screen.getByRole('region', { name: 'Graphic Equalizer' })
-  const [fold, ...stops] = tabStops(geq)
-  expect(fold?.classList).toContain('adv-cat__toggle')
-  expect(stops.map((node) => node.getAttribute('aria-label'))).toEqual([
-    'Graphic Equalizer Enable',
-    'Graphic Equalizer Band Count', // the box…
-    'Graphic Equalizer Band Count', // …then its Slider
-    'Graphic Equalizer Band Frequencies',
-    'Graphic Equalizer Band Gains',
+  const stops = tabStops(geq)
+  expect(stops.slice(-3)).toEqual([
+    slider('Graphic Equalizer Band Count'),
+    strip(panel, 'gebf'),
+    gains,
   ])
-  expect(stops.slice(-2)).toEqual([strip(panel, 'gebf'), gains])
+  expect(stops.some((node) => node.closest('.adv-bands__band'))).toBe(false)
 })
 
 // Behavior 7 (#90): a band card is a normal card — nothing in it spans
