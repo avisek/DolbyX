@@ -153,12 +153,14 @@ export function onValue(kind: ParamKind): number {
   return typeof kind === 'object' && 'tristate' in kind ? kind.tristate.on : 1
 }
 
-/** The display unit suffix for a kind — empty when unit-less. */
+/** The display unit suffix for a kind — empty when unit-less. The
+ * `aobg` layout kind carries 1/16-dB gains, so it reads in dB. */
 export function unitLabel(kind: ParamKind): string {
   if (typeof kind === 'object') {
     return 'decibel' in kind ? (kind.decibel.lkfs ? 'LKFS' : 'dB') : ''
   }
   if (kind === 'frequency_hz') return 'Hz'
   if (kind === 'degrees') return '°'
+  if (kind === 'aobg_channel_major') return 'dB'
   return ''
 }

@@ -30,6 +30,11 @@ export function isWritable(def: ParameterDef): boolean {
   return def.access === 'settable' || def.access === 'experimental'
 }
 
+/** Whether the card is a Live array — ReadOnly-Dynamic, fed by `vis`. */
+export function isLive(def: ParameterDef): boolean {
+  return def.access === 'read_only_dynamic'
+}
+
 /**
  * A card's current raw values (engine-native i16): ReadOnly-Static from
  * the snapshot's Readouts; ReadOnly-Dynamic from the last `vis` frame (a
@@ -42,28 +47,65 @@ export function paramValues(def: ParameterDef): readonly number[] {
   if (def.access === 'read_only_static') {
     return state.readouts[def.name] ?? def.default
   }
-  if (def.access === 'read_only_dynamic') {
-    return visArray(def.name) ?? def.default
-  }
+  if (isLive(def)) return visArray(def.name) ?? def.default
   if (isPresetCarried(def)) return resolvedEqParam(def.name) ?? def.default
   return selectedProfile()?.params[def.name] ?? def.default
 }
 
 /**
+ * The mechanical prefix rule (ADR-0004), no map: a table row named
+ * `<prefix><suffix>` — the array's two-char prefix; never the array
+ * itself — is a group count, its resolved head value; `undefined`
+ * when the table has no such row. Today: `ie ge ar ao vn vc` + `nb`
+ * → `ienb genb arnb aonb vnnb vcnb`, `ao` + `cc` → `aocc`; `vnnb` is
+ * a Readout, read like any static value.
+ */
+function prefixGate(
+  def: ParameterDef,
+  suffix: 'nb' | 'cc',
+): number | undefined {
+  const gate = findParamDef(`${def.name.slice(0, 2)}${suffix}`)
+  if (!gate || gate.name === def.name) return undefined
+  return paramValues(gate)[0]
+}
+
+/**
  * A band array's effective count — the bands in effect, not the
- * allocation (CONTEXT.md: Band strip). The mechanical prefix rule,
- * no map (ADR-0004): a table row named `<prefix>nb` (the array's
- * two-char prefix; never the array itself) is the group's band count,
- * its resolved head value clamped to `[0, length]`; no such row ⇒
- * the full length. Today: `ie ge ar ao vn vc` → `ienb genb arnb aonb
- * vnnb vcnb`; `vnnb` is a Readout, read like any static value.
+ * allocation (CONTEXT.md: Band strip): the `<prefix>nb` gate clamped
+ * to `[0, length]`; no gate ⇒ the full length.
  */
 export function effectiveCount(def: ParameterDef): number {
-  const gate = findParamDef(`${def.name.slice(0, 2)}nb`)
-  if (!gate || gate.name === def.name) return def.length
-  const raw = paramValues(gate)[0]
+  const raw = prefixGate(def, 'nb')
   if (raw === undefined) return def.length
   return Math.min(def.length, Math.max(0, raw))
+}
+
+/** One `aobg` channel set: the engine channel id and its gains. */
+export interface ChannelRow {
+  readonly id: number
+  readonly gains: readonly number[]
+}
+
+/**
+ * The `aobg` layout, parsed as-is (ddp/02): channel sets packed at
+ * stride `1 + <prefix>nb`, `[id, gains…]` each, exactly `<prefix>cc`
+ * of them — stopping early where the data runs out. No terminator
+ * scan, no repacking: a desynced array (`aonb` changed, `aobg` not
+ * re-set) renders the honest parse.
+ */
+export function channelRows(def: ParameterDef): readonly ChannelRow[] {
+  const channels = prefixGate(def, 'cc') ?? 0
+  const stride = 1 + effectiveCount(def)
+  const values = paramValues(def)
+  const rows: ChannelRow[] = []
+  for (
+    let at = 0;
+    rows.length < channels && at + stride <= values.length;
+    at += stride
+  ) {
+    rows.push({ id: values[at] ?? 0, gains: values.slice(at + 1, at + stride) })
+  }
+  return rows
 }
 
 /** A writable card's Source item — the selected EQ preset for a

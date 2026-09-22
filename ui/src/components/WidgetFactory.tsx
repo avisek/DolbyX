@@ -14,7 +14,7 @@ import {
   liveParam,
   paramValues,
 } from '../store/wiring'
-import BandArray, { bandInputId } from './BandArray'
+import BandArray, { firstBandId } from './BandArray'
 import NumberInput from './NumberInput'
 import Slider from './Slider'
 import Toggle from './Toggle'
@@ -39,13 +39,12 @@ const NUMERIC_KINDS: ReadonlySet<string> = new Set<string>([
  * The primary control a card labels — its `for` target: the switch,
  * the tristate's *currently checked* radio (so a label click focuses
  * the current state), the numeric field (writable or read-only — a
- * readonly field still takes focus for select / copy), a writable
- * array's first band editor, none while the card is still a readout.
- * Reactive through the head value; mirrors the factory's dispatch.
+ * readonly field still takes focus for select / copy), an array's
+ * first band editor. Reactive through the head value; mirrors the
+ * factory's dispatch.
  */
 export function primaryControlId(def: ParameterDef): string | undefined {
-  if (isBandArray(def)) return bandInputId(def, 0)
-  if (def.length > 1) return undefined
+  if (isBandArray(def)) return firstBandId(def)
   if (isNumericScalar(def)) return controlId(def)
   if (!isWritable(def)) return undefined
   const kind = kindTag(def.kind)
@@ -54,18 +53,11 @@ export function primaryControlId(def: ParameterDef): string | undefined {
   return undefined
 }
 
-/**
- * Whether a def renders the Band strip today: a writable `length > 1`
- * param that isn't `aobg`. The rule's end state is every `length > 1`
- * param, whatever the kind or access — #90 part 2 lifts the gate for
- * the read-only sources and `aobg`'s channel rows.
- */
+/** Whether a def renders the Band strip: every `length > 1` param,
+ * whatever the kind or access — kind decides structure, access gates
+ * editability (#90). */
 function isBandArray(def: ParameterDef): boolean {
-  return (
-    def.length > 1 &&
-    isWritable(def) &&
-    kindTag(def.kind) !== 'aobg_channel_major'
-  )
+  return def.length > 1
 }
 
 /** Whether a def renders the numeric box: a scalar of a numeric kind,
@@ -204,8 +196,8 @@ const WidgetFactory: Component<{ def: ParameterDef; name: string }> = (
     }
   }
   // Kind decides structure, access gates editability; `def` is static,
-  // so the branch is taken once. Every other combo is still the
-  // readout — #90 part 2 seats the remaining arrays here.
+  // so the branch is taken once. Only an unknown combo reaches the
+  // readout.
   const editableScalar = def.length === 1 && isWritable(def)
   return (
     <Switch fallback={<Readout def={def} name={props.name} />}>
