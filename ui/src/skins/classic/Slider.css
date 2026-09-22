@@ -1,0 +1,81 @@
+/* The shared Slider (#89): a control-height strip whose track / fill /
+   thumb are painted entirely from `--norm` (0–1) — the component sets
+   no geometry. Fills what the box leaves of the control row. Hover
+   grows the thumb under focus weight; disabled = muted fill, a smaller
+   thumb, no lift. */
+
+.adv-slider {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 3rem;
+  height: var(--control-h);
+  cursor: pointer;
+  /* Behavior, not appearance: a press-drag is the slider's, never the
+     browser's pan. Every skin keeps it. */
+  touch-action: none;
+}
+
+.adv-slider--disabled {
+  cursor: default;
+}
+
+.adv-slider__track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  margin: 0 var(--space-2);
+  border-radius: 2px;
+  background: var(--color-bg);
+}
+
+.adv-slider__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(clamp(0, var(--norm, 0), 1) * 100%);
+  border-radius: 2px;
+  background: var(--color-accent);
+  opacity: 0.8;
+}
+
+.adv-slider__thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(clamp(0, var(--norm, 0), 1) * 100%);
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--color-accent);
+  translate: -50% -50%;
+  transition: scale 0.12s ease;
+}
+
+/* Hover under focus weight — the whole hover selector inside `:where()`
+   (ADR-0011). Disabled sliders get no lift. */
+:where(.adv-card:hover)
+  .adv-slider:where(:not(.adv-slider--disabled))
+  .adv-slider__thumb {
+  scale: 1.2;
+}
+
+.adv-slider:focus-visible {
+  outline: none;
+}
+
+.adv-slider:focus-visible .adv-slider__thumb {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.adv-slider--disabled .adv-slider__fill {
+  background: var(--hue-readonly);
+  opacity: 0.35;
+}
+
+.adv-slider--disabled .adv-slider__thumb {
+  width: 0.6rem;
+  height: 0.6rem;
+  background: var(--hue-readonly);
+  opacity: 0.7;
+}

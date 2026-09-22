@@ -123,10 +123,10 @@ test('Tab + Space on a switch commits, and the next snapshot carries it', async 
   await expect(enable).not.toBeChecked() // Music ships dvle=0
   await expect(peerEnable).not.toBeChecked()
 
-  // From the preceding card's numeric box (`dvlo`, #87) — one Tab
-  // reaches the switch; the disabled reset marker between is skipped.
+  // From the preceding card's Slider (`dvlo`, #89) — one Tab reaches
+  // the switch; the disabled reset marker between is skipped.
   await page
-    .getByRole('textbox', { name: 'Volume Leveler Output Target' })
+    .getByRole('slider', { name: 'Volume Leveler Output Target' })
     .focus()
   await page.keyboard.press('Tab')
   await expect(enable).toBeFocused()
@@ -314,4 +314,54 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   }))
   expect(after.selection).toEqual([0, after.value.length])
   await expect(peer.getByRole('textbox', { name })).toHaveValue(after.value)
+})
+
+// — Slider (#89, behavior 10) —
+
+// Geometry truth: the thumb's rendered centre sits where `--norm` says
+// on the track — at the midpoint for Music's 3 dB of 0–6 — and a real
+// press-drag from the thumb past the track's right end lands `max`:
+// the slider reads 6 dB with focus held, `--norm` is 1, the thumb sits
+// at the track's right edge, and the peer page's next snapshot carries
+// the value.
+test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm", async ({
+  page,
+  context,
+}) => {
+  await openAdvanced(page)
+  const peer = await context.newPage()
+  await openAdvanced(peer)
+  const name = 'Headphone Virtualizer Surround Boost'
+  const slider = page.getByRole('slider', { name })
+  await expect(slider).toHaveAttribute('aria-valuenow', '3') // Music ships dhsb=48
+  await slider.scrollIntoViewIfNeeded()
+  const track = slider.locator('.adv-slider__track')
+  const thumb = slider.locator('.adv-slider__thumb')
+  const rect = await track.boundingBox()
+  if (!rect) throw new Error('track not laid out')
+  const thumbX = async () => {
+    const box = await thumb.boundingBox()
+    if (!box) throw new Error('thumb not laid out')
+    return box.x + box.width / 2
+  }
+  const y = rect.y + rect.height / 2
+  expect(Math.abs((await thumbX()) - (rect.x + rect.width / 2))).toBeLessThan(1)
+
+  await page.mouse.move(await thumbX(), y)
+  await page.mouse.down()
+  await page.mouse.move(rect.x + rect.width + 20, y, { steps: 8 })
+  await page.mouse.up()
+
+  await expect(slider).toHaveAttribute('aria-valuenow', '6')
+  await expect(slider).toBeFocused()
+  await expect(slider).toHaveAttribute('aria-valuetext', '6 dB')
+  expect(
+    await slider.evaluate((el) => el.style.getPropertyValue('--norm')),
+  ).toBe('1')
+  expect(Math.abs((await thumbX()) - (rect.x + rect.width))).toBeLessThan(1)
+  await expect(page.getByRole('textbox', { name })).toHaveValue('6')
+  await expect(peer.getByRole('slider', { name })).toHaveAttribute(
+    'aria-valuenow',
+    '6',
+  )
 })

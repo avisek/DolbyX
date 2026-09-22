@@ -12,7 +12,6 @@ import {
   stepped,
   type StepAxis,
   type StepMode,
-  type StepScale,
 } from '../lib/step'
 
 /** A complete number — rejects the partials typing passes through. */
@@ -28,8 +27,8 @@ const PX_PER_STEP = 4
  * you type*. Every complete number is a live write clamped to
  * `[min, max]` while the text stays as typed; blur / Enter commits if
  * it differs from store truth and re-syncs the text; Esc reverts.
- * ↑ / ↓ step what the box shows by the Step rule (`fine`, `scale`;
- * Alt / Shift from the event), write it live, and leave the re-synced
+ * ↑ / ↓ step what the box shows by the Step rule (`axis`; Alt / Shift
+ * from the event), write it live, and leave the re-synced
  * text selected so the next keystroke replaces it. Uncontrolled while
  * focused, mirroring the store otherwise (read-only always). Display
  * units in and out — the caller converts.
@@ -48,12 +47,8 @@ const NumberInput: Component<{
   name: string
   /** Store truth, display units. */
   value: () => number
-  min: number
-  max: number
-  /** One raw unit in display units — the step lattice. */
-  fine: number
-  /** `log` for frequencies: multiplicative steps; linear when absent. */
-  scale?: StepScale | undefined
+  /** Range, lattice, and scale — the Step rule's axis, display units. */
+  axis: StepAxis
   /** The kind's unit label — empty renders no overlay. */
   unit: string
   readOnly?: boolean | undefined
@@ -70,13 +65,7 @@ const NumberInput: Component<{
   let wrapper!: HTMLSpanElement
   const editable = () => props.readOnly !== true
   const scrub = () => props.scrub === true && editable()
-  const axis = (): StepAxis => ({
-    min: props.min,
-    max: props.max,
-    fine: props.fine,
-    scale: props.scale,
-  })
-  const clamp = (value: number): number => clampTo(axis(), value)
+  const clamp = (value: number): number => clampTo(props.axis, value)
 
   /** The field's text as a complete number, else undefined. */
   const parsed = (): number | undefined => {
@@ -146,10 +135,10 @@ const NumberInput: Component<{
     // Up = increase.
     accum -= locked ? event.movementY / devicePixelRatio : event.movementY
     const steps = Math.trunc(accum / PX_PER_STEP)
-    const value = stepped(axis(), base, steps, event)
+    const value = stepped(props.axis, base, steps, event)
     if (
-      (steps > 0 && value === props.max) ||
-      (steps < 0 && value === props.min)
+      (steps > 0 && value === props.axis.max) ||
+      (steps < 0 && value === props.axis.min)
     ) {
       // Pinned at a bound: rebase to it, so reversing bites within one
       // step instead of unwinding dead travel.
@@ -287,7 +276,7 @@ const NumberInput: Component<{
             // the store's (optimistically applied) truth, selected.
             const shown = clamp(parsed() ?? props.value())
             props.onLive?.(
-              stepped(axis(), shown, key === 'ArrowUp' ? 1 : -1, event),
+              stepped(props.axis, shown, key === 'ArrowUp' ? 1 : -1, event),
             )
             showSynced()
             event.preventDefault()

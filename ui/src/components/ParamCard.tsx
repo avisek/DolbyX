@@ -36,12 +36,12 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
       on:click={(event) => {
         // Only the card's own chrome forwards to the `for` target: a
         // click inside a control that manages its own focus (numeric
-        // box, slider, band strip — #87 on) keeps the focus it set.
-        // Tristate segments are nested labels with their own radio
-        // forwarding, deliberately not listed.
+        // box, band strip — #87 on) keeps the focus it set. The Slider
+        // cancels its own click (#89); tristate segments are nested
+        // labels with their own radio forwarding — neither is listed.
         if (
           event.target instanceof Element &&
-          event.target.closest('.adv-input, [role=slider], .adv-bands')
+          event.target.closest('.adv-input, .adv-bands')
         ) {
           event.preventDefault()
         }
