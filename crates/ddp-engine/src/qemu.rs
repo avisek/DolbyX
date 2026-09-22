@@ -26,17 +26,14 @@ use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command as Proce
 use std::sync::Mutex;
 
 use crate::protocol::{
-    Command, STATUS_NO_SESSION, STATUS_OK, decode_get_params_reply, param_name, read_reply,
-    write_message,
+    Command, STATUS_NO_SESSION, STATUS_OK, VIS_TAIL_SAMPLES, decode_get_params_reply, param_name,
+    read_reply, write_message,
 };
 use crate::{Engine, EngineError, Result, SessionId, VisFrame};
 
 /// The rates `EFFECT_CMD_SET_CONFIG` honours — the same gate the shim
 /// enforces, applied host-side so the engine never sees a bad rate.
 const SUPPORTED_RATES: [u32; 3] = [44_100, 48_000, 32_000];
-
-/// Samples in the fixed vis tail (`vnbg ‖ vnbe ‖ vcbg ‖ vcbe`).
-const VIS_TAIL_SAMPLES: usize = 80;
 
 /// The live engine subprocess: the child plus its protocol pipes.
 struct Subprocess {
@@ -234,6 +231,7 @@ impl Engine for QemuBackend {
             vnbe: band(),
             vcbg: band(),
             vcbe: band(),
+            gebg: band(),
         })
     }
 }

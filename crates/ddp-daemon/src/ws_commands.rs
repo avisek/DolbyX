@@ -177,7 +177,7 @@ pub(crate) enum WsEvent<'a> {
     /// The per-block visualizer broadcast — the main session's vis
     /// tail; pub/sub to every client, no originator rule (ADR-0005).
     Vis {
-        /// The tail's four arrays keyed by 4-CC, raw i16 1/16-dB.
+        /// The tail's five arrays keyed by 4-CC, raw i16 1/16-dB.
         params: VisParams,
     },
     /// The one success reply per command — failures use
@@ -219,6 +219,8 @@ pub(crate) struct VisParams {
     vcbg: [i16; 20],
     /// Custom-grid per-band spectrum excitations.
     vcbe: [i16; 20],
+    /// The GEQ gains the DSP applied in this block.
+    gebg: [i16; 20],
 }
 
 impl From<&VisFrame> for VisParams {
@@ -228,6 +230,7 @@ impl From<&VisFrame> for VisParams {
             vnbe: frame.vnbe,
             vcbg: frame.vcbg,
             vcbe: frame.vcbe,
+            gebg: frame.gebg,
         }
     }
 }

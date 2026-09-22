@@ -4,7 +4,8 @@
 //! contract is pinned for every later slice: enabled → deterministic
 //! marker transform (bitwise NOT — ferried audio stays distinguishable
 //! from dry passthrough), disabled → echo (bypass identity), vis tail
-//! fabricated. A failure plan ([`StubBackend::fail_next`] /
+//! fabricated, `gebg` echoing the session's last `set_params` write.
+//! A failure plan ([`StubBackend::fail_next`] /
 //! [`StubBackend::fail_forever`]) injects backend failures for the
 //! supervisor's recovery paths.
 
@@ -222,12 +223,22 @@ impl Engine for StubBackend {
         } else {
             output.copy_from_slice(input);
         }
-        Ok(fabricated_vis())
+        let mut gebg = [0_i16; 20];
+        if let Some(written) = session.params.get("gebg") {
+            let n = written.len().min(gebg.len());
+            gebg[..n].copy_from_slice(&written[..n]);
+        }
+        Ok(VisFrame {
+            gebg,
+            ..fabricated_vis()
+        })
     }
 }
 
 /// The deterministic vis tail every stub `process` reply carries: four
-/// distinguishable ramps, `vnbg` 0–19 through `vcbe` 60–79.
+/// distinguishable ramps, `vnbg` 0–19 through `vcbe` 60–79, plus the
+/// power-on `gebg` (zeros) — `process` swaps in the session's last
+/// `set_params` write.
 #[must_use]
 pub fn fabricated_vis() -> VisFrame {
     let ramp = |base: i16| {
@@ -243,6 +254,7 @@ pub fn fabricated_vis() -> VisFrame {
         vnbe: ramp(20),
         vcbg: ramp(40),
         vcbe: ramp(60),
+        gebg: [0; 20],
     }
 }
 
@@ -314,6 +326,29 @@ mod tests {
         assert_eq!(vis, fabricated_vis());
         assert_eq!(vis.vnbg[..3], [0, 1, 2]);
         assert_eq!(vis.vcbe[19], 79);
+    }
+
+    /// The fifth vis-tail array: the `gebg` in force for the block —
+    /// the session's last `set_params` write, padded to the fixed 20
+    /// slots; the registry's power-on zeros before any write. Per
+    /// session, never crossed.
+    #[test]
+    fn process_reports_the_session_gebg_in_force() {
+        let stub = StubBackend::new();
+        let a = stub.create_session(48000).unwrap();
+        let b = stub.create_session(48000).unwrap();
+        let vis = stub.process(a, &[0, 0], &mut [0, 0]).unwrap();
+        assert_eq!(vis.gebg, [0; 20], "power-on gebg before any write");
+
+        stub.set_params(a, &[("gebg", &[16, -32, 48])]).unwrap();
+        let vis = stub.process(a, &[0, 0], &mut [0, 0]).unwrap();
+        assert_eq!(vis.gebg[..4], [16, -32, 48, 0]);
+        assert_eq!(vis.vcbg, fabricated_vis().vcbg, "the ramps stay");
+        let other = stub.process(b, &[0, 0], &mut [0, 0]).unwrap();
+        assert_eq!(other.gebg, [0; 20], "per session");
+
+        stub.set_params(a, &[("gebg", &[7; 20])]).unwrap();
+        assert_eq!(stub.process(a, &[0, 0], &mut [0, 0]).unwrap().gebg, [7; 20]);
     }
 
     #[test]

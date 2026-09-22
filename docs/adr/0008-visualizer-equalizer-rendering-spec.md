@@ -55,7 +55,11 @@ Deliberate choices a reader might otherwise "fix":
   `ven = 0`, whose frozen frames can't follow edits — they render
   resolved state instead (GEQ-only; the original's suspended render
   deviated identically). One rule, three consumers: curve vertices,
-  thumb Ys, the touch math's reference gain.
+  thumb Ys, the touch math's offset — the frame's `vcbg − gebg`
+  residual, the non-GEQ contribution the DSP applied in that very
+  block. Pairing within one frame keeps the rebase exact under any
+  round-trip delay; rebasing against the smoother's own last gain
+  fed the delay back as a rail-to-rail swing (issue #105).
 - **The drag surface is the field, not the thumbs.** Pointer-down
   anywhere edits immediately; x snaps to the nearest visible EQ slider;
   moves sweep across bands — the original's finger-painting feel.

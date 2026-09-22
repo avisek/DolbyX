@@ -25,7 +25,7 @@ export { visFrame }
 export { visIdle }
 
 /**
- * One of the frame's four arrays by 4-CC — a Live array's read
+ * One of the frame's arrays by 4-CC — the Live arrays' read
  * (CONTEXT.md); `undefined` before the first event or for any other
  * name.
  */

@@ -212,12 +212,16 @@ export function fixtureState(
 
 /**
  * One `vis` event's params as the daemon broadcasts them (issue #24
- * part A): four fixed 20-slot arrays, raw i16 1/16-dB. Unset custom
- * slots carry what streamed silence produces — `vcbe` −192 (−12 dB),
- * `vcbg` 0.
+ * part A, #105): five fixed 20-slot arrays, raw i16 1/16-dB. Unset
+ * custom slots carry what streamed silence produces — `vcbe` −192
+ * (−12 dB), `vcbg` 0 — and `gebg` the flat factory curve, 0.
  */
 export function fixtureVis(
-  head: { vcbg?: readonly number[]; vcbe?: readonly number[] } = {},
+  head: {
+    vcbg?: readonly number[]
+    vcbe?: readonly number[]
+    gebg?: readonly number[]
+  } = {},
 ): VisParams {
   const pad = (values: readonly number[] | undefined, floor: number) =>
     Array.from({ length: 20 }, (_slot, band) => values?.[band] ?? floor)
@@ -226,6 +230,7 @@ export function fixtureVis(
     vnbe: pad(undefined, -192),
     vcbg: pad(head.vcbg, 0),
     vcbe: pad(head.vcbe, -192),
+    gebg: pad(head.gebg, 0),
   }
 }
 

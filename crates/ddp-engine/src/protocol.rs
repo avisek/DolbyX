@@ -37,6 +37,18 @@ pub const STATUS_INVALID: i32 = -22;
 /// The session id names no live session (mirrors `-ENOENT`).
 pub const STATUS_NO_SESSION: i32 = -2;
 
+/// The vis tail every `Process` reply carries, in order: the four
+/// ReadOnly-Dynamic arrays plus the `gebg` in force for the block —
+/// read from the same registry the DSP just consumed, so
+/// `vcbg − gebg` is that block's exact non-GEQ residual.
+pub const VIS_TAIL_NAMES: [ParamName; 5] = [*b"vnbg", *b"vnbe", *b"vcbg", *b"vcbe", *b"gebg"];
+/// Slots per vis-tail array — fixed 20 at every rate (at 32 kHz only
+/// `vnnb` = 19 are live; the 20th is engine-stale). `gebg` stores 40;
+/// the tail reads its 20 wire bands.
+pub const VIS_BAND_SLOTS: usize = 20;
+/// Samples in the fixed vis tail (5 × 20 i16 = 200 bytes).
+pub const VIS_TAIL_SAMPLES: usize = VIS_TAIL_NAMES.len() * VIS_BAND_SLOTS;
+
 /// Sends one framed reply (shim → daemon).
 ///
 /// # Errors
@@ -217,7 +229,7 @@ pub enum Command {
         names: Vec<ParamName>,
     },
     /// 0x30 `[u32 session_id][u32 frames][i16 × frames × 2]` → reply
-    /// `[i16 × frames × 2 pcm][i16 × 80 vis tail]` — the PCM block
+    /// `[i16 × frames × 2 pcm][i16 × VIS_TAIL_SAMPLES vis tail]` — the PCM block
     /// always comes first.
     Process {
         /// The session that processes the block.

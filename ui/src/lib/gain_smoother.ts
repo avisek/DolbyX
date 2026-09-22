@@ -74,10 +74,7 @@ export class GainSmoother {
   /** The convolved curve in dB — what the engine carries. */
   private readonly smooth = new Float64Array(WIRE_BANDS)
   /** Per-band coalescing queue; insertion order = drain order. */
-  private readonly queue = new Map<
-    number,
-    { dB: number; ref: number | undefined }
-  >()
+  private readonly queue = new Map<number, { dB: number; offset: number }>()
   private lastEmitted = new Int16Array(WIRE_BANDS)
   /** Last tick's timestamp; `null` ⇒ the next tick sees Δt = 0. */
   private lastTick: number | null = null
@@ -123,15 +120,16 @@ export class GainSmoother {
   }
 
   /**
-   * Queues a touch: `dB` for `band`, optionally against the reference
-   * gain `ref` the caller rendered the thumb at (the composed `vcbg`
-   * value) — the drain rebases the touch so the painted user gain plus
-   * the non-GEQ contribution lands where the finger points. Re-enqueueing
-   * a band moves it to the drain tail; the last value wins.
+   * Queues a touch: `dB` for `band`, less `offset` — the band's non-GEQ
+   * contribution as the caller measured it (one frame's `vcbg − gebg`,
+   * display dB), so the painted gain plus that contribution lands where
+   * the finger points. The smoother's own state never enters the
+   * rebase. Re-enqueueing a band moves it to the drain tail; the last
+   * value wins.
    */
-  enqueue(band: number, dB: number, ref?: number): void {
+  enqueue(band: number, dB: number, offset = 0): void {
     this.queue.delete(band)
-    this.queue.set(band, { dB, ref })
+    this.queue.set(band, { dB, offset })
   }
 
   /**
@@ -149,11 +147,9 @@ export class GainSmoother {
         : now - this.lastTick
     this.lastTick = now
     // Drain: splat each queued touch across its (2L+1)-cell window —
-    // every cell the same value, the thick-brush feel. A reference gain
-    // rebases the touch by the band's non-GEQ contribution.
-    for (const [band, { dB, ref }] of this.queue) {
-      const gain =
-        ref === undefined ? dB : dB - (ref - (this.smooth[band] ?? 0))
+    // every cell the same value, the thick-brush feel.
+    for (const [band, { dB, offset }] of this.queue) {
+      const gain = dB - offset
       for (let cell = band; cell <= band + 2 * L; cell += 1) {
         this.temp[cell] = gain
       }

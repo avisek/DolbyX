@@ -119,13 +119,14 @@ pub async fn start_daemon() -> TestDaemon {
 }
 
 /// The `params` object a [`ddp_engine::VisFrame`] must appear as on
-/// the wire (ADR-0005): the four arrays verbatim under their 4-CC keys.
+/// the wire (ADR-0005): the five arrays verbatim under their 4-CC keys.
 pub fn vis_params_json(frame: &ddp_engine::VisFrame) -> serde_json::Value {
     serde_json::json!({
         "vnbg": frame.vnbg.to_vec(),
         "vnbe": frame.vnbe.to_vec(),
         "vcbg": frame.vcbg.to_vec(),
         "vcbe": frame.vcbe.to_vec(),
+        "gebg": frame.gebg.to_vec(),
     })
 }
 

@@ -72,7 +72,7 @@ vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 
 const { default: Visualizer } = await import('./Visualizer')
 const { applySnapshot, state } = await import('../store/state')
-const { resetVis } = await import('../store/vis')
+const { resetVis, visFrame } = await import('../store/vis')
 const { startWs, stopWs } = await import('../store/ws')
 
 beforeEach(() => {
@@ -581,3 +581,53 @@ it('a still hold keeps emitting while decay pends, then ticks go quiet', () => {
   for (let frame = 0; frame < 5; frame += 1) vi.advanceTimersToNextFrame()
   expect(edits(socket)).toHaveLength(settledCount)
 })
+
+// Issue #105 — network- and fps-agnostic. The vis round trip is a
+// delay line: the frame the pump reads at tick t reflects the gain
+// sent N ticks earlier — `vcbg[t] = sent[t − N] + IEQ`, `gebg[t] =
+// sent[t − N]`, IEQ +3 dB (48) on every band. Pairing each frame's
+// `vcbg` with its own `gebg` makes the residual exact whatever N: a
+// hold at +12 dB (y = 96) on band 10 sends 9 dB (144) on every emitted
+// batch, and the composed curve lands on the finger (192). N = 1 is
+// the tightest loop, stable even against the smoother's own last gain;
+// from N = 2 that rebase swung rail to rail (9, 18, 18, 9, 0, …).
+it.each([1, 2, 3, 8])(
+  'a hold lands where the finger points through an N = %i frame vis delay',
+  (delay) => {
+    localStorage.setItem('dolbyx.geq.kernel', 'Direct')
+    const socket = renderConnected()
+    sizeField()
+    const IEQ = 48
+    /** The gain in force per tick — `sent[t]`; the engine holds its last write. */
+    const sent = [0]
+    const frameReflecting = (tick: number) => {
+      const gebg = sent[Math.max(0, tick)] ?? 0
+      return fixtureVis({
+        vcbg: Array.from({ length: 20 }, (_slot, band) =>
+          band === 10 ? gebg + IEQ : IEQ,
+        ),
+        gebg: bandGains({ 10: gebg }),
+      })
+    }
+    socket.serverMessage({ type: 'vis', params: frameReflecting(0) })
+    vi.advanceTimersToNextFrame()
+
+    fireEvent.pointerDown(editor(), { pointerId: 1, clientX: 200, clientY: 96 })
+    for (let tick = 1; tick <= 30; tick += 1) {
+      vi.advanceTimersToNextFrame() // the pump: re-enqueue the hold, tick
+      sent.push(edits(socket).at(-1)?.params.gebg?.[10] ?? 0)
+      // The frame tick + 1 reads: what the engine applied N ticks before.
+      socket.serverMessage({
+        type: 'vis',
+        params: frameReflecting(tick + 1 - delay),
+      })
+    }
+    fireEvent.pointerUp(editor(), { pointerId: 1 })
+
+    const gains = edits(socket).map((edit) => edit.params.gebg?.[10])
+    expect(gains.length).toBeGreaterThan(0)
+    expect(gains).toEqual(gains.map(() => 144))
+    expect(sent.at(-1)).toBe(144)
+    expect(visFrame()?.vcbg[10]).toBe(192)
+  },
+)
