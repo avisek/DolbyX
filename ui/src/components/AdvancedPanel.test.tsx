@@ -11,6 +11,7 @@ import {
   fixtureBootstrap,
   fixtureCategories,
   fixtureParams,
+  fixtureRamp,
   fixtureState,
   fixtureStateWithParams,
   fixtureVis,
@@ -2460,4 +2461,259 @@ it('a drag over a wrapped strip — band 1 and band N tops differ — writes not
   releaseAt(targets, 105, 5)
   expect(sentEdits(socket)).toEqual([])
   expect(editingBands(targets)).toEqual([])
+})
+
+// — Divergence + Reset (#92) —
+
+const resetOf = (node: HTMLElement) =>
+  node.querySelector<HTMLButtonElement>(':scope > .adv-card__reset')
+
+// Behavior 1 (#92) — the tracer bullet: a card whose resolved value is
+// off the Baseline carries `adv-card--diverged` and an enabled reset
+// marker; a clean card's marker is `disabled`. Client-derived from the
+// snapshot's baseline, never sent (ADR-0005).
+it('a diverged card publishes --diverged and enables its reset; a clean one is disabled', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ dvla: [9] }))
+  const leveler = card(panel, 'dvla')
+  expect(leveler.classList).toContain('adv-card--diverged')
+  expect(resetOf(leveler)?.disabled).toBe(false)
+  expect(resetOf(leveler)?.getAttribute('aria-label')).toBe(
+    'Reset Volume Leveler Amount',
+  )
+  expect(resetOf(leveler)?.title).toBe('Reset Volume Leveler Amount')
+
+  const enable = card(panel, 'dvle')
+  expect(enable.classList).not.toContain('adv-card--diverged')
+  expect(resetOf(enable)?.disabled).toBe(true)
+
+  // Back on the baseline: divergence is derived, so it clears live.
+  applySnapshot(fixtureState())
+  expect(leveler.classList).not.toContain('adv-card--diverged')
+  expect(resetOf(leveler)?.disabled).toBe(true)
+})
+
+/** The frames sent after `mark` — past the handshake's own `get_state`. */
+const sentSince = (socket: MockWebSocket, mark: number) =>
+  socket.sentCommands().slice(mark)
+
+// Behavior 2 (#92): the click is one `reset_profile { id, only:[4-CC] }`
+// on the active profile, chased by `get_state` on the ack; the ack
+// itself moves nothing — reset values live in the daemon's cascade, so
+// the reconcile's snapshot is what lands them (ADR-0007).
+it('clicking a card reset sends reset_profile scoped to the 4-CC, then get_state; the snapshot lands it', async () => {
+  const panel = renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dvla: [9] }))
+  const leveler = card(panel, 'dvla')
+  const mark = socket.sentCommands().length
+
+  resetOf(leveler)?.click()
+  expect(sentSince(socket, mark)).toEqual([
+    {
+      cmd: 'reset_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      only: ['dvla'],
+    },
+  ])
+
+  const sent = sentSince(socket, mark)[0]
+  socket.serverMessage({ type: 'ack', request_id: sent?.request_id })
+  await waitFor(() => {
+    expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+      'reset_profile',
+      'get_state',
+    ])
+  })
+  expect(boxText(panel, 'dvla')).toBe('9')
+  expect(resetOf(leveler)?.disabled).toBe(false)
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState(),
+    request_id: sentSince(socket, mark)[1]?.request_id,
+  })
+  expect(boxText(panel, 'dvla')).toBe('4')
+  expect(resetOf(leveler)?.disabled).toBe(true)
+})
+
+/**
+ * Music selecting `presetId` with `gebg` diverged on the named rows —
+ * the profile's own, the preset's, or both.
+ */
+function selectingWithGebg(
+  presetId: string | null,
+  diverged: { profile?: boolean; preset?: boolean },
+) {
+  const seeded = selectingState(presetId)
+  const ramp = fixtureRamp(16)
+  return {
+    ...seeded,
+    profiles: seeded.profiles.map((profile) =>
+      profile.id === 'music' && diverged.profile
+        ? { ...profile, params: { ...profile.params, gebg: ramp } }
+        : profile,
+    ),
+    eq_presets: seeded.eq_presets.map((preset) =>
+      preset.id === 'rich' && diverged.preset
+        ? { ...preset, params: { ...preset.params, gebg: ramp } }
+        : preset,
+    ),
+  }
+}
+
+// Behavior 3 (#92): the Source rule — a preset-carried card diverges
+// against and resets on the selected EQ preset: `reset_eq_preset
+// { id, only:[4-CC] }` + `get_state`; the profile's own divergence on
+// the same 4-CC is ignored while the preset is selected.
+it('a preset-carried card diverges and resets on the selected EQ preset, ignoring the profile row', async () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = card(panel, 'gebg')
+
+  applySnapshot(selectingWithGebg('rich', { profile: true }))
+  expect(gains.classList).not.toContain('adv-card--diverged')
+  expect(resetOf(gains)?.disabled).toBe(true)
+
+  applySnapshot(selectingWithGebg('rich', { profile: true, preset: true }))
+  expect(gains.classList).toContain('adv-card--diverged')
+  const mark = socket.sentCommands().length
+  resetOf(gains)?.click()
+  expect(sentSince(socket, mark)).toEqual([
+    {
+      cmd: 'reset_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      only: ['gebg'],
+    },
+  ])
+  socket.serverMessage({
+    type: 'ack',
+    request_id: sentSince(socket, mark)[0]?.request_id,
+  })
+  await waitFor(() => {
+    expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+      'reset_eq_preset',
+      'get_state',
+    ])
+  })
+
+  // None selected: the profile's own row is the Source item again.
+  applySnapshot(selectingWithGebg(null, { profile: true }))
+  expect(resetOf(gains)?.disabled).toBe(false)
+})
+
+const section = (label: string) => screen.getByRole('region', { name: label })
+const sectionReset = (label: string) =>
+  within(section(label)).getByRole<HTMLButtonElement>('button', {
+    name: `Reset ${label}`,
+  })
+
+// Behavior 4 (#92): a category's reset marker is enabled iff any of
+// its writable params diverges — `adv-cat--diverged` alongside — and
+// its click is one `reset_profile` whose `only` is exactly the writable
+// 4-CC names in table order: read-only names (Visualizer's grid + live
+// arrays) never appear, they have no Content key.
+it('a category reset enables on any writable divergence and resets exactly the writable 4-CCs', () => {
+  renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dvli: [-200], vcnb: [10] }))
+
+  expect(section('Volume Leveler').classList).toContain('adv-cat--diverged')
+  expect(sectionReset('Volume Leveler').disabled).toBe(false)
+  expect(sectionReset('Volume Leveler').title).toBe('Reset Volume Leveler')
+  expect(section('Dialog Enhancer').classList).not.toContain(
+    'adv-cat--diverged',
+  )
+  expect(sectionReset('Dialog Enhancer').disabled).toBe(true)
+  expect(sectionReset('Build').disabled).toBe(true)
+
+  const mark = socket.sentCommands().length
+  sectionReset('Volume Leveler').click()
+  sectionReset('Visualizer').click()
+  expect(sentSince(socket, mark)).toEqual([
+    {
+      cmd: 'reset_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      only: ['dvla', 'dvli', 'dvlo', 'dvle', 'dvmc', 'dvme'],
+    },
+    {
+      cmd: 'reset_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      only: ['ven', 'vcnb', 'vcbf'],
+    },
+  ])
+})
+
+// Behavior 5 (#92): the `geq` header follows the category's one Source
+// item — with a preset selected it is enabled iff the preset diverges
+// on the four `ge*` params and resets them on the preset; on None it
+// targets the profile. Exactly one command per click.
+it('Graphic Equalizer header resets the preset while one is selected, else the profile', () => {
+  renderOpen()
+  const socket = connect()
+
+  applySnapshot(selectingWithGebg('rich', { profile: true }))
+  expect(section('Graphic Equalizer').classList).toContain('adv-cat--preset')
+  expect(section('Graphic Equalizer').classList).not.toContain(
+    'adv-cat--diverged',
+  )
+  expect(sectionReset('Graphic Equalizer').disabled).toBe(true)
+
+  applySnapshot(selectingWithGebg('rich', { preset: true }))
+  expect(section('Graphic Equalizer').classList).toContain('adv-cat--diverged')
+  const mark = socket.sentCommands().length
+  sectionReset('Graphic Equalizer').click()
+  expect(sentSince(socket, mark)).toEqual([
+    {
+      cmd: 'reset_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      only: ['geon', 'genb', 'gebf', 'gebg'],
+    },
+  ])
+
+  applySnapshot(selectingWithGebg(null, { profile: true }))
+  expect(section('Graphic Equalizer').classList).not.toContain(
+    'adv-cat--preset',
+  )
+  sectionReset('Graphic Equalizer').click()
+  expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+    'reset_eq_preset',
+    'reset_profile',
+  ])
+  expect(sentSince(socket, mark)[1]).toEqual({
+    cmd: 'reset_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    only: ['geon', 'genb', 'gebf', 'gebg'],
+  })
+})
+
+// Behavior 6 (#92): read-only cards render no reset marker at all — no
+// Content key, nothing to reset; the skin's slot stays empty.
+it('read-only cards render no reset marker', () => {
+  const panel = renderOpen()
+  for (const code of ['vnnb', 'bver', 'vnbg']) {
+    expect(resetOf(card(panel, code))).toBeNull()
+  }
+  expect(resetOf(card(panel, 'vcnb'))).not.toBeNull() // Experimental
+})
+
+// Behavior 2 (#92), the card-as-label edge: the marker is interactive
+// content inside the card's `label`, so its click never forwards to
+// the card's primary control — a toggle card's reset is exactly one
+// `reset_profile`, no stray `edit_profile` flip.
+it('a toggle card reset never forwards the click to its switch', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dvle: [1] }))
+  const mark = socket.sentCommands().length
+  resetOf(card(panel, 'dvle'))?.click()
+  expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+    'reset_profile',
+  ])
 })

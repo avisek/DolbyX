@@ -129,11 +129,16 @@ export function categories(): readonly CategoryDef[] {
 }
 
 /**
- * Whether a param rides an EQ preset — eligibility is derived,
- * `category ∈ {Ieq, Geq}`, never a flag (ADR-0003).
+ * Whether a Parameter category rides an EQ preset — eligibility is a
+ * category property, `∈ {Ieq, Geq}`, never a flag (ADR-0003).
  */
+export function isPresetCategory(category: ParamCategory): boolean {
+  return category === 'ieq' || category === 'geq'
+}
+
+/** Whether a param rides an EQ preset — its category's eligibility. */
 export function isPresetCarried(def: ParameterDef): boolean {
-  return def.category === 'ieq' || def.category === 'geq'
+  return isPresetCategory(def.category)
 }
 
 /**

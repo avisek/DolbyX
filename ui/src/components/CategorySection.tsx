@@ -1,15 +1,19 @@
 import { For, createSignal, type Component } from 'solid-js'
 import type { CategoryDef } from '../lib/parameters'
 import { foldedCategories, setCategoryFolded } from '../lib/prefs'
-import { categoryWritesToPreset } from '../store/wiring'
+import {
+  categoryDiverges,
+  categoryWritesToPreset,
+  resetCategory,
+} from '../store/wiring'
 import ParamCard from './ParamCard'
 
 /**
  * One Parameter category as a labelled section (#85): a header whose
  * fold toggle IS the header's box (chevron, title, count inside — no
- * nested interactive content) followed by the category's reset marker
- * (inert until #92), over a body of one card per param in `params`
- * order.
+ * nested interactive content) followed by the category's Reset marker
+ * (#92: `disabled` while clean, one scoped `reset_*` on the category's
+ * Source item), over a body of one card per param in `params` order.
  * The Fold is state — `adv-cat--collapsed`, content stays mounted, the
  * skin animates (ADR-0011 addendum) — remembered per browser
  * (`dolbyx.advanced.collapsed`).
@@ -20,6 +24,7 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
   // eslint-disable-next-line solid/reactivity
   const stored = foldedCategories().includes(props.category.name)
   const [folded, setFolded] = createSignal(stored)
+  const resetName = () => `Reset ${props.category.label}`
   const toggle = () => {
     setFolded(!folded())
     setCategoryFolded(props.category.name, folded())
@@ -30,6 +35,7 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
       classList={{
         'adv-cat--collapsed': folded(),
         'adv-cat--preset': categoryWritesToPreset(props.category),
+        'adv-cat--diverged': categoryDiverges(props.category),
       }}
       aria-label={props.category.label}
     >
@@ -49,8 +55,12 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
         <button
           type="button"
           class="adv-cat__reset"
-          disabled
-          aria-label={`Reset ${props.category.label}`}
+          disabled={!categoryDiverges(props.category)}
+          aria-label={resetName()}
+          title={resetName()}
+          onClick={() => {
+            resetCategory(props.category)
+          }}
         />
       </header>
       <div class="adv-cat__body">

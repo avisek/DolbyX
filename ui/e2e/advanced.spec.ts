@@ -499,3 +499,58 @@ test('a fast 4-event drag across gebg leaves no band at its pre-drag value', asy
     .poll(() => values(peer.getByRole('group', { name })))
     .toEqual(after)
 })
+
+// — Divergence + Reset (#92, behavior 9) —
+
+// The Classic morph: a diverged card's marker rests as the dot (glyph
+// `::after` at opacity 0) and shows ↺ on card hover; a clean card's
+// marker is invisible and not hit-testable — the slot stays. Then the
+// real round trip: the click resets that one 4-CC on the daemon.
+test('a diverged reset marker rests as a dot, morphs to ↺ on hover; a clean one is inert', async ({
+  page,
+}) => {
+  await openAdvanced(page)
+  const enable = page.getByRole('switch', { name: 'Volume Leveler Enable' })
+  const reset = page.getByRole('button', {
+    name: 'Reset Volume Leveler Enable',
+  })
+  const cleanReset = page.getByRole('button', {
+    name: 'Reset Volume Leveler Amount',
+  })
+  const glyphOpacity = () =>
+    reset.evaluate((el) => getComputedStyle(el, '::after').opacity)
+
+  await expect(reset).toBeDisabled()
+  await enable.click() // Music ships dvle=0 — now off its Baseline
+  await expect(enable).toBeChecked()
+  await expect(reset).toBeEnabled()
+
+  // At rest (pointer parked on the panel header): the dot, no glyph.
+  await page.getByRole('button', { name: 'Advanced' }).hover()
+  await expect.poll(glyphOpacity, { timeout: 2000 }).toBe('0')
+  await expect(reset).toHaveCSS('opacity', '1')
+
+  // Card hover: the glyph.
+  await page.locator('.adv-card', { has: enable }).hover()
+  await expect.poll(glyphOpacity, { timeout: 2000 }).toBe('1')
+
+  // Clean: invisible, and a pointer at its centre lands elsewhere.
+  await expect(cleanReset).toBeDisabled()
+  await expect(cleanReset).toHaveCSS('opacity', '0')
+  await expect(cleanReset).toHaveCSS('pointer-events', 'none')
+  const hit = await cleanReset.evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const under = document.elementFromPoint(
+      box.x + box.width / 2,
+      box.y + box.height / 2,
+    )
+    return under === el
+  })
+  expect(hit).toBe(false)
+
+  // The click: one scoped `reset_profile` — the daemon falls `dvle`
+  // back to its Baseline and the reconcile lands it.
+  await reset.click()
+  await expect(enable).not.toBeChecked()
+  await expect(reset).toBeDisabled()
+})

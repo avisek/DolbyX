@@ -1,6 +1,11 @@
 import { Show, type Component } from 'solid-js'
 import { paramDef } from '../lib/parameters'
-import { isWritable, writesToPreset } from '../store/wiring'
+import {
+  isWritable,
+  paramDiverges,
+  resetParam,
+  writesToPreset,
+} from '../store/wiring'
 import WidgetFactory, { primaryControlId } from './WidgetFactory'
 
 /**
@@ -19,6 +24,7 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
   // eslint-disable-next-line solid/reactivity
   const def = paramDef(props.name)
   const name = () => `${props.categoryLabel} ${def.label}`
+  const resetName = () => `Reset ${name()}`
   return (
     <label
       class="adv-card"
@@ -27,6 +33,7 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
         'adv-card--ro': !isWritable(def),
         'adv-card--exp': def.access === 'experimental',
         'adv-card--preset': writesToPreset(def),
+        'adv-card--diverged': paramDiverges(def),
       }}
       for={primaryControlId(def)}
       title={def.description}
@@ -39,9 +46,11 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
         // box, band strip — #87 on) keeps the focus it set. The Slider
         // cancels its own click (#89); tristate segments are nested
         // labels with their own radio forwarding — neither is listed.
+        // The Reset marker is interactive content — browsers skip the
+        // forward natively; listed so the rule holds everywhere.
         if (
           event.target instanceof Element &&
-          event.target.closest('.adv-input, .adv-bands')
+          event.target.closest('.adv-input, .adv-bands, .adv-card__reset')
         ) {
           event.preventDefault()
         }
@@ -49,14 +58,19 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
     >
       <code class="adv-card__code">{def.name}</code>
       <span class="adv-card__label">{def.label}</span>
-      {/* The reset marker — read-only params have no Content key, so
-          no marker; `disabled` until divergence lands (#92). */}
+      {/* The Reset marker (#92): IS the divergence indicator — one
+          button, `disabled` while clean. Read-only params have no
+          Content key, so no marker: the skin's slot stays empty. */}
       <Show when={isWritable(def)}>
         <button
           type="button"
           class="adv-card__reset"
-          disabled
-          aria-label={`Reset ${name()}`}
+          disabled={!paramDiverges(def)}
+          aria-label={resetName()}
+          title={resetName()}
+          onClick={() => {
+            resetParam(def)
+          }}
         />
       </Show>
       <div class="adv-card__control">

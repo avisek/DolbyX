@@ -310,9 +310,14 @@ export function renameEqPreset(id: string, name: string): void {
     })
 }
 
-/** As [`resetProfile`], for an EQ preset. */
-export function resetEqPreset(id: string): void {
-  requestThenReconcile({ cmd: 'reset_eq_preset', id })
+/** As [`resetProfile`], for an EQ preset — `only` scopes to
+ * preset-carried content keys. */
+export function resetEqPreset(id: string, only?: readonly string[]): void {
+  requestThenReconcile(
+    only
+      ? { cmd: 'reset_eq_preset', id, only }
+      : { cmd: 'reset_eq_preset', id },
+  )
 }
 
 /**

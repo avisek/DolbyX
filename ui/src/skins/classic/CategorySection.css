@@ -136,8 +136,8 @@
   content: ' params';
 }
 
-/* The reset marker: bare chrome sized for its slot; the dot / ↺ morph
-   arrives with divergence (#92). Clean ⇒ invisible, slot kept. */
+/* The Reset marker's slot, over the header's right end; its morph
+   lives in ResetMarker.css. */
 .adv-cat__reset {
   position: absolute;
   top: 50%;
@@ -145,14 +145,8 @@
   width: var(--reset-w);
   height: var(--reset-w);
   padding: 0;
-  border: none;
   background: none;
   translate: 0 -50%;
-}
-
-.adv-cat__reset:disabled {
-  opacity: 0;
-  pointer-events: none;
 }
 
 /* — Body: the card's block spacing lives here, so it folds with the

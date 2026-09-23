@@ -7,11 +7,14 @@
 import {
   findParamDef,
   isPresetCarried,
+  isPresetCategory,
   paramDef,
   type CategoryDef,
   type ParameterDef,
 } from '../lib/parameters'
+import type { EqPreset, Profile } from '../lib/ws'
 import {
+  paramsDiverge,
   resolvedEqParam,
   selectedEqPreset,
   selectedProfile,
@@ -23,6 +26,8 @@ import {
   editEqPresetLive,
   editProfile,
   editProfileLive,
+  resetEqPreset,
+  resetProfile,
 } from './ws'
 
 /** Whether the bucket takes writes — Settable or Experimental. */
@@ -114,17 +119,42 @@ export function channelRows(def: ParameterDef): readonly ChannelRow[] {
   return rows
 }
 
-/** A writable card's Source item — the selected EQ preset for a
- * preset-carried param while the active profile has an EQ selection
- * (ADR-0003), else the active profile. */
-function sourceItem(def: ParameterDef): {
+/**
+ * A Source item (CONTEXT.md): the selected EQ preset or the active
+ * profile — `item` is its snapshot row (`undefined` only on an inert
+ * store), `id` what commands address.
+ */
+interface Source {
   readonly preset: boolean
   readonly id: string
-} {
-  const preset = isPresetCarried(def) ? selectedEqPreset() : undefined
+  readonly item: Profile | EqPreset | undefined
+}
+
+/** The Source rule's pick: the selected EQ preset for a preset-carried
+ * subject while the active profile has an EQ selection (ADR-0003),
+ * else the active profile. */
+function sourceOf(carried: boolean): Source {
+  const preset = carried ? selectedEqPreset() : undefined
   return preset
-    ? { preset: true, id: preset.id }
-    : { preset: false, id: state.selected_profile }
+    ? { preset: true, id: preset.id, item: preset }
+    : { preset: false, id: state.selected_profile, item: selectedProfile() }
+}
+
+/** A writable card's Source item. */
+function sourceItem(def: ParameterDef): Source {
+  return sourceOf(isPresetCarried(def))
+}
+
+/** A category's one Source item — eligibility is a category property,
+ * so `ieq` / `geq` sit on the preset as one. */
+function categorySource(category: CategoryDef): Source {
+  return sourceOf(isPresetCategory(category.name))
+}
+
+/** A category's writable 4-CC names, table order — its Content keys;
+ * read-only params have none. */
+function writableParams(category: CategoryDef): readonly string[] {
+  return category.params.filter((name) => isWritable(paramDef(name)))
 }
 
 /** Whether a card writes to the selected EQ preset — `adv-card--preset`. */
@@ -132,12 +162,10 @@ export function writesToPreset(def: ParameterDef): boolean {
   return sourceItem(def).preset
 }
 
-/**
- * Whether any of a category's params writes to the selected EQ preset
- * — `ieq` / `geq` while a preset is selected — `adv-cat--preset`.
- */
+/** Whether a category's Source item is the selected EQ preset —
+ * `ieq` / `geq` while a preset is selected — `adv-cat--preset`. */
 export function categoryWritesToPreset(category: CategoryDef): boolean {
-  return category.params.some((name) => writesToPreset(paramDef(name)))
+  return categorySource(category).preset
 }
 
 /**
@@ -163,4 +191,41 @@ export function liveParam(def: ParameterDef, values: readonly number[]): void {
   const item = sourceItem(def)
   const edit = item.preset ? editEqPresetLive : editProfileLive
   edit(item.id, { [def.name]: values })
+}
+
+// — Divergence + Reset (#92) —
+
+/** Whether `source` diverges from its Baseline on any of `keys` —
+ * derived from the snapshot's baseline, never sent (ADR-0005). */
+function diverges(source: Source, keys: readonly string[]): boolean {
+  return source.item !== undefined && paramsDiverge(source.item, keys)
+}
+
+/** A scoped Reset on `source` — request-then-reconcile (ADR-0007). */
+function reset(source: Source, only: readonly string[]): void {
+  const command = source.preset ? resetEqPreset : resetProfile
+  command(source.id, only)
+}
+
+/** Whether a card's value is off its Source item's Baseline —
+ * `adv-card--diverged`, and the reset marker's enabled state. */
+export function paramDiverges(def: ParameterDef): boolean {
+  return isWritable(def) && diverges(sourceItem(def), [def.name])
+}
+
+/** A card's Reset: `reset_* { only: [<4-CC>] }` on its Source item. */
+export function resetParam(def: ParameterDef): void {
+  reset(sourceItem(def), [def.name])
+}
+
+/** Whether any of a category's writable params is off its Source
+ * item's Baseline — `adv-cat--diverged`, and the header marker's state. */
+export function categoryDiverges(category: CategoryDef): boolean {
+  return diverges(categorySource(category), writableParams(category))
+}
+
+/** A category's Reset: one `reset_*` on its one Source item, `only`
+ * its writable 4-CC names — never a read-only one, never two commands. */
+export function resetCategory(category: CategoryDef): void {
+  reset(categorySource(category), writableParams(category))
 }

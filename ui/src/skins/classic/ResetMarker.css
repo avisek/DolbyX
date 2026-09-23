@@ -1,0 +1,88 @@
+/* The Reset marker (#92), shared by cards and category headers: one
+   button that IS the divergence indicator (ADR-0011 addendum). At rest
+   a dot; on card hover / header hover / `:focus-visible` the dot scales
+   away and ↺ scales in. Clean (`:disabled`) ⇒ invisible and not
+   hit-testable — the slot stays, nothing shifts. Hover rules sit under
+   focus weight (`:where()`): a focused marker always wins, ringed. */
+
+:is(.adv-card__reset, .adv-cat__reset) {
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    border-color var(--morph-ms) ease,
+    background var(--morph-ms) ease,
+    opacity var(--morph-ms) ease;
+}
+
+.adv-card__reset {
+  position: relative;
+}
+
+/* The dot. */
+:is(.adv-card__reset, .adv-cat__reset)::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+  transform: translate(-50%, -50%);
+  transition: transform var(--morph-ms) ease;
+}
+
+/* The glyph. */
+:is(.adv-card__reset, .adv-cat__reset)::after {
+  content: '↺';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-accent);
+  font-size: 0.9rem;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    transform var(--morph-ms) ease,
+    opacity var(--morph-ms) ease;
+}
+
+/* Morph: the card's hover, the header's hover (a whole-category hover
+   was noisy), or the marker's own focus. */
+:where(.adv-card:hover) .adv-card__reset::before,
+:where(.adv-cat__head:hover) .adv-cat__reset::before,
+:is(.adv-card__reset, .adv-cat__reset):focus-visible::before {
+  transform: translate(-50%, -50%) scale(0);
+}
+
+:where(.adv-card:hover) .adv-card__reset::after,
+:where(.adv-cat__head:hover) .adv-cat__reset::after,
+:is(.adv-card__reset, .adv-cat__reset):focus-visible::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+:where(.adv-card:hover) .adv-card__reset,
+:where(.adv-cat__head:hover) .adv-cat__reset {
+  border-color: var(--hover-line);
+}
+
+:is(.adv-card__reset, .adv-cat__reset):where(:hover) {
+  border-color: var(--color-accent);
+}
+
+/* Focus outranks hover: the ring, never the hover border alone. */
+:is(.adv-card__reset, .adv-cat__reset):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+/* Clean: the marker vanishes; the slot stays, rows never shift. */
+:is(.adv-card__reset, .adv-cat__reset):disabled {
+  opacity: 0;
+  pointer-events: none;
+}

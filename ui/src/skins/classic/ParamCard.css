@@ -1,8 +1,8 @@
 /* One parameter card (#85): a form row subgridded onto the category's
    four tracks — code | label | reset | control — so rows align across
    every card. Access is color-coded on the 4-CC chip by hue token;
-   labels wrap, never truncate. The reset marker's dot / ↺ morph arrives
-   with divergence (#92). */
+   labels wrap, never truncate. The Reset marker's morph lives in
+   ResetMarker.css; only its slot is here. */
 
 .adv-card {
   display: grid;
@@ -57,21 +57,15 @@
   color: var(--color-text-muted);
 }
 
-/* The reset marker: bare chrome sized for its slot; clean ⇒ invisible,
-   slot kept so rows never shift. Read-only cards leave the track empty. */
+/* The Reset marker's slot — a fixed square on the reset track; read-only
+   cards leave it empty. */
 .adv-card__reset {
   grid-column: 3;
   justify-self: center;
   width: var(--reset-w);
   height: var(--reset-w);
   padding: 0;
-  border: none;
   background: none;
-}
-
-.adv-card__reset:disabled {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .adv-card__control {
