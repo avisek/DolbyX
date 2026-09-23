@@ -24,6 +24,7 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
   // eslint-disable-next-line solid/reactivity
   const stored = foldedCategories().includes(props.category.name)
   const [folded, setFolded] = createSignal(stored)
+  const resetName = () => `Reset ${props.category.label}`
   const toggle = () => {
     setFolded(!folded())
     setCategoryFolded(props.category.name, folded())
@@ -55,8 +56,8 @@ const CategorySection: Component<{ category: CategoryDef }> = (props) => {
           type="button"
           class="adv-cat__reset"
           disabled={!categoryDiverges(props.category)}
-          aria-label={`Reset ${props.category.label}`}
-          title={`Reset ${props.category.label}`}
+          aria-label={resetName()}
+          title={resetName()}
           onClick={() => {
             resetCategory(props.category)
           }}

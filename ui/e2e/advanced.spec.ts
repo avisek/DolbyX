@@ -505,7 +505,7 @@ test('a fast 4-event drag across gebg leaves no band at its pre-drag value', asy
 // The Classic morph: a diverged card's marker rests as the dot (glyph
 // `::after` at opacity 0) and shows ↺ on card hover; a clean card's
 // marker is invisible and not hit-testable — the slot stays. Then the
-// real round trip: the click resets the one cc on the daemon.
+// real round trip: the click resets that one 4-CC on the daemon.
 test('a diverged reset marker rests as a dot, morphs to ↺ on hover; a clean one is inert', async ({
   page,
 }) => {

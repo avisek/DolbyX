@@ -3,12 +3,9 @@
    a dot; on card hover / header hover / `:focus-visible` the dot scales
    away and ↺ scales in. Clean (`:disabled`) ⇒ invisible and not
    hit-testable — the slot stays, nothing shifts. Hover rules sit under
-   focus weight (`:where()`): a focused marker always wins. */
+   focus weight (`:where()`): a focused marker always wins, ringed. */
 
-.adv-card__reset,
-.adv-cat__reset {
-  --morph-ms: 0.18s;
-
+:is(.adv-card__reset, .adv-cat__reset) {
   border: 1px solid transparent;
   border-radius: 50%;
   cursor: pointer;
@@ -23,8 +20,7 @@
 }
 
 /* The dot. */
-.adv-card__reset::before,
-.adv-cat__reset::before {
+:is(.adv-card__reset, .adv-cat__reset)::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -38,8 +34,7 @@
 }
 
 /* The glyph. */
-.adv-card__reset::after,
-.adv-cat__reset::after {
+:is(.adv-card__reset, .adv-cat__reset)::after {
   content: '↺';
   position: absolute;
   inset: 0;
@@ -59,15 +54,13 @@
    was noisy), or the marker's own focus. */
 :where(.adv-card:hover) .adv-card__reset::before,
 :where(.adv-cat__head:hover) .adv-cat__reset::before,
-.adv-card__reset:focus-visible::before,
-.adv-cat__reset:focus-visible::before {
+:is(.adv-card__reset, .adv-cat__reset):focus-visible::before {
   transform: translate(-50%, -50%) scale(0);
 }
 
 :where(.adv-card:hover) .adv-card__reset::after,
 :where(.adv-cat__head:hover) .adv-cat__reset::after,
-.adv-card__reset:focus-visible::after,
-.adv-cat__reset:focus-visible::after {
+:is(.adv-card__reset, .adv-cat__reset):focus-visible::after {
   opacity: 1;
   transform: scale(1);
 }
@@ -77,18 +70,19 @@
   border-color: var(--hover-line);
 }
 
-.adv-card__reset:where(:hover),
-.adv-cat__reset:where(:hover),
-.adv-card__reset:focus-visible,
-.adv-cat__reset:focus-visible {
+:is(.adv-card__reset, .adv-cat__reset):where(:hover) {
   border-color: var(--color-accent);
-  outline: none;
+}
+
+/* Focus outranks hover: the ring, never the hover border alone. */
+:is(.adv-card__reset, .adv-cat__reset):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 /* Clean: the marker vanishes; the slot stays, rows never shift. */
-.adv-card__reset:disabled,
-.adv-cat__reset:disabled {
+:is(.adv-card__reset, .adv-cat__reset):disabled {
   opacity: 0;
   pointer-events: none;
 }

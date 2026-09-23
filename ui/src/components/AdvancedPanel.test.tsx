@@ -2497,11 +2497,11 @@ it('a diverged card publishes --diverged and enables its reset; a clean one is d
 const sentSince = (socket: MockWebSocket, mark: number) =>
   socket.sentCommands().slice(mark)
 
-// Behavior 2 (#92): the click is one `reset_profile { id, only:[cc] }`
+// Behavior 2 (#92): the click is one `reset_profile { id, only:[4-CC] }`
 // on the active profile, chased by `get_state` on the ack; the ack
 // itself moves nothing — reset values live in the daemon's cascade, so
 // the reconcile's snapshot is what lands them (ADR-0007).
-it('clicking a card reset sends reset_profile scoped to the cc, then get_state; the snapshot lands it', async () => {
+it('clicking a card reset sends reset_profile scoped to the 4-CC, then get_state; the snapshot lands it', async () => {
   const panel = renderOpen()
   const socket = connect()
   applySnapshot(fixtureStateWithParams({ dvla: [9] }))
@@ -2565,8 +2565,8 @@ function selectingWithGebg(
 
 // Behavior 3 (#92): the Source rule — a preset-carried card diverges
 // against and resets on the selected EQ preset: `reset_eq_preset
-// { id, only:[cc] }` + `get_state`; the profile's own divergence on the
-// same cc is ignored while the preset is selected.
+// { id, only:[4-CC] }` + `get_state`; the profile's own divergence on
+// the same 4-CC is ignored while the preset is selected.
 it('a preset-carried card diverges and resets on the selected EQ preset, ignoring the profile row', async () => {
   const panel = renderOpen()
   const socket = connect()
@@ -2611,11 +2611,11 @@ const sectionReset = (label: string) =>
   })
 
 // Behavior 4 (#92): a category's reset marker is enabled iff any of
-// its writable ccs diverges — `adv-cat--diverged` alongside — and its
-// click is one `reset_profile` whose `only` is exactly the writable
-// ccs in table order: read-only names (Visualizer's grid + live
+// its writable params diverges — `adv-cat--diverged` alongside — and
+// its click is one `reset_profile` whose `only` is exactly the writable
+// 4-CC names in table order: read-only names (Visualizer's grid + live
 // arrays) never appear, they have no Content key.
-it('a category reset enables on any writable divergence and resets exactly the writable ccs', () => {
+it('a category reset enables on any writable divergence and resets exactly the writable 4-CCs', () => {
   renderOpen()
   const socket = connect()
   applySnapshot(fixtureStateWithParams({ dvli: [-200], vcnb: [10] }))
@@ -2650,7 +2650,7 @@ it('a category reset enables on any writable divergence and resets exactly the w
 
 // Behavior 5 (#92): the `geq` header follows the category's one Source
 // item — with a preset selected it is enabled iff the preset diverges
-// on the four `ge*` ccs and resets them on the preset; on None it
+// on the four `ge*` params and resets them on the preset; on None it
 // targets the profile. Exactly one command per click.
 it('Graphic Equalizer header resets the preset while one is selected, else the profile', () => {
   renderOpen()
@@ -2681,6 +2681,10 @@ it('Graphic Equalizer header resets the preset while one is selected, else the p
     'adv-cat--preset',
   )
   sectionReset('Graphic Equalizer').click()
+  expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+    'reset_eq_preset',
+    'reset_profile',
+  ])
   expect(sentSince(socket, mark)[1]).toEqual({
     cmd: 'reset_profile',
     request_id: expect.any(String) as string,
@@ -2697,4 +2701,19 @@ it('read-only cards render no reset marker', () => {
     expect(resetOf(card(panel, code))).toBeNull()
   }
   expect(resetOf(card(panel, 'vcnb'))).not.toBeNull() // Experimental
+})
+
+// Behavior 2 (#92), the card-as-label edge: the marker is interactive
+// content inside the card's `label`, so its click never forwards to
+// the card's primary control — a toggle card's reset is exactly one
+// `reset_profile`, no stray `edit_profile` flip.
+it('a toggle card reset never forwards the click to its switch', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  applySnapshot(fixtureStateWithParams({ dvle: [1] }))
+  const mark = socket.sentCommands().length
+  resetOf(card(panel, 'dvle'))?.click()
+  expect(sentSince(socket, mark).map((frame) => frame.cmd)).toEqual([
+    'reset_profile',
+  ])
 })

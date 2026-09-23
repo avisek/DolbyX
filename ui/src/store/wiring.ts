@@ -7,6 +7,7 @@
 import {
   findParamDef,
   isPresetCarried,
+  isPresetCategory,
   paramDef,
   type CategoryDef,
   type ParameterDef,
@@ -129,10 +130,11 @@ interface Source {
   readonly item: Profile | EqPreset | undefined
 }
 
-/** The Source rule's pick: the EQ preset when handed one (a
- * preset-carried target while the profile has an EQ selection,
- * ADR-0003), else the active profile. */
-function sourceOf(preset: EqPreset | undefined): Source {
+/** The Source rule's pick: the selected EQ preset for a preset-carried
+ * subject while the active profile has an EQ selection (ADR-0003),
+ * else the active profile. */
+function sourceOf(carried: boolean): Source {
+  const preset = carried ? selectedEqPreset() : undefined
   return preset
     ? { preset: true, id: preset.id, item: preset }
     : { preset: false, id: state.selected_profile, item: selectedProfile() }
@@ -140,24 +142,17 @@ function sourceOf(preset: EqPreset | undefined): Source {
 
 /** A writable card's Source item. */
 function sourceItem(def: ParameterDef): Source {
-  return sourceOf(isPresetCarried(def) ? selectedEqPreset() : undefined)
+  return sourceOf(isPresetCarried(def))
 }
 
-/**
- * A category's one Source item: preset eligibility is a category
- * property (preset-carried ⟺ category ∈ {Ieq, Geq}), so `ieq` / `geq`
- * sit on the selected EQ preset while one is selected — every other
- * case, the active profile.
- */
+/** A category's one Source item — eligibility is a category property,
+ * so `ieq` / `geq` sit on the preset as one. */
 function categorySource(category: CategoryDef): Source {
-  const carried = category.params.some((name) =>
-    isPresetCarried(paramDef(name)),
-  )
-  return sourceOf(carried ? selectedEqPreset() : undefined)
+  return sourceOf(isPresetCategory(category.name))
 }
 
-/** A category's writable ccs, table order — the category's Content
- * keys; read-only params have none. */
+/** A category's writable 4-CC names, table order — its Content keys;
+ * read-only params have none. */
 function writableParams(category: CategoryDef): readonly string[] {
   return category.params.filter((name) => isWritable(paramDef(name)))
 }
@@ -218,19 +213,19 @@ export function paramDiverges(def: ParameterDef): boolean {
   return isWritable(def) && diverges(sourceItem(def), [def.name])
 }
 
-/** A card's Reset: `reset_* { only: [cc] }` on its Source item. */
+/** A card's Reset: `reset_* { only: [<4-CC>] }` on its Source item. */
 export function resetParam(def: ParameterDef): void {
   reset(sourceItem(def), [def.name])
 }
 
-/** Whether any of a category's writable ccs is off its Source item's
- * Baseline — `adv-cat--diverged`, and the header marker's state. */
+/** Whether any of a category's writable params is off its Source
+ * item's Baseline — `adv-cat--diverged`, and the header marker's state. */
 export function categoryDiverges(category: CategoryDef): boolean {
   return diverges(categorySource(category), writableParams(category))
 }
 
 /** A category's Reset: one `reset_*` on its one Source item, `only`
- * its writable ccs — never a read-only name, never two commands. */
+ * its writable 4-CC names — never a read-only one, never two commands. */
 export function resetCategory(category: CategoryDef): void {
   reset(categorySource(category), writableParams(category))
 }
