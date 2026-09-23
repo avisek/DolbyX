@@ -80,9 +80,11 @@ export function effectiveCount(def: ParameterDef): number {
   return Math.min(def.length, Math.max(0, raw))
 }
 
-/** One `aobg` channel set: the engine channel id and its gains. */
+/** One `aobg` channel set: the engine channel id, its gains, and where
+ * the gains start in the packed array — the row's write offset. */
 export interface ChannelRow {
   readonly id: number
+  readonly at: number
   readonly gains: readonly number[]
 }
 
@@ -103,7 +105,11 @@ export function channelRows(def: ParameterDef): readonly ChannelRow[] {
     rows.length < channels && at + stride <= values.length;
     at += stride
   ) {
-    rows.push({ id: values[at] ?? 0, gains: values.slice(at + 1, at + stride) })
+    rows.push({
+      id: values[at] ?? 0,
+      at: at + 1,
+      gains: values.slice(at + 1, at + stride),
+    })
   }
   return rows
 }

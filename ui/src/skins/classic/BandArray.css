@@ -1,13 +1,15 @@
-/* The Band strip (#90): one row of equal columns — `--count` of them —
-   each a band whose bar rises from the floor to `--norm` (0–1, linear
-   over the def's range); the whole column tints on hover so low bars
-   feel like their tall neighbours. The meta line sits under the strip.
-   Editors are present but hidden with `opacity` (never `display` /
-   `visibility`, ADR-0011) — their popover placement is band editing's
-   (#91). Hover under focus weight; the strip's focus line is its
-   border. Access as looks: `--ro` muted bars, `--live` a lighter
-   accent, `--opaque` value cells — the editor box shown, the bar
-   hidden — and `aobg`'s `__chan` gutter before each row. */
+/* The Band strip (#90, #91): one row of equal columns — `--count` of
+   them — each a band whose bar rises from the floor to `--norm` (0–1,
+   linear over the def's range); the whole column tints on hover, on
+   the keyboard's active band while the strip is focused, and while its
+   editor is open, so low bars feel like their tall neighbours. The meta
+   line sits under the strip. The Band editor is a popover anchored
+   above its band (CSS anchor positioning), hidden with `opacity` —
+   never `display` / `visibility` (ADR-0011). Hover under focus weight;
+   the strip's focus line is its border. Access as looks: `--ro` muted
+   bars, `--live` a lighter accent, `--opaque` value cells — the editor
+   box shown in place, the bar hidden — and `aobg`'s `__chan` gutter
+   before each row. */
 
 .adv-bands {
   display: flex;
@@ -57,19 +59,29 @@
   outline: none;
 }
 
-/* The band column: the hover / focus region, full strip height. */
+/* The band column: the hover / active / editing region, full strip
+   height. It is the editor's anchor (`anchor-scope` keeps each band's
+   name to its own editor) and must stay unpositioned — the strip is the
+   editor's containing block; a positioned band would silently break
+   `anchor()`. */
 .adv-bands__band {
-  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   min-width: 2px;
   border-radius: 3px 3px 0 0;
+  anchor-name: --adv-band;
+  anchor-scope: --adv-band;
   transition: background 0.1s ease;
 }
 
 .adv-bands__band--hover {
   background: rgb(255 255 255 / 7%);
+}
+
+.adv-bands__strip:focus-visible .adv-bands__band--active,
+.adv-bands__band--editing {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /* The bar: a thin pillar from the column's floor; a floor of 3% keeps
@@ -91,7 +103,9 @@
   --bar-color: color-mix(in srgb, var(--hue-readonly) 55%, transparent);
 }
 
-.adv-bands__band--hover .adv-bands__bar {
+.adv-bands__band--hover .adv-bands__bar,
+.adv-bands__strip:focus-visible .adv-bands__band--active .adv-bands__bar,
+.adv-bands__band--editing .adv-bands__bar {
   --bar-color: var(--color-accent);
 }
 
@@ -100,14 +114,54 @@
   --bar-color: color-mix(in srgb, var(--color-accent) 75%, #fff);
 }
 
-/* The editor: kept in the tree and focusable, out of the column's
-   flow, invisible until #91 places it. */
+/* The Band editor (#91): a popover anchored above its band — bottom on
+   the band's top, centred on it; `anchor-center` alone keeps band 1's
+   and band N's inside the strip. Kept in the tree and focusable: hidden
+   with `opacity`, shown while the band is `--editing` or holds focus.
+   Stacked over the neighbouring columns — z-order is the skin's. */
 .adv-bands__editor {
   position: absolute;
-  top: 0;
-  left: 0;
+  z-index: 1;
+  position-anchor: --adv-band;
+  bottom: anchor(top);
+  justify-self: anchor-center;
+  margin-bottom: 0.2rem;
   opacity: 0;
   pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.adv-bands__band--editing .adv-bands__editor,
+.adv-bands__editor:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The editor's box: content-sized digits, no unit slot, centred. */
+.adv-bands__editor .adv-input {
+  --adv-unit-w: 0px;
+  --adv-pad-x: 0.3em;
+
+  display: block;
+  width: auto;
+  font-size: 0.68rem;
+}
+
+.adv-bands__editor .adv-input__field {
+  width: auto;
+  min-width: 5ch;
+  height: 1.35rem;
+  field-sizing: content;
+  border-color: var(--color-accent);
+  border-radius: 3px;
+  background: rgb(12 20 32 / 96%);
+  color: var(--color-text);
+  text-align: center;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%);
+}
+
+.adv-bands--ro .adv-bands__editor .adv-input__field {
+  border-color: var(--hover-line);
 }
 
 /* Opaque blobs are cells, not bars: the strip loses its chart chrome
@@ -140,6 +194,7 @@
 
 .adv-bands--opaque .adv-bands__editor {
   position: static;
+  margin: 0;
   opacity: 1;
   pointer-events: auto;
 }
@@ -150,12 +205,28 @@
 
   display: block;
   width: auto;
+  font-size: 0.8rem;
 }
 
 .adv-bands--opaque .adv-input__field {
   min-width: 4ch;
+  height: var(--control-h);
   field-sizing: content;
+  border-color: var(--color-bg);
+  background: var(--color-bg);
   font-family: var(--font-mono);
+  text-align: right;
+  box-shadow: none;
+}
+
+/* Cells have no column tint to light: the box's border marks the
+   active / editing cell instead. */
+.adv-bands--opaque
+  .adv-bands__strip:focus-visible
+  .adv-bands__band--active
+  .adv-input__field,
+.adv-bands--opaque .adv-bands__band--editing .adv-input__field {
+  border-color: var(--color-accent);
 }
 
 /* `aobg`'s channel gutter: the engine channel id, fixed width so the

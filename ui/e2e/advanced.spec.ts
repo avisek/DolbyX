@@ -365,3 +365,58 @@ test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm"
     '6',
   )
 })
+
+// — Band editing (#91, behavior 9) —
+
+// Geometry truth for the Band editor popover: opened on band 1 and on
+// band 20 of `gebg` (Home / End, Enter), the editor renders above its
+// band and inside the strip's box — `anchor-center` keeps the edge
+// bands' editors from overflowing. A digit typed on the strip lands as
+// the editor's whole text once (the strip consumes the keydown).
+test('the band editor of band 1 and of band 20 opens above its band, inside the strip', async ({
+  page,
+}) => {
+  await openAdvanced(page)
+  const strip = page.getByRole('group', {
+    name: 'Graphic Equalizer Band Gains',
+  })
+  await strip.scrollIntoViewIfNeeded()
+  await strip.focus()
+  const stripBox = await strip.boundingBox()
+  if (!stripBox) throw new Error('strip not laid out')
+
+  for (const [key, slot] of [
+    ['Home', 0],
+    ['End', 19],
+  ] as const) {
+    await page.keyboard.press(key)
+    await page.keyboard.press('Enter')
+    const band = strip.locator('.adv-bands__band').nth(slot)
+    const editor = band.locator('.adv-bands__editor')
+    await expect(band).toHaveClass(/adv-bands__band--editing/)
+    await expect(band.getByRole('textbox')).toBeFocused()
+    await expect(editor).toHaveCSS('opacity', '1')
+    const [bandBox, editorBox] = await Promise.all([
+      band.boundingBox(),
+      editor.boundingBox(),
+    ])
+    if (!bandBox || !editorBox) throw new Error('band not laid out')
+    expect(editorBox.y + editorBox.height).toBeLessThanOrEqual(bandBox.y)
+    expect(editorBox.x).toBeGreaterThanOrEqual(stripBox.x)
+    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(
+      stripBox.x + stripBox.width,
+    )
+    await page.keyboard.press('Escape')
+    await expect(strip).toBeFocused()
+    await expect(band).not.toHaveClass(/adv-bands__band--editing/)
+  }
+
+  await page.keyboard.press('Home')
+  await page.keyboard.press('3')
+  const first = strip.locator('.adv-bands__band').first().getByRole('textbox')
+  await expect(first).toBeFocused()
+  await expect(first).toHaveValue('3')
+  await page.keyboard.press('Enter')
+  await expect(strip).toBeFocused()
+  await expect(first).toHaveValue('3')
+})
