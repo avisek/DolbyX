@@ -284,6 +284,11 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   const wrapper = boost.locator('..')
   await expect(boost).toHaveValue('3') // Music ships dhsb=48
   await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  // Focused, the box reads as a text field; idle again, as a knob.
+  await boost.focus()
+  await expect(boost).toHaveCSS('cursor', 'text')
+  await boost.blur()
+  await expect(boost).toHaveCSS('cursor', 'ns-resize')
   const lockedOn = () =>
     page.evaluate(() => document.pointerLockElement?.className ?? null)
 
@@ -307,7 +312,7 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   await expect.poll(lockedOn).toBeNull()
   await expect(wrapper).not.toHaveClass(/adv-input--scrubbing/)
   await expect(boost).toBeFocused()
-  await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  await expect(boost).toHaveCSS('cursor', 'text')
   const after = await boost.evaluate((el: HTMLInputElement) => ({
     value: el.value,
     selection: [el.selectionStart, el.selectionEnd],
