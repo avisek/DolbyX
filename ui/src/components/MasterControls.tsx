@@ -50,10 +50,10 @@ const MasterControl: Component<{
   amount: ParameterDef
 }> = (props) => {
   // Static per row: the descriptor never changes within a page load.
-  /* eslint-disable solid/reactivity */
+  // eslint-disable-next-line solid/reactivity
   const enable = props.enable
+  // eslint-disable-next-line solid/reactivity
   const amount = props.amount
-  /* eslint-enable solid/reactivity */
   const pair = [enable.name, amount.name]
   const profileId = () => state.selected_profile
 

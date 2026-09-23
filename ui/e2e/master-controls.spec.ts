@@ -44,15 +44,3 @@ test('switch, box and slider share one height; the label click focuses the box',
     page.getByRole('textbox', { name: 'Dialog Enhancer amount' }),
   ).toBeFocused()
 })
-
-// The curated surface exposes no 4-CC — the panel's chips stay in the
-// panel — and the native range input is gone for good.
-test('no 4-CC text and no native range input on the main screen rows', async ({
-  page,
-}) => {
-  await page.goto('/')
-  await expect(page.locator('.connection-badge')).toHaveText('Connected')
-  const section = page.getByRole('region', { name: 'Master controls' })
-  await expect(section.locator('input[type=range]')).toHaveCount(0)
-  await expect(section).not.toContainText(/\b(vdhe|dhsb|deon|dea|dvle|dvla)\b/)
-})

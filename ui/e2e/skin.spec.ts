@@ -7,9 +7,10 @@ import { expect, test } from './fixtures'
 
 /**
  * Behavior 4's fixture: computed properties of the app root, the power
- * toggle, and a master control, captured on `main` — skin-owned values
- * only, nothing viewport-derived. Any drift here means a stylesheet was
- * lost, reordered, or edited (a deliberate redraw re-pins it).
+ * toggle, and a master control — skin-owned values only, nothing
+ * viewport-derived — captured on `main` at the move and re-pinned by
+ * each deliberate redraw (#93). Any other drift means a stylesheet was
+ * lost, reordered, or edited.
  */
 const BASELINE = {
   '.app': {
