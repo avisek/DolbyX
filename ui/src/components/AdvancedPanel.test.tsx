@@ -2034,10 +2034,15 @@ it('Shift+↓ steps 10 units, Alt+↑ the lattice tenth; a clamped step writes n
   ])
 
   applySnapshot(
-    fixtureStateWithParams({ gebg: [576, ...Array<number>(19).fill(0)] }),
+    fixtureStateWithParams({ gebg: [576, -576, ...Array<number>(18).fill(0)] }),
   )
   const up = press(gains, 'ArrowUp')
   press(gains, 'ArrowUp', { shiftKey: true })
+  press(gains, 'ArrowUp', { altKey: true })
+  press(gains, 'ArrowRight')
+  press(gains, 'ArrowDown')
+  press(gains, 'ArrowDown', { shiftKey: true })
+  press(gains, 'ArrowDown', { altKey: true })
   expect(sentParams(socket)).toHaveLength(2)
   expect(up.defaultPrevented).toBe(true)
 })
@@ -2201,8 +2206,11 @@ it('the meta reads the active band while the strip is focused or its editor open
   press(gains, 'Enter')
   expect(document.activeElement).toBe(bandInput(gains, 3))
   expect(line?.textContent).toBe('band 4 · -27 dB')
+  press(bandInput(gains, 3), 'Escape')
+  expect(document.activeElement).toBe(gains)
+  expect(line?.textContent).toBe('band 4 · -27 dB')
 
-  bandInput(gains, 3).blur()
+  gains.blur()
   expect(line?.textContent).toBe('10 of 40 bands · dB')
 })
 
@@ -2238,7 +2246,7 @@ it('↑ on gebg writes the selected EQ preset live, else the profile', () => {
 // row lifts its band 2 alone, at the packed offset (id slot 21, gains
 // from 22): the whole 329-slot array goes out with h₂ + 16, ids and
 // every other gain untouched; the meta names the channel.
-it('keyboard on an aobg row writes that row’s gain at its packed offset', () => {
+it("keyboard on an aobg row writes that row's gain at its packed offset", () => {
   const panel = renderOpen()
   const socket = connect()
   const packed = packedAobg([
@@ -2254,7 +2262,7 @@ it('keyboard on an aobg row writes that row’s gain at its packed offset', () =
   expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 2 · -8.5 dB')
   press(second, 'ArrowUp')
   const expected = [...packed]
-  expected[21 + 1 + 1] = (RIGHT_GAINS[1] ?? 0) + 16
+  expected[23] = (RIGHT_GAINS[1] ?? 0) + 16 // id at 21, h₁ at 22, h₂ at 23
   expect(sentParams(socket)).toEqual([{ aobg: expected }])
   expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 2 · -7.5 dB')
 })

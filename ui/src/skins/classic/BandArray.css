@@ -154,10 +154,10 @@
   field-sizing: content;
   border-color: var(--color-accent);
   border-radius: 3px;
-  background: rgb(12 20 32 / 96%);
+  background: color-mix(in srgb, var(--color-bg) 96%, transparent);
   color: var(--color-text);
   text-align: center;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 45%);
+  box-shadow: 0 2px 8px color-mix(in srgb, #000 45%, transparent);
 }
 
 .adv-bands--ro .adv-bands__editor .adv-input__field {
@@ -166,8 +166,9 @@
 
 /* Opaque blobs are cells, not bars: the strip loses its chart chrome
    and wraps as many boxes as it holds; each band is its editor box —
-   the value in mono digits — and the bar is not drawn at all. Focus
-   falls back to an outline, there being no border to light. */
+   the popover rules above undone, a plain control-height cell with the
+   value in mono digits — and the bar is not drawn at all. Focus falls
+   back to an outline, there being no border to light. */
 .adv-bands--opaque .adv-bands__strip {
   display: flex;
   flex-wrap: wrap;

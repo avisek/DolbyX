@@ -6,6 +6,7 @@ import {
   createSignal,
   type Component,
 } from 'solid-js'
+import { ENGAGE_PX } from '../lib/gesture'
 import { unitLabel, type ParameterDef } from '../lib/parameters'
 import { axisOf, displayValue, rawValue } from '../lib/scalar'
 import { stepped, type Modifiers } from '../lib/step'
@@ -20,10 +21,6 @@ import {
   type ChannelRow,
 } from '../store/wiring'
 import NumberInput from './NumberInput'
-
-/** Pointer travel that turns a press into not-a-click (#91 Part 2:
- * a Paint) — the numeric box's Scrub threshold, shared. */
-const ENGAGE_PX = 3
 
 /** One band's editor id; `aobg` rows key theirs by channel index. */
 export function bandInputId(
@@ -68,6 +65,11 @@ const withUnit = (def: ParameterDef, text: string, sep = ' '): string => {
 /** The meta line's `band N · value unit` for one band. */
 const bandText = (def: ParameterDef, slot: number, raw: number): string =>
   `band ${String(slot + 1)} · ${withUnit(def, String(displayValue(def, raw)))}`
+
+/** A digit, `.` or `-` typed plain — never a browser shortcut
+ * (Ctrl+`-` zooms). */
+const isTyped = (event: KeyboardEvent): boolean =>
+  /^[\d.-]$/.test(event.key) && !event.ctrlKey && !event.metaKey
 
 /** Writes one strip's array: the whole stored array with one slot
  * changed, live (mid-gesture) or committed. Absent on a strip whose
@@ -115,35 +117,43 @@ const Strip: Component<{
   let strip!: HTMLDivElement
 
   // — Roving state —
-  const [active, setActive] = createSignal(0)
+  const [activeSlot, setActive] = createSignal(0)
   /** The band whose editor holds focus — derived from focus-within,
    * never a flag of the strip's own. */
-  const [editing, setEditing] = createSignal<number>()
+  const [editingSlot, setEditing] = createSignal<number>()
   /** Whether the strip element itself holds focus. */
   const [focused, setFocused] = createSignal(false)
-  const inputs: HTMLInputElement[] = []
   const lastSlot = (): number => Math.max(0, props.count() - 1)
-  // The active band stays inside the effective count.
-  createEffect(() => {
-    if (active() > lastSlot()) setActive(lastSlot())
-  })
+  // Both clamp into the effective count as it shrinks: the active band
+  // moves in; an editor removed under focus (no `focusout` fires) is no
+  // longer editing.
+  const active = (): number => Math.min(activeSlot(), lastSlot())
+  const editing = (): number | undefined => {
+    const slot = editingSlot()
+    return slot !== undefined && slot <= lastSlot() ? slot : undefined
+  }
   createEffect(() => {
     const slot = editing() ?? (focused() ? active() : undefined)
     props.onFocusBand(slot === undefined ? undefined : { row: props.row, slot })
   })
 
+  /** A band's editor input, by position among the bands. */
+  const inputAt = (slot: number): HTMLInputElement | null =>
+    strip.children[slot]?.querySelector('input') ?? null
+
   /** Opens a band's editor: its input focused, text selected. */
   const openEditor = (slot: number): void => {
     setActive(slot)
-    inputs[slot]?.focus()
-    inputs[slot]?.select()
+    const input = inputAt(slot)
+    input?.focus()
+    input?.select()
   }
 
   /** Type-to-edit: the keystroke becomes the editor's whole text, and
    * the box commits it by its own rules (instant clamp-commit). */
   const typeInto = (slot: number, key: string): void => {
     openEditor(slot)
-    const input = inputs[slot]
+    const input = inputAt(slot)
     if (!input) return
     input.value = key
     input.setSelectionRange(1, 1)
@@ -156,10 +166,9 @@ const Strip: Component<{
   /** Steps the active band by the Step rule; a step the range absorbs
    * writes nothing. */
   const nudge = (direction: 1 | -1, mods: Modifiers): void => {
-    if (!write) return
     const slot = active()
     const next = rawValue(def, stepped(axis, value(slot), direction, mods))
-    if (next !== props.raw(slot)) write(slot, next, true)
+    if (next !== props.raw(slot)) write?.(slot, next, true)
   }
 
   // — Pointer, click half: press arms, release without travel opens
@@ -198,16 +207,16 @@ const Strip: Component<{
           setFocused(true)
           return
         }
-        const slot = inputs.indexOf(event.target as HTMLInputElement)
-        if (slot < 0) return
+        const slot = inEditor(event.target)
+          ? bandAt(event.target)?.slot
+          : undefined
+        if (slot === undefined) return
         setEditing(slot)
         setActive(slot)
       }}
       onFocusOut={(event) => {
         if (event.target === strip) setFocused(false)
-        else if (inputs.includes(event.target as HTMLInputElement)) {
-          setEditing(undefined)
-        }
+        else if (inEditor(event.target)) setEditing(undefined)
       }}
       onKeyDown={(event) => {
         const key = event.key
@@ -229,7 +238,7 @@ const Strip: Component<{
         else if (key === 'Enter') openEditor(active())
         else if (write && key === 'ArrowUp') nudge(1, event)
         else if (write && key === 'ArrowDown') nudge(-1, event)
-        else if (write && /^[\d.-]$/.test(key)) typeInto(active(), key)
+        else if (write && isTyped(event)) typeInto(active(), key)
         else return
         event.preventDefault()
         event.stopPropagation()
@@ -299,9 +308,6 @@ const Strip: Component<{
                 unit=""
                 readOnly={!write}
                 tabIndex={-1}
-                ref={(input) => {
-                  inputs[slot] = input
-                }}
                 onLive={(next) => {
                   write?.(slot, rawValue(def, next), true)
                 }}
@@ -339,12 +345,13 @@ function withRaw(def: ParameterDef, index: number, raw: number): number[] {
 }
 
 /** A writable def's strip write at `offset` into the stored array —
- * live through the Source rule's optimistic path, else the commit. */
+ * live through the Source rule's optimistic path, else the commit.
+ * Opaque blobs are cells, never edited, whatever their bucket. */
 function stripWrite(
   def: ParameterDef,
   offset: () => number,
 ): StripWrite | undefined {
-  if (!isWritable(def)) return undefined
+  if (!isWritable(def) || def.kind === 'opaque') return undefined
   return (slot, raw, live) => {
     ;(live ? liveParam : commitParam)(def, withRaw(def, offset() + slot, raw))
   }
@@ -456,7 +463,7 @@ const BandArray: Component<{ def: ParameterDef; name: string }> = (props) => {
                 count={() => row().gains.length}
                 raw={(slot) => gainAt(def, row(), slot)}
                 idFor={(slot) => bandInputId(def, slot, chan)}
-                write={stripWrite(def, () => row().at)}
+                write={stripWrite(def, () => row().offset)}
                 hover={hover}
                 onHover={setHover}
                 onFocusBand={setFocusBand}

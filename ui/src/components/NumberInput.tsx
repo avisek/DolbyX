@@ -6,6 +6,7 @@ import {
   onCleanup,
   type Component,
 } from 'solid-js'
+import { ENGAGE_PX } from '../lib/gesture'
 import {
   clampTo,
   stepMode,
@@ -16,9 +17,6 @@ import {
 
 /** A complete number — rejects the partials typing passes through. */
 const NUMBER = /^[-+]?(\d+(\.\d+)?|\.\d+)$/
-
-/** Vertical travel that turns a press into a Scrub (#88). */
-const ENGAGE_PX = 3
 /** Css px of travel per step while scrubbing. */
 const PX_PER_STEP = 4
 
