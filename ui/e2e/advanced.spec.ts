@@ -284,6 +284,11 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   const wrapper = boost.locator('..')
   await expect(boost).toHaveValue('3') // Music ships dhsb=48
   await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  // Focused, the box reads as a text field; idle again, as a knob.
+  await boost.focus()
+  await expect(boost).toHaveCSS('cursor', 'text')
+  await boost.blur()
+  await expect(boost).toHaveCSS('cursor', 'ns-resize')
   const lockedOn = () =>
     page.evaluate(() => document.pointerLockElement?.className ?? null)
 
@@ -307,7 +312,7 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   await expect.poll(lockedOn).toBeNull()
   await expect(wrapper).not.toHaveClass(/adv-input--scrubbing/)
   await expect(boost).toBeFocused()
-  await expect(boost).toHaveCSS('cursor', 'ns-resize')
+  await expect(boost).toHaveCSS('cursor', 'text')
   const after = await boost.evaluate((el: HTMLInputElement) => ({
     value: el.value,
     selection: [el.selectionStart, el.selectionEnd],
@@ -364,4 +369,81 @@ test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm"
     'aria-valuenow',
     '6',
   )
+})
+
+// — Band editing (#91, behavior 9) —
+
+// Geometry truth for the Band editor popover: opened on band 1 and on
+// band 20 of `gebg` (Home / End, Enter), the editor renders above its
+// band and inside the strip's box — `anchor-center` keeps the edge
+// bands' editors from overflowing. A digit typed on the strip lands as
+// the editor's whole text once (the strip consumes the keydown).
+test('the band editor of band 1 and of band 20 opens above its band, inside the strip', async ({
+  page,
+}) => {
+  await openAdvanced(page)
+  const strip = page.getByRole('group', {
+    name: 'Graphic Equalizer Band Gains',
+  })
+  await strip.scrollIntoViewIfNeeded()
+  await strip.focus()
+  const stripBox = await strip.boundingBox()
+  if (!stripBox) throw new Error('strip not laid out')
+
+  for (const [key, slot] of [
+    ['Home', 0],
+    ['End', 19],
+  ] as const) {
+    await page.keyboard.press(key)
+    await page.keyboard.press('Enter')
+    const band = strip.locator('.adv-bands__band').nth(slot)
+    const editor = band.locator('.adv-bands__editor')
+    await expect(band).toHaveClass(/adv-bands__band--editing/)
+    await expect(band.getByRole('textbox')).toBeFocused()
+    await expect(editor).toHaveCSS('opacity', '1')
+    const [bandBox, editorBox] = await Promise.all([
+      band.boundingBox(),
+      editor.boundingBox(),
+    ])
+    if (!bandBox || !editorBox) throw new Error('band not laid out')
+    expect(editorBox.y + editorBox.height).toBeLessThanOrEqual(bandBox.y)
+    expect(editorBox.x).toBeGreaterThanOrEqual(stripBox.x)
+    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(
+      stripBox.x + stripBox.width,
+    )
+    await page.keyboard.press('Escape')
+    await expect(strip).toBeFocused()
+    await expect(band).not.toHaveClass(/adv-bands__band--editing/)
+  }
+
+  await page.keyboard.press('Home')
+  await page.keyboard.press('3')
+  const first = strip.locator('.adv-bands__band').first().getByRole('textbox')
+  await expect(first).toBeFocused()
+  await expect(first).toHaveValue('3')
+  await page.keyboard.press('Enter')
+  await expect(strip).toBeFocused()
+  await expect(first).toHaveValue('3')
+
+  // The open editor keeps the Scrub: a press-drag on its box locks the
+  // pointer and steps the band; the strip opens nothing else.
+  await page.keyboard.press('Enter')
+  await expect(first).toBeFocused()
+  const box = await first.boundingBox()
+  if (!box) throw new Error('editor not laid out')
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x, y - 3)
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.pointerLockElement?.className ?? null),
+    )
+    .toMatch(/\badv-input\b/)
+  await page.mouse.move(x, y - 11)
+  await expect(first).not.toHaveValue('3')
+  await page.mouse.up()
+  await expect(first).toBeFocused()
+  await expect(strip.locator('.adv-bands__band--editing')).toHaveCount(1)
 })

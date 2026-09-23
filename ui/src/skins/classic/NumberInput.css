@@ -4,8 +4,10 @@
    — so columns line up. The two lengths are registered so `ch` / `em`
    resolve on the wrapper once and inherit as absolute lengths (the unit
    uses a smaller font). Control-height, hover under focus weight. The
-   Scrub (#88): `--scrub` (capability) gets the ns-resize cursor,
-   `--scrubbing` (state) the accent line. */
+   Scrub (#88): `--scrub` (capability) gets the ns-resize cursor while
+   idle — "you can drag this" — and the text cursor once focused —
+   "you're typing now"; the gesture itself works in either state.
+   `--scrubbing` (state) gets the accent line. */
 
 @property --adv-unit-w {
   syntax: '<length>';
@@ -37,6 +39,10 @@
 .adv-input--scrub,
 .adv-input--scrub .adv-input__field {
   cursor: ns-resize;
+}
+
+.adv-input--scrub .adv-input__field:focus {
+  cursor: text;
 }
 
 .adv-input__field {

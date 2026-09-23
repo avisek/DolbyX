@@ -1728,9 +1728,9 @@ const tabStops = (section: HTMLElement) =>
   )
 
 // Behavior 6 (#90): the strip is one Tab stop — `tabindex=0`, named —
-// and every editor inside is `tabindex=-1`, `readonly`: Tab from the
-// previous card lands on the strip, never on a band input.
-it('the strip is the one Tab stop; band editors are readonly and out of the sequence', () => {
+// and every editor inside is `tabindex=-1` (writable here, #91): Tab
+// from the previous card lands on the strip, never on a band input.
+it('the strip is the one Tab stop; band editors are out of the sequence', () => {
   const panel = renderOpen()
   const gains = strip(panel, 'gebg')
   expect(gains.tabIndex).toBe(0)
@@ -1740,7 +1740,7 @@ it('the strip is the one Tab stop; band editors are readonly and out of the sequ
   expect(editors).toHaveLength(20)
   for (const editor of editors) {
     expect(editor.tabIndex).toBe(-1)
-    expect(editor.readOnly).toBe(true)
+    expect(editor.readOnly).toBe(false)
   }
   expect(editors[0]?.id).toBe('adv-gebg-b0')
   expect(card(panel, 'gebg').getAttribute('for')).toBe('adv-gebg-b0')
@@ -1978,4 +1978,316 @@ it('a vis event re-values the live vcbg bands; the last frame holds through sile
   } finally {
     vi.useRealTimers()
   }
+})
+
+// — Band editing: roving keyboard, popover editor, click-to-edit (#91 part 1) —
+
+const bandInput = (node: HTMLElement, slot: number) => {
+  const input = bands(node)[slot]?.querySelector<HTMLInputElement>('input')
+  if (!input) throw new Error(`no editor for band ${String(slot + 1)}`)
+  return input
+}
+
+const activeBands = (node: HTMLElement) =>
+  bands(node).flatMap((band, slot) =>
+    band.classList.contains('adv-bands__band--active') ? [slot] : [],
+  )
+
+// Tracer bullet (#91): the strip focused, → → ↑ on `iebt` (20 zeros,
+// `frac_bits = 4`) is one live `edit_profile` carrying the whole
+// array with band 3 alone up one display unit — raw +16 — and
+// `--active` on band 3 only.
+it('→ → ↑ on a focused iebt strip lifts band 3 by one display unit in one live write', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const targets = strip(panel, 'iebt')
+  press(targets, 'ArrowRight')
+  press(targets, 'ArrowRight')
+  const up = press(targets, 'ArrowUp')
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { iebt: [0, 0, 16, ...Array<number>(17).fill(0)] },
+    },
+  ])
+  expect(activeBands(targets)).toEqual([2])
+  expect(up.defaultPrevented).toBe(true)
+  expect(barVars(bands(targets)[2] as HTMLElement).value).toBe(1)
+  expect(document.activeElement).toBe(targets)
+})
+
+// Behavior 2 (#91): the Step rule on the active band — `gebg` (−36…36
+// dB, `frac_bits = 4`) band 1 at 0: Shift+↓ is −10 dB (raw −160),
+// Alt+↑ the lattice-floored tenth, 0.125 dB (+2 raw); at the range
+// edge a step the range absorbs writes nothing.
+it('Shift+↓ steps 10 units, Alt+↑ the lattice tenth; a clamped step writes nothing', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = strip(panel, 'gebg')
+  press(gains, 'ArrowDown', { shiftKey: true })
+  press(gains, 'ArrowUp', { altKey: true })
+  expect(sentParams(socket)).toEqual([
+    { gebg: [-160, ...Array<number>(19).fill(0)] },
+    { gebg: [-158, ...Array<number>(19).fill(0)] },
+  ])
+
+  applySnapshot(
+    fixtureStateWithParams({ gebg: [576, -576, ...Array<number>(18).fill(0)] }),
+  )
+  const up = press(gains, 'ArrowUp')
+  press(gains, 'ArrowUp', { shiftKey: true })
+  press(gains, 'ArrowUp', { altKey: true })
+  press(gains, 'ArrowRight')
+  press(gains, 'ArrowDown')
+  press(gains, 'ArrowDown', { shiftKey: true })
+  press(gains, 'ArrowDown', { altKey: true })
+  expect(sentParams(socket)).toHaveLength(2)
+  expect(up.defaultPrevented).toBe(true)
+})
+
+const editingBands = (node: HTMLElement) =>
+  bands(node).flatMap((band, slot) =>
+    band.classList.contains('adv-bands__band--editing') ? [slot] : [],
+  )
+
+// Behavior 3 (#91): Enter on the strip opens the active band's editor
+// — its input focused, text selected, the band `--editing`; Esc inside
+// reverts, returns focus to the strip and clears `--editing`. Both
+// keys are consumed.
+it('Enter opens the active band editor selected; Esc inside returns focus to the strip', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = strip(panel, 'gebg')
+  press(gains, 'ArrowRight')
+  press(gains, 'ArrowRight')
+  const enter = press(gains, 'Enter')
+  const editor = bandInput(gains, 2)
+  expect(document.activeElement).toBe(editor)
+  expect(fullySelected(editor)).toBe(true)
+  expect(editingBands(gains)).toEqual([2])
+  expect(enter.defaultPrevented).toBe(true)
+
+  const escape = press(editor, 'Escape')
+  expect(document.activeElement).toBe(gains)
+  expect(editingBands(gains)).toEqual([])
+  expect(activeBands(gains)).toEqual([2])
+  expect(escape.defaultPrevented).toBe(true)
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 4 (#91): a digit on the focused strip opens the active
+// band's editor with that digit as its whole text and commits it live,
+// clamped — `9` on `iebt` band 2 (−30…30 dB) is 9 dB, raw 144; a
+// following `9` typed in the box makes 99, clamped to 30 dB (480), the
+// text staying as typed. `-` alone opens the editor and writes nothing.
+it('a digit on the strip opens the active editor as its whole text and commits clamped live', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const targets = strip(panel, 'iebt')
+  press(targets, 'ArrowRight')
+  const digit = press(targets, '9')
+  const editor = bandInput(targets, 1)
+  expect(document.activeElement).toBe(editor)
+  expect(editor.value).toBe('9')
+  expect(editor.selectionStart).toBe(1)
+  expect(editingBands(targets)).toEqual([1])
+  expect(digit.defaultPrevented).toBe(true)
+  expect(sentParams(socket)).toEqual([
+    { iebt: [0, 144, ...Array<number>(18).fill(0)] },
+  ])
+
+  type(editor, '99')
+  expect(editor.value).toBe('99')
+  expect(sentParams(socket)).toHaveLength(2)
+  expect(sentParams(socket)[1]).toEqual({
+    iebt: [0, 480, ...Array<number>(18).fill(0)],
+  })
+
+  press(targets, 'Escape')
+  press(targets, '-')
+  const minus = bandInput(targets, 1)
+  expect(document.activeElement).toBe(minus)
+  expect(minus.value).toBe('-')
+  expect(sentParams(socket)).toHaveLength(2)
+})
+
+/** A press + release on `band` (pointer 1, button 0), `dx` px apart,
+ * then the compat click — what a mouse click on the bar delivers. */
+function clickBand(band: HTMLElement, dx = 0): void {
+  const bar = band.querySelector('.adv-bands__bar') as HTMLElement
+  fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 50 })
+  if (dx !== 0) fireEvent.pointerMove(bar, { pointerId: 1, clientX: 50 + dx })
+  fireEvent.pointerUp(bar, { pointerId: 1, button: 0, clientX: 50 + dx })
+  fireEvent.click(bar)
+}
+
+// Behavior 5 (#91): press + release on band 5 without movement opens
+// band 5's editor — focused, selected — not band 1's (the card label's
+// `for` target), and writes nothing; the editor opens on the release,
+// never the press. A press that travels 3 px before release opens
+// nothing (Part 2 paints there).
+it('press + release on band 5 focuses its editor, not band 1; movement disarms', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = strip(panel, 'gebg')
+  const fifth = bands(gains)[4] as HTMLElement
+  const bar = fifth.querySelector('.adv-bands__bar') as HTMLElement
+  fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 50 })
+  expect(document.activeElement).not.toBe(bandInput(gains, 4))
+  fireEvent.pointerUp(bar, { pointerId: 1, button: 0, clientX: 50 })
+  fireEvent.click(bar)
+  expect(document.activeElement).toBe(bandInput(gains, 4))
+  expect(fullySelected(bandInput(gains, 4))).toBe(true)
+  expect(editingBands(gains)).toEqual([4])
+  expect(activeBands(gains)).toEqual([4])
+
+  press(gains, 'Escape')
+  clickBand(bands(gains)[7] as HTMLElement, 3)
+  expect(document.activeElement).not.toBe(bandInput(gains, 7))
+  expect(editingBands(gains)).toEqual([])
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 6 (#91): access gates editability — a read-only (`vnbf`), a
+// Live (`vnbg`) and an opaque (`bndl`) strip ignore ↑ / ↓ and digits
+// (nothing written, the keys not consumed), while a click still reveals
+// that band's `readonly` editor, focused.
+it('read-only, live and opaque strips ignore ↑/↓ and digits; click reveals a readonly editor', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  for (const code of ['vnbf', 'vnbg', 'bndl']) {
+    const node = strip(panel, code)
+    press(node, 'ArrowRight')
+    const up = press(node, 'ArrowUp')
+    const down = press(node, 'ArrowDown', { shiftKey: true })
+    const digit = press(node, '5')
+    expect(up.defaultPrevented).toBe(false)
+    expect(down.defaultPrevented).toBe(false)
+    expect(digit.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(node)
+
+    clickBand(bands(node)[1] as HTMLElement)
+    const editor = bandInput(node, 1)
+    expect(document.activeElement).toBe(editor)
+    expect(editor.readOnly).toBe(true)
+    expect(editingBands(node)).toEqual([1])
+    press(editor, 'ArrowUp')
+    fireEvent.input(editor, { target: { value: '7' } })
+  }
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 7 (#91): with the strip focused and band 4 active (nothing
+// hovered) the meta line reads `band 4 · value unit`; it still does
+// while band 4's editor is open; blurring the strip restores the
+// summary. A hovered band still wins (08).
+it('the meta reads the active band while the strip is focused or its editor open; blur restores the summary', () => {
+  const panel = renderOpen()
+  applySnapshot(fixtureStateWithParams({ genb: [10], gebg: ramp40(-576, 48) }))
+  const gains = strip(panel, 'gebg')
+  const line = meta(panel, 'gebg')
+  press(gains, 'End')
+  press(gains, 'ArrowLeft')
+  press(gains, 'ArrowLeft')
+  press(gains, 'ArrowLeft')
+  press(gains, 'ArrowLeft')
+  press(gains, 'ArrowLeft')
+  press(gains, 'ArrowLeft')
+  expect(activeBands(gains)).toEqual([3])
+  expect(line?.textContent).toBe('band 4 · -27 dB')
+
+  fireEvent.pointerMove(bands(gains)[0] as HTMLElement)
+  expect(line?.textContent).toBe('band 1 · -36 dB')
+  fireEvent.pointerLeave(gains)
+  expect(line?.textContent).toBe('band 4 · -27 dB')
+
+  press(gains, 'Enter')
+  expect(document.activeElement).toBe(bandInput(gains, 3))
+  expect(line?.textContent).toBe('band 4 · -27 dB')
+  press(bandInput(gains, 3), 'Escape')
+  expect(document.activeElement).toBe(gains)
+  expect(line?.textContent).toBe('band 4 · -27 dB')
+
+  gains.blur()
+  expect(line?.textContent).toBe('10 of 40 bands · dB')
+})
+
+// Behavior 8 (#91): the Source rule — with Rich selected, ↑ on `gebg`
+// is a live `edit_eq_preset` against Rich (its flat curve, band 1 up
+// one dB = raw 16), never `edit_profile`; after `None`, the profile.
+it('↑ on gebg writes the selected EQ preset live, else the profile', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  applySnapshot(selectingState('rich'))
+  const gains = strip(panel, 'gebg')
+  press(gains, 'ArrowUp')
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_eq_preset',
+      request_id: expect.any(String) as string,
+      id: 'rich',
+      params: { gebg: [16, ...Array<number>(19).fill(0)] },
+    },
+  ])
+
+  applySnapshot(selectingState(null))
+  press(gains, 'ArrowUp')
+  expect(sentEdits(socket)[1]).toEqual({
+    cmd: 'edit_profile',
+    request_id: expect.any(String) as string,
+    id: 'music',
+    params: { gebg: [16, ...Array<number>(19).fill(0)] },
+  })
+})
+
+// `aobg` (#91): each channel row is its own strip — → ↑ on the second
+// row lifts its band 2 alone, at the packed offset (id slot 21, gains
+// from 22): the whole 329-slot array goes out with h₂ + 16, ids and
+// every other gain untouched; the meta names the channel.
+it("keyboard on an aobg row writes that row's gain at its packed offset", () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const packed = packedAobg([
+    { id: 2, gains: LEFT_GAINS },
+    { id: 3, gains: RIGHT_GAINS },
+  ])
+  applySnapshot(fixtureStateWithParams({ aocc: [2], aonb: [20], aobg: packed }))
+  const second = rows(panel, 'aobg')[1]?.querySelector<HTMLElement>(
+    '.adv-bands__strip',
+  )
+  if (!second) throw new Error('no second row')
+  press(second, 'ArrowRight')
+  expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 2 · -8.5 dB')
+  press(second, 'ArrowUp')
+  const expected = [...packed]
+  expected[23] = (RIGHT_GAINS[1] ?? 0) + 16 // id at 21, h₁ at 22, h₂ at 23
+  expect(sentParams(socket)).toEqual([{ aobg: expected }])
+  expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 2 · -7.5 dB')
+})
+
+// The editor keeps the Scrub (#88): a press on band 3's open box that
+// travels 3 px engages the lock and one −4 px window move steps `gebg`
+// band 3 up 1 dB live; the strip neither opens another editor nor
+// disarms anything — the gesture is the box's.
+it('a press-drag on an open band editor scrubs it; the strip stays out of it', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = strip(panel, 'gebg')
+  press(gains, 'ArrowRight')
+  press(gains, 'ArrowRight')
+  press(gains, 'Enter')
+  const editor = bandInput(gains, 2)
+  expect(box(editor).classList).toContain('adv-input--scrub')
+  engage(editor)
+  expect(scrubbingOn(editor)).toBe(true)
+  scrubBy(-4)
+  expect(sentParams(socket)).toEqual([
+    { gebg: [0, 0, 16, ...Array<number>(17).fill(0)] },
+  ])
+  release()
+  expect(document.activeElement).toBe(editor)
+  expect(editingBands(gains)).toEqual([2])
+  expect(sentParams(socket)).toHaveLength(1)
 })
