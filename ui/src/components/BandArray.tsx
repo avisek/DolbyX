@@ -307,6 +307,7 @@ const Strip: Component<{
                 axis={axis}
                 unit=""
                 readOnly={!write}
+                scrub={write !== undefined}
                 tabIndex={-1}
                 onLive={(next) => {
                   write?.(slot, rawValue(def, next), true)

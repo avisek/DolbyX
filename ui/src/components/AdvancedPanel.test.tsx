@@ -2266,3 +2266,28 @@ it("keyboard on an aobg row writes that row's gain at its packed offset", () => 
   expect(sentParams(socket)).toEqual([{ aobg: expected }])
   expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 2 · -7.5 dB')
 })
+
+// The editor keeps the Scrub (#88): a press on band 3's open box that
+// travels 3 px engages the lock and one −4 px window move steps `gebg`
+// band 3 up 1 dB live; the strip neither opens another editor nor
+// disarms anything — the gesture is the box's.
+it('a press-drag on an open band editor scrubs it; the strip stays out of it', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const gains = strip(panel, 'gebg')
+  press(gains, 'ArrowRight')
+  press(gains, 'ArrowRight')
+  press(gains, 'Enter')
+  const editor = bandInput(gains, 2)
+  expect(box(editor).classList).toContain('adv-input--scrub')
+  engage(editor)
+  expect(scrubbingOn(editor)).toBe(true)
+  scrubBy(-4)
+  expect(sentParams(socket)).toEqual([
+    { gebg: [0, 0, 16, ...Array<number>(17).fill(0)] },
+  ])
+  release()
+  expect(document.activeElement).toBe(editor)
+  expect(editingBands(gains)).toEqual([2])
+  expect(sentParams(socket)).toHaveLength(1)
+})

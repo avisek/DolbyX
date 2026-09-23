@@ -419,4 +419,26 @@ test('the band editor of band 1 and of band 20 opens above its band, inside the 
   await page.keyboard.press('Enter')
   await expect(strip).toBeFocused()
   await expect(first).toHaveValue('3')
+
+  // The open editor keeps the Scrub: a press-drag on its box locks the
+  // pointer and steps the band; the strip opens nothing else.
+  await page.keyboard.press('Enter')
+  await expect(first).toBeFocused()
+  const box = await first.boundingBox()
+  if (!box) throw new Error('editor not laid out')
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x, y - 3)
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.pointerLockElement?.className ?? null),
+    )
+    .toMatch(/\badv-input\b/)
+  await page.mouse.move(x, y - 11)
+  await expect(first).not.toHaveValue('3')
+  await page.mouse.up()
+  await expect(first).toBeFocused()
+  await expect(strip.locator('.adv-bands__band--editing')).toHaveCount(1)
 })
