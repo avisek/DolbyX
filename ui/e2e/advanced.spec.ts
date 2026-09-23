@@ -451,7 +451,7 @@ test('the band editor of band 1 and of band 20 opens above its band, inside the 
 // — Band editing: drag-to-paint (#91 part 2, behavior 15) —
 
 // Geometry truth for the Paint: a fast 4-event drag — press on band 1,
-// two moves landing on band 20, release — across `gebg` at a quarter
+// a move to mid-strip, a move to band 20, release — across `gebg` at a quarter
 // of the strip's height leaves no band at its pre-drag value (Music
 // ships a flat 0 dB): every band the pointer skipped is interpolated
 // to the same height, the editor never opens, and the release's commit

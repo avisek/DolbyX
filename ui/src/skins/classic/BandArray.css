@@ -45,7 +45,7 @@
     ),
     var(--color-bg);
   transition: border-color 0.12s ease;
-  /* The brush (#91): a writable strip paints under a crosshair. */
+  /* Paint (#91): a writable strip paints under a crosshair. */
   cursor: crosshair;
   /* Behavior, not appearance: a drag over the bands never selects the
      editors' text. Every skin keeps it. */

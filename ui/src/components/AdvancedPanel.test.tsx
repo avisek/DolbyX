@@ -2295,7 +2295,7 @@ it('a press-drag on an open band editor scrubs it; the strip stays out of it', (
 // — Band editing: drag-to-paint (#91 part 2) —
 
 /** Lays a strip's bands out as one row of equal 10 px columns over a
- * 100 px height — happy-dom lays nothing out; the brush reads these
+ * 100 px height — happy-dom lays nothing out; the Paint reads these
  * rects. `wrapped` drops the last band onto a second row. */
 function mockColumns(node: HTMLElement, wrapped = false): void {
   const all = bands(node)
@@ -2313,15 +2313,13 @@ function mockColumns(node: HTMLElement, wrapped = false): void {
 }
 
 /** A pointer-1 press on `band`'s bar at (`x`, `y`) — button 0. */
-function pressBand(band: HTMLElement, x: number, y: number): void {
-  const bar = band.querySelector('.adv-bands__bar') as HTMLElement
-  fireEvent.pointerDown(bar, {
+const pressBand = (band: HTMLElement, x: number, y: number) =>
+  fireEvent.pointerDown(band.querySelector('.adv-bands__bar') as HTMLElement, {
     pointerId: 1,
     button: 0,
     clientX: x,
     clientY: y,
   })
-}
 
 /** A pointer-1 move over the capturing strip to (`x`, `y`). */
 const dragTo = (node: HTMLElement, x: number, y: number) =>
@@ -2399,7 +2397,7 @@ it('a press that starts on an editor input never paints, however far it moves', 
   expect(editingBands(targets)).toEqual([1])
 })
 
-// Behavior 12 (#91): access gates the brush — a read-only (`vnbf`), a
+// Behavior 12 (#91): access gates the Paint — a read-only (`vnbf`), a
 // Live (`vnbg`) and an opaque (`bndl`) strip laid out as one row take
 // a press-drag-release across every band and write nothing; the drag
 // opens no editor either.
@@ -2448,7 +2446,7 @@ it("painting on an aobg row writes only that row's gain slice at the packed offs
   expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 3 · 30 dB')
 })
 
-// Behavior 14 (#91): the brush needs one row — with band 1 and band N
+// Behavior 14 (#91): the Paint needs one row — with band 1 and band N
 // on different rows (a wrapping skin) a drag across `iebt` writes
 // nothing and, being a drag, opens no editor.
 it('a drag over a wrapped strip — band 1 and band N tops differ — writes nothing', () => {

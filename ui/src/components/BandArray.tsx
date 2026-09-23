@@ -76,12 +76,23 @@ const isTyped = (event: KeyboardEvent): boolean =>
  * a strip whose access takes no writes. */
 type StripWrite = (values: readonly number[], live: boolean) => void
 
-/** One brush sample: the band under the pointer and the raw value its
+/** One Paint sample: the band under the pointer and the raw value its
  * height reads. */
 interface Sample {
   readonly slot: number
   readonly raw: number
 }
+
+/** A stroke under way: its last sample and the visible array it
+ * paints into. */
+interface Stroke {
+  last: Sample
+  readonly next: number[]
+}
+
+/** How far band 1's and band N's tops may differ and still count as
+ * one row — sub-pixel layout noise, never a wrapped line. */
+const ROW_PX = 1
 
 /**
  * One strip — `role=group`, one Tab stop — of `count` bands over a raw
@@ -206,26 +217,26 @@ const Strip: Component<{
   // ENGAGE_PX paints on a writable strip, else disarms. A gesture
   // starting on an editor is the box's own (its Scrub, #88) — the
   // strip ignores it.
-  /** The armed pointer, its origin and its band; `undefined` at rest. */
-  let armed: { id: number; x: number; y: number; slot: number } | undefined
-  /** The stroke under way — its last sample and the array it paints
-   * into; `undefined` until the armed press travels. */
-  let stroke: { last: Sample; next: number[] } | undefined
+  /** The armed pointer — its origin, its band, and the stroke once the
+   * press has travelled; `undefined` at rest. */
+  let armed:
+    | { id: number; x: number; y: number; slot: number; stroke?: Stroke }
+    | undefined
 
+  /** Lets the armed pointer go — state and capture. */
   const disarm = (event: PointerEvent): void => {
     if (armed?.id !== event.pointerId) return
     armed = undefined
-    stroke = undefined
     if (strip.hasPointerCapture(event.pointerId)) {
       strip.releasePointerCapture(event.pointerId)
     }
   }
 
-  /** The pointer at (`x`, `y`) as a brush sample: x across the band
+  /** The pointer at (`x`, `y`) as a Paint sample: x across the band
    * columns → the band (`floor(fx · n)`, clamped), y within the band's
    * box → the raw value (`min` at the floor, `max` at the top, on the
    * raw lattice). `undefined` where the bands aren't laid out as one
-   * row — a wrapping skin, or no layout at all: no brush there. */
+   * row — a wrapping skin, or no layout at all: no Paint there. */
   const locate = (x: number, y: number): Sample | undefined => {
     const n = props.count()
     const first = strip.children[0]
@@ -234,7 +245,7 @@ const Strip: Component<{
     const a = first.getBoundingClientRect()
     const z = final.getBoundingClientRect()
     const width = z.right - a.left
-    if (width <= 0 || a.height <= 0 || Math.abs(a.top - z.top) > 1) {
+    if (width <= 0 || a.height <= 0 || Math.abs(a.top - z.top) > ROW_PX) {
       return undefined
     }
     const fx = (x - a.left) / width
@@ -245,10 +256,9 @@ const Strip: Component<{
 
   /** Paints the stroke from its last sample to `sample` — every band
    * between on the straight line, so a fast drag leaves no gaps — and
-   * writes the visible array live, once. The brush marks the band it
-   * is on. */
-  const paintTo = (sample: Sample): void => {
-    if (!stroke) return
+   * writes the visible array live, once. The band under the pointer
+   * reads as hovered. */
+  const paintTo = (stroke: Stroke, sample: Sample): void => {
     const from = stroke.last
     const span = sample.slot - from.slot
     const lo = Math.min(from.slot, sample.slot)
@@ -262,15 +272,16 @@ const Strip: Component<{
     write?.(stroke.next, true)
   }
 
-  /** The armed pointer's end: a stroke commits what it painted; a
-   * `click` release without one opens the pressed band's editor. */
-  const release = (event: PointerEvent, click: boolean): void => {
-    if (armed?.id !== event.pointerId) return
-    const { slot } = armed
-    const painted = stroke
+  /** The armed pointer's end: a stroke commits what it painted — on a
+   * cancel too, so the live frames already out never dangle. Returns
+   * the pressed band when the gesture never travelled: a click. */
+  const release = (event: PointerEvent): number | undefined => {
+    if (armed?.id !== event.pointerId) return undefined
+    const { slot, stroke } = armed
     disarm(event)
-    if (painted) write?.(painted.next, false)
-    else if (click) openEditor(slot)
+    if (!stroke) return slot
+    write?.(stroke.next, false)
+    return undefined
   }
 
   /** The band under an event target, by position among the bands. */
@@ -348,7 +359,7 @@ const Strip: Component<{
           return
         }
         if (event.pointerId !== armed.id) return
-        if (!stroke) {
+        if (!armed.stroke) {
           const travel = Math.hypot(
             event.clientX - armed.x,
             event.clientY - armed.y,
@@ -362,16 +373,17 @@ const Strip: Component<{
             disarm(event)
             return
           }
-          stroke = { last: origin, next: visible() }
+          armed.stroke = { last: origin, next: visible() }
         }
         const sample = locate(event.clientX, event.clientY)
-        if (sample) paintTo(sample)
+        if (sample) paintTo(armed.stroke, sample)
       }}
       onPointerUp={(event) => {
-        release(event, true)
+        const clicked = release(event)
+        if (clicked !== undefined) openEditor(clicked)
       }}
       onPointerCancel={(event) => {
-        release(event, false)
+        release(event)
       }}
       onPointerLeave={() => {
         props.onHover(undefined)
