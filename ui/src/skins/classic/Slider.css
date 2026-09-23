@@ -52,8 +52,9 @@
 }
 
 /* Hover under focus weight — the whole hover selector inside `:where()`
-   (ADR-0011). Disabled sliders get no lift. */
-:where(.adv-card:hover)
+   (ADR-0011). Disabled sliders get no lift. The Master control row
+   (#93) hosts the same Slider. */
+:where(.adv-card:hover, .master-control:hover)
   .adv-slider:where(:not(.adv-slider--disabled))
   .adv-slider__thumb {
   scale: 1.2;

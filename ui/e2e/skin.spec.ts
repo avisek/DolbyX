@@ -7,9 +7,9 @@ import { expect, test } from './fixtures'
 
 /**
  * Behavior 4's fixture: computed properties of the app root, the power
- * toggle, and a master-control slider, captured on `main` before the
- * move — skin-owned values only, nothing viewport-derived. Any drift
- * here means a stylesheet was lost, reordered, or edited.
+ * toggle, and a master control, captured on `main` — skin-owned values
+ * only, nothing viewport-derived. Any drift here means a stylesheet was
+ * lost, reordered, or edited (a deliberate redraw re-pins it).
  */
 const BASELINE = {
   '.app': {
@@ -36,16 +36,17 @@ const BASELINE = {
     'background-color': 'rgb(0, 180, 255)',
     'border-radius': '12px',
   },
+  // Redrawn on the Advanced controls (#93): the token scale's values.
   '.master-control': {
-    padding: '12px 20px',
-    'border-radius': '8px',
+    display: 'grid',
+    padding: '8px 16px',
+    'border-radius': '9.6px',
     'background-color': 'rgb(22, 34, 47)',
-    gap: '8px',
+    'column-gap': '8px',
   },
-  '.master-control__slider': {
-    'accent-color': 'rgb(0, 180, 255)',
+  '.master-control .adv-slider': {
     'flex-grow': '1',
-    height: '16px',
+    height: '27.1875px', // --control-h, layout-rounded
   },
 }
 

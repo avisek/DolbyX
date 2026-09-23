@@ -11,7 +11,6 @@
   --head-x: var(--space-4);
   --code-w: 3.3rem;
   --label-w: 8.5rem;
-  --reset-w: 1.4rem;
   --ctl-min: 11rem;
 
   display: grid;

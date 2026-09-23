@@ -22,6 +22,10 @@
   /* One height for input / toggle / tristate / slider */
   --control-h: 1.7rem;
 
+  /* The Reset marker's square (card rows, category headers, Master
+     controls) */
+  --reset-w: 1.4rem;
+
   /* Radii: controls / cards */
   --radius-1: 0.35rem;
   --radius-2: 0.6rem;

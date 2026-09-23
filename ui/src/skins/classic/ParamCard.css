@@ -60,6 +60,7 @@
 /* The Reset marker's slot — a fixed square on the reset track; read-only
    cards leave it empty. */
 .adv-card__reset {
+  position: relative;
   grid-column: 3;
   justify-self: center;
   width: var(--reset-w);

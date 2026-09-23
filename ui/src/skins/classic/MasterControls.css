@@ -1,82 +1,67 @@
+/* The Master controls (#93) on the Advanced controls: card-like rows on
+   the surface token — label | reset | control (switch · box · Slider) —
+   in the panel's language: `--control-h` widgets, hover under focus
+   weight (`:where()`), the Reset marker's morph from ResetMarker.css.
+   Curated surface: no 4-CC chip, so the row is three tracks. */
+
 .master-controls {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .master-control {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
-  border: 1px solid var(--color-surface);
-  border-radius: 0.5rem;
+  --ctl-min: 14rem;
+
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) var(--reset-w)
+    minmax(var(--ctl-min), 2fr);
+  column-gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-2);
   background: var(--color-surface);
+  cursor: default;
+  transition: background 0.12s ease;
 }
 
-.master-control__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* Hover under focus weight: a row holding focus always wins. */
+:where(.master-control:hover) {
+  background: color-mix(in srgb, var(--color-surface), white 3%);
+}
+
+.master-control:has(:focus-visible) {
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-surface));
 }
 
 .master-control__label {
+  min-width: 0;
   color: var(--color-text);
-  font-size: 1rem;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
-.master-control__toggle {
-  display: inline-flex;
+/* The Reset marker's slot — a fixed square; its morph lives in
+   ResetMarker.css. */
+.master-control__reset {
+  position: relative;
+  justify-self: center;
+  width: var(--reset-w);
+  height: var(--reset-w);
   padding: 0;
-  border: none;
   background: none;
-  cursor: pointer;
 }
 
-.master-control__track {
-  display: inline-flex;
-  align-items: center;
-  width: 2.25rem;
-  height: 1.25rem;
-  padding: 0.1875rem;
-  border-radius: 0.625rem;
-  background: var(--color-bg);
-  transition: background 0.15s ease;
-}
-
-.master-control__thumb {
-  width: 0.875rem;
-  height: 0.875rem;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  transition:
-    transform 0.15s ease,
-    background 0.15s ease;
-}
-
-.master-control__toggle[aria-checked='true'] .master-control__track {
-  background: var(--color-accent);
-}
-
-.master-control__toggle[aria-checked='true'] .master-control__thumb {
-  transform: translateX(1rem);
-  background: var(--color-bg);
-}
-
-.master-control__amount {
+.master-control__control {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.master-control__slider {
-  flex: 1;
-  accent-color: var(--color-accent);
-}
-
-.master-control__value {
-  min-width: 3.5rem;
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
-  text-align: right;
+/* Power off (`app--off`, the whole-UI marker): greyed like the
+   visualizer's off surface; still operable. */
+.app--off .master-control {
+  filter: grayscale(100%) brightness(60%);
 }
