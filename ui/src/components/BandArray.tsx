@@ -71,10 +71,17 @@ const bandText = (def: ParameterDef, slot: number, raw: number): string =>
 const isTyped = (event: KeyboardEvent): boolean =>
   /^[\d.-]$/.test(event.key) && !event.ctrlKey && !event.metaKey
 
-/** Writes one strip's array: the whole stored array with one slot
- * changed, live (mid-gesture) or committed. Absent on a strip whose
- * access takes no writes. */
-type StripWrite = (slot: number, raw: number, live: boolean) => void
+/** Writes one strip's visible array — the stored array with the
+ * strip's bands replaced — live (mid-gesture) or committed. Absent on
+ * a strip whose access takes no writes. */
+type StripWrite = (values: readonly number[], live: boolean) => void
+
+/** One brush sample: the band under the pointer and the raw value its
+ * height reads. */
+interface Sample {
+  readonly slot: number
+  readonly raw: number
+}
 
 /**
  * One strip — `role=group`, one Tab stop — of `count` bands over a raw
@@ -86,6 +93,14 @@ type StripWrite = (slot: number, raw: number, live: boolean) => void
  * (`--active`, clamped into the count as it shrinks); ↑ / ↓ step it by
  * the Step rule and write the array live. Handled keys are consumed —
  * the page never scrolls, nothing above re-handles.
+ *
+ * Pointer model (#91): a press on a band arms; a release without
+ * travel opens that band's editor; travel past `ENGAGE_PX` on a
+ * writable strip is a Paint — x across the band columns picks the
+ * band, y within the band's box the value, every band crossed between
+ * two samples interpolated, one live write of the visible array per
+ * move, one commit on release, no editor. Only a strip laid out as one
+ * row paints; a gesture starting on an editor is the box's Scrub.
  *
  * Marks the hovered band (`--hover`) and reports it to its container.
  */
@@ -163,27 +178,99 @@ const Strip: Component<{
   const inEditor = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest('.adv-bands__editor') !== null
 
+  /** The visible array — the strip's bands' raw values. */
+  const visible = (): number[] => {
+    const raws: number[] = []
+    const count = props.count()
+    for (let slot = 0; slot < count; slot += 1) raws.push(props.raw(slot))
+    return raws
+  }
+
+  /** The visible array with one band changed. */
+  const withSlot = (slot: number, raw: number): number[] => {
+    const next = visible()
+    next[slot] = raw
+    return next
+  }
+
   /** Steps the active band by the Step rule; a step the range absorbs
    * writes nothing. */
   const nudge = (direction: 1 | -1, mods: Modifiers): void => {
     const slot = active()
     const next = rawValue(def, stepped(axis, value(slot), direction, mods))
-    if (next !== props.raw(slot)) write?.(slot, next, true)
+    if (next !== props.raw(slot)) write?.(withSlot(slot, next), true)
   }
 
-  // — Pointer, click half: press arms, release without travel opens
-  // the pressed band's editor (reveal on click, never on press);
-  // travel past ENGAGE_PX disarms. A gesture starting on an editor is
-  // the box's own (its Scrub, #88) — the strip ignores it.
+  // — Pointer: press arms, release without travel opens the pressed
+  // band's editor (reveal on click, never on press); travel past
+  // ENGAGE_PX paints on a writable strip, else disarms. A gesture
+  // starting on an editor is the box's own (its Scrub, #88) — the
+  // strip ignores it.
   /** The armed pointer, its origin and its band; `undefined` at rest. */
   let armed: { id: number; x: number; y: number; slot: number } | undefined
+  /** The stroke under way — its last sample and the array it paints
+   * into; `undefined` until the armed press travels. */
+  let stroke: { last: Sample; next: number[] } | undefined
 
   const disarm = (event: PointerEvent): void => {
     if (armed?.id !== event.pointerId) return
     armed = undefined
+    stroke = undefined
     if (strip.hasPointerCapture(event.pointerId)) {
       strip.releasePointerCapture(event.pointerId)
     }
+  }
+
+  /** The pointer at (`x`, `y`) as a brush sample: x across the band
+   * columns → the band (`floor(fx · n)`, clamped), y within the band's
+   * box → the raw value (`min` at the floor, `max` at the top, on the
+   * raw lattice). `undefined` where the bands aren't laid out as one
+   * row — a wrapping skin, or no layout at all: no brush there. */
+  const locate = (x: number, y: number): Sample | undefined => {
+    const n = props.count()
+    const first = strip.children[0]
+    const final = strip.children[n - 1]
+    if (!first || !final) return undefined
+    const a = first.getBoundingClientRect()
+    const z = final.getBoundingClientRect()
+    const width = z.right - a.left
+    if (width <= 0 || a.height <= 0 || Math.abs(a.top - z.top) > 1) {
+      return undefined
+    }
+    const fx = (x - a.left) / width
+    const slot = Math.min(n - 1, Math.max(0, Math.floor(fx * n)))
+    const fy = Math.min(1, Math.max(0, (a.bottom - y) / a.height))
+    return { slot, raw: Math.round(def.min + fy * (def.max - def.min)) }
+  }
+
+  /** Paints the stroke from its last sample to `sample` — every band
+   * between on the straight line, so a fast drag leaves no gaps — and
+   * writes the visible array live, once. The brush marks the band it
+   * is on. */
+  const paintTo = (sample: Sample): void => {
+    if (!stroke) return
+    const from = stroke.last
+    const span = sample.slot - from.slot
+    const lo = Math.min(from.slot, sample.slot)
+    const hi = Math.max(from.slot, sample.slot)
+    for (let slot = lo; slot <= hi; slot += 1) {
+      const t = span === 0 ? 1 : (slot - from.slot) / span
+      stroke.next[slot] = Math.round(from.raw + (sample.raw - from.raw) * t)
+    }
+    stroke.last = sample
+    props.onHover({ row: props.row, slot: sample.slot })
+    write?.(stroke.next, true)
+  }
+
+  /** The armed pointer's end: a stroke commits what it painted; a
+   * `click` release without one opens the pressed band's editor. */
+  const release = (event: PointerEvent, click: boolean): void => {
+    if (armed?.id !== event.pointerId) return
+    const { slot } = armed
+    const painted = stroke
+    disarm(event)
+    if (painted) write?.(painted.next, false)
+    else if (click) openEditor(slot)
   }
 
   /** The band under an event target, by position among the bands. */
@@ -261,18 +348,31 @@ const Strip: Component<{
           return
         }
         if (event.pointerId !== armed.id) return
-        const travel = Math.hypot(
-          event.clientX - armed.x,
-          event.clientY - armed.y,
-        )
-        if (travel >= ENGAGE_PX) disarm(event)
+        if (!stroke) {
+          const travel = Math.hypot(
+            event.clientX - armed.x,
+            event.clientY - armed.y,
+          )
+          if (travel < ENGAGE_PX) return
+          // Past the threshold: no click any more. A writable strip in
+          // one row starts a stroke from the press; anything else lets
+          // the gesture go.
+          const origin = write && locate(armed.x, armed.y)
+          if (!origin) {
+            disarm(event)
+            return
+          }
+          stroke = { last: origin, next: visible() }
+        }
+        const sample = locate(event.clientX, event.clientY)
+        if (sample) paintTo(sample)
       }}
       onPointerUp={(event) => {
-        const slot = armed?.id === event.pointerId ? armed.slot : undefined
-        disarm(event)
-        if (slot !== undefined) openEditor(slot)
+        release(event, true)
       }}
-      onPointerCancel={disarm}
+      onPointerCancel={(event) => {
+        release(event, false)
+      }}
       onPointerLeave={() => {
         props.onHover(undefined)
       }}
@@ -310,13 +410,14 @@ const Strip: Component<{
                 scrub={write !== undefined}
                 tabIndex={-1}
                 onLive={(next) => {
-                  write?.(slot, rawValue(def, next), true)
+                  write?.(withSlot(slot, rawValue(def, next)), true)
                 }}
                 onCommit={(next) => {
                   // Store truth is raw: a typed value on the same
                   // lattice step has nothing to commit.
                   const raw = rawValue(def, next)
-                  if (raw !== props.raw(slot)) write?.(slot, raw, false)
+                  if (raw !== props.raw(slot))
+                    write?.(withSlot(slot, raw), false)
                 }}
               />
             </span>
@@ -332,16 +433,22 @@ const Strip: Component<{
 const rawAt = (def: ParameterDef, slot: number): number =>
   paramValues(def)[slot] ?? def.default[slot] ?? def.min
 
-/** The stored array with `index` set to `raw` — the array a band
- * write sends whole; a tail slot the store never carried is filled
- * from the table default up to it. */
-function withRaw(def: ParameterDef, index: number, raw: number): number[] {
-  const values = paramValues(def)
+/** The stored array with `values` written from `offset` — the array a
+ * strip's write sends whole; a tail slot the store never carried is
+ * filled from the table default up to it. */
+function withRaws(
+  def: ParameterDef,
+  offset: number,
+  values: readonly number[],
+): number[] {
+  const stored = paramValues(def)
   const next = Array.from(
-    { length: Math.max(values.length, index + 1) },
-    (_raw, slot) => values[slot] ?? def.default[slot] ?? def.min,
+    { length: Math.max(stored.length, offset + values.length) },
+    (_raw, slot) => stored[slot] ?? def.default[slot] ?? def.min,
   )
-  next[index] = raw
+  values.forEach((raw, slot) => {
+    next[offset + slot] = raw
+  })
   return next
 }
 
@@ -353,8 +460,8 @@ function stripWrite(
   offset: () => number,
 ): StripWrite | undefined {
   if (!isWritable(def) || def.kind === 'opaque') return undefined
-  return (slot, raw, live) => {
-    ;(live ? liveParam : commitParam)(def, withRaw(def, offset() + slot, raw))
+  return (values, live) => {
+    ;(live ? liveParam : commitParam)(def, withRaws(def, offset(), values))
   }
 }
 
