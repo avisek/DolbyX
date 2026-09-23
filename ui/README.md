@@ -68,6 +68,7 @@ paints it. v2.0 ships one skin, **Classic**, and no switcher.
 - `index.css` — the skin entry point; `main.tsx` imports only this
 - `theme.css` — tokens; `base.css` — resets + typography
 - `<Component>.css` — one BEM file per component; `index.css` orders them
+- `ResetMarker.css` — the Reset marker's morph, shared by card + header
 
 **Add a component's stylesheet**: create `src/skins/classic/<Name>.css`,
 `@import` it from `index.css`. Never import CSS from `.tsx` — ESLint

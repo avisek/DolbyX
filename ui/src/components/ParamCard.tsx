@@ -1,6 +1,11 @@
 import { Show, type Component } from 'solid-js'
 import { paramDef } from '../lib/parameters'
-import { isWritable, writesToPreset } from '../store/wiring'
+import {
+  isWritable,
+  paramDiverges,
+  resetParam,
+  writesToPreset,
+} from '../store/wiring'
 import WidgetFactory, { primaryControlId } from './WidgetFactory'
 
 /**
@@ -27,6 +32,7 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
         'adv-card--ro': !isWritable(def),
         'adv-card--exp': def.access === 'experimental',
         'adv-card--preset': writesToPreset(def),
+        'adv-card--diverged': paramDiverges(def),
       }}
       for={primaryControlId(def)}
       title={def.description}
@@ -49,14 +55,19 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
     >
       <code class="adv-card__code">{def.name}</code>
       <span class="adv-card__label">{def.label}</span>
-      {/* The reset marker — read-only params have no Content key, so
-          no marker; `disabled` until divergence lands (#92). */}
+      {/* The Reset marker (#92): IS the divergence indicator — one
+          button, `disabled` while clean. Read-only params have no
+          Content key, so no marker: the skin's slot stays empty. */}
       <Show when={isWritable(def)}>
         <button
           type="button"
           class="adv-card__reset"
-          disabled
+          disabled={!paramDiverges(def)}
           aria-label={`Reset ${name()}`}
+          title={`Reset ${name()}`}
+          onClick={() => {
+            resetParam(def)
+          }}
         />
       </Show>
       <div class="adv-card__control">
