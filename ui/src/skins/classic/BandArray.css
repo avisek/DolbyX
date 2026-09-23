@@ -45,9 +45,15 @@
     ),
     var(--color-bg);
   transition: border-color 0.12s ease;
+  /* Paint (#91): a writable strip paints under a crosshair. */
+  cursor: crosshair;
   /* Behavior, not appearance: a drag over the bands never selects the
      editors' text. Every skin keeps it. */
   user-select: none;
+}
+
+.adv-bands--ro .adv-bands__strip {
+  cursor: default;
 }
 
 :where(.adv-card:hover) .adv-bands__strip {
@@ -177,6 +183,7 @@
   padding: 0;
   border: none;
   background: none;
+  cursor: default;
 }
 
 .adv-bands--opaque .adv-bands__strip:focus-visible {

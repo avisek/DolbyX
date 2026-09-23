@@ -2127,7 +2127,7 @@ function clickBand(band: HTMLElement, dx = 0): void {
 // band 5's editor — focused, selected — not band 1's (the card label's
 // `for` target), and writes nothing; the editor opens on the release,
 // never the press. A press that travels 3 px before release opens
-// nothing (Part 2 paints there).
+// nothing — and, the strip having no layout here, paints nothing.
 it('press + release on band 5 focuses its editor, not band 1; movement disarms', () => {
   const panel = renderOpen()
   const socket = connect()
@@ -2290,4 +2290,174 @@ it('a press-drag on an open band editor scrubs it; the strip stays out of it', (
   expect(document.activeElement).toBe(editor)
   expect(editingBands(gains)).toEqual([2])
   expect(sentParams(socket)).toHaveLength(1)
+})
+
+// — Band editing: drag-to-paint (#91 part 2) —
+
+/** Lays a strip's bands out as one row of equal 10 px columns over a
+ * 100 px height — happy-dom lays nothing out; the Paint reads these
+ * rects. `wrapped` drops the last band onto a second row. */
+function mockColumns(node: HTMLElement, wrapped = false): void {
+  const all = bands(node)
+  all.forEach((band, slot) => {
+    const top = wrapped && slot === all.length - 1 ? 100 : 0
+    vi.spyOn(band, 'getBoundingClientRect').mockReturnValue({
+      left: slot * 10,
+      right: slot * 10 + 10,
+      width: 10,
+      top,
+      bottom: top + 100,
+      height: 100,
+    } as DOMRect)
+  })
+}
+
+/** A pointer-1 press on `band`'s bar at (`x`, `y`) — button 0. */
+const pressBand = (band: HTMLElement, x: number, y: number) =>
+  fireEvent.pointerDown(band.querySelector('.adv-bands__bar') as HTMLElement, {
+    pointerId: 1,
+    button: 0,
+    clientX: x,
+    clientY: y,
+  })
+
+/** A pointer-1 move over the capturing strip to (`x`, `y`). */
+const dragTo = (node: HTMLElement, x: number, y: number) =>
+  fireEvent.pointerMove(node, { pointerId: 1, clientX: x, clientY: y })
+
+/** The pointer-1 release on the strip at (`x`, `y`). */
+const releaseAt = (node: HTMLElement, x: number, y: number) =>
+  fireEvent.pointerUp(node, { pointerId: 1, button: 0, clientX: x, clientY: y })
+
+// Tracer bullet (#91 part 2): over `iebt` (20 zeros, −480…480) laid
+// out as one row, a press on band 2 at 75 % of the height (−15 dB,
+// raw −240) dragged to band 7 at 25 % (+15 dB, raw 240) is ONE live
+// `edit_profile` carrying the straight ramp over bands 2–7 — the
+// skipped bands interpolated — every other band as the fixture. A
+// second move back to band 4 at mid-height (0) re-paints 4–7 from the
+// last sample; the release commits that array once more and opens no
+// editor.
+it('a drag from band 2 to band 7 paints the interpolated ramp live; release commits, no editor', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const targets = strip(panel, 'iebt')
+  mockColumns(targets)
+  pressBand(bands(targets)[1] as HTMLElement, 15, 75)
+  expect(sentEdits(socket)).toEqual([])
+
+  dragTo(targets, 65, 25)
+  const ramp = [0, -240, -144, -48, 48, 144, 240, ...Array<number>(13).fill(0)]
+  expect(sentEdits(socket)).toEqual([
+    {
+      cmd: 'edit_profile',
+      request_id: expect.any(String) as string,
+      id: 'music',
+      params: { iebt: ramp },
+    },
+  ])
+  expect(barVars(bands(targets)[6] as HTMLElement).value).toBe(15)
+
+  dragTo(targets, 35, 50)
+  const back = [0, -240, -144, 0, 80, 160, 240, ...Array<number>(13).fill(0)]
+  expect(sentParams(socket)).toEqual([{ iebt: ramp }, { iebt: back }])
+
+  releaseAt(targets, 35, 50)
+  expect(sentParams(socket)).toEqual([
+    { iebt: ramp },
+    { iebt: back },
+    { iebt: back },
+  ])
+  expect(editingBands(targets)).toEqual([])
+  expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement)
+})
+
+// Behavior 11 (#91): a gesture that starts on an editor input is the
+// box's own (its Scrub) — the strip never paints from it, however far
+// it travels across the laid-out bands; the release opens no other
+// editor.
+it('a press that starts on an editor input never paints, however far it moves', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const targets = strip(panel, 'iebt')
+  mockColumns(targets)
+  press(targets, 'ArrowRight')
+  press(targets, 'Enter')
+  const editor = bandInput(targets, 1)
+  fireEvent.pointerDown(editor, {
+    pointerId: 1,
+    button: 0,
+    clientX: 15,
+    clientY: 75,
+  })
+  dragTo(targets, 195, 5)
+  dragTo(targets, 5, 95)
+  releaseAt(targets, 5, 95)
+  expect(sentEdits(socket)).toEqual([])
+  expect(document.activeElement).toBe(editor)
+  expect(editingBands(targets)).toEqual([1])
+})
+
+// Behavior 12 (#91): access gates the Paint — a read-only (`vnbf`), a
+// Live (`vnbg`) and an opaque (`bndl`) strip laid out as one row take
+// a press-drag-release across every band and write nothing; the drag
+// opens no editor either.
+it('read-only, live and opaque strips ignore paint gestures', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  for (const code of ['vnbf', 'vnbg', 'bndl']) {
+    const node = strip(panel, code)
+    mockColumns(node)
+    pressBand(bands(node)[0] as HTMLElement, 5, 95)
+    dragTo(node, 55, 55)
+    dragTo(node, 195, 5)
+    releaseAt(node, 195, 5)
+    expect(editingBands(node)).toEqual([])
+  }
+  expect(sentEdits(socket)).toEqual([])
+})
+
+// Behavior 13 (#91): `aobg` paints per channel row — a drag on channel
+// row 2 (id 3, packed at 21) from band 1 at the floor to band 3 at the
+// top writes the whole 329-slot array with h₁…h₃ ramped −30 → 0 → +30
+// dB (raw −480, 0, 480) at the packed offset 22, the id slot and every
+// other gain — the first row's too — untouched.
+it("painting on an aobg row writes only that row's gain slice at the packed offset", () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const packed = packedAobg([
+    { id: 2, gains: LEFT_GAINS },
+    { id: 3, gains: RIGHT_GAINS },
+  ])
+  applySnapshot(fixtureStateWithParams({ aocc: [2], aonb: [20], aobg: packed }))
+  const second = rows(panel, 'aobg')[1]?.querySelector<HTMLElement>(
+    '.adv-bands__strip',
+  )
+  if (!second) throw new Error('no second row')
+  mockColumns(second)
+  pressBand(bands(second)[0] as HTMLElement, 5, 100)
+  dragTo(second, 25, 0)
+  const expected = [...packed]
+  expected[22] = -480
+  expected[23] = 0
+  expected[24] = 480
+  expect(sentParams(socket)).toEqual([{ aobg: expected }])
+  releaseAt(second, 25, 0)
+  expect(sentParams(socket)).toEqual([{ aobg: expected }, { aobg: expected }])
+  expect(meta(panel, 'aobg')?.textContent).toBe('ch 3 · band 3 · 30 dB')
+})
+
+// Behavior 14 (#91): the Paint needs one row — with band 1 and band N
+// on different rows (a wrapping skin) a drag across `iebt` writes
+// nothing and, being a drag, opens no editor.
+it('a drag over a wrapped strip — band 1 and band N tops differ — writes nothing', () => {
+  const panel = renderOpen()
+  const socket = connect()
+  const targets = strip(panel, 'iebt')
+  mockColumns(targets, true)
+  pressBand(bands(targets)[1] as HTMLElement, 15, 75)
+  dragTo(targets, 65, 25)
+  dragTo(targets, 105, 5)
+  releaseAt(targets, 105, 5)
+  expect(sentEdits(socket)).toEqual([])
+  expect(editingBands(targets)).toEqual([])
 })

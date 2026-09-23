@@ -447,3 +447,55 @@ test('the band editor of band 1 and of band 20 opens above its band, inside the 
   await expect(first).toBeFocused()
   await expect(strip.locator('.adv-bands__band--editing')).toHaveCount(1)
 })
+
+// — Band editing: drag-to-paint (#91 part 2, behavior 15) —
+
+// Geometry truth for the Paint: a fast 4-event drag — press on band 1,
+// a move to mid-strip, a move to band 20, release — across `gebg` at a quarter
+// of the strip's height leaves no band at its pre-drag value (Music
+// ships a flat 0 dB): every band the pointer skipped is interpolated
+// to the same height, the editor never opens, and the release's commit
+// reaches the peer page's next snapshot.
+test('a fast 4-event drag across gebg leaves no band at its pre-drag value', async ({
+  page,
+  context,
+}) => {
+  await openAdvanced(page)
+  const peer = await context.newPage()
+  await openAdvanced(peer)
+  const name = 'Graphic Equalizer Band Gains'
+  const strip = page.getByRole('group', { name })
+  await strip.scrollIntoViewIfNeeded()
+  const values = (group: typeof strip) =>
+    group
+      .locator('.adv-bands__bar')
+      .evaluateAll((bars) =>
+        bars.map((bar) =>
+          (bar as HTMLElement).style.getPropertyValue('--value'),
+        ),
+      )
+  const before = await values(strip)
+  expect(before).toHaveLength(20)
+  expect(new Set(before)).toEqual(new Set(['0']))
+
+  const bands = strip.locator('.adv-bands__band')
+  const [first, last] = await Promise.all([
+    bands.first().boundingBox(),
+    bands.last().boundingBox(),
+  ])
+  if (!first || !last) throw new Error('bands not laid out')
+  const y = first.y + first.height / 4
+  await page.mouse.move(first.x + first.width / 2, y)
+  await page.mouse.down()
+  await page.mouse.move(first.x + (last.x - first.x) / 2, y)
+  await page.mouse.move(last.x + last.width / 2, y)
+  await page.mouse.up()
+
+  const after = await values(strip)
+  expect(after.some((value, band) => value === before[band])).toBe(false)
+  expect(new Set(after).size).toBe(1) // one height, every band
+  await expect(strip.locator('.adv-bands__band--editing')).toHaveCount(0)
+  await expect
+    .poll(() => values(peer.getByRole('group', { name })))
+    .toEqual(after)
+})
