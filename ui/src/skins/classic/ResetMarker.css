@@ -5,7 +5,7 @@
    hit-testable — the slot stays, nothing shifts. Hover rules sit under
    focus weight (`:where()`): a focused marker always wins, ringed. */
 
-:is(.adv-card__reset, .adv-cat__reset) {
+:is(.adv-card__reset, .adv-cat__reset, .picker__reset, .master-control__reset) {
   border: 1px solid transparent;
   border-radius: 50%;
   cursor: pointer;
@@ -15,12 +15,19 @@
     opacity var(--morph-ms) ease;
 }
 
-.adv-card__reset {
+.adv-card__reset,
+.picker__reset,
+.master-control__reset {
   position: relative;
 }
 
 /* The dot. */
-:is(.adv-card__reset, .adv-cat__reset)::before {
+:is(
+  .adv-card__reset,
+  .adv-cat__reset,
+  .picker__reset,
+  .master-control__reset
+)::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -34,7 +41,12 @@
 }
 
 /* The glyph. */
-:is(.adv-card__reset, .adv-cat__reset)::after {
+:is(
+  .adv-card__reset,
+  .adv-cat__reset,
+  .picker__reset,
+  .master-control__reset
+)::after {
   content: '↺';
   position: absolute;
   inset: 0;
@@ -54,35 +66,66 @@
    was noisy), or the marker's own focus. */
 :where(.adv-card:hover) .adv-card__reset::before,
 :where(.adv-cat__head:hover) .adv-cat__reset::before,
-:is(.adv-card__reset, .adv-cat__reset):focus-visible::before {
+:where(.picker:hover) .picker__reset::before,
+:where(.master-control:hover) .master-control__reset::before,
+:is(
+    .adv-card__reset,
+    .adv-cat__reset,
+    .picker__reset,
+    .master-control__reset
+  ):focus-visible::before {
   transform: translate(-50%, -50%) scale(0);
 }
 
 :where(.adv-card:hover) .adv-card__reset::after,
 :where(.adv-cat__head:hover) .adv-cat__reset::after,
-:is(.adv-card__reset, .adv-cat__reset):focus-visible::after {
+:where(.picker:hover) .picker__reset::after,
+:where(.master-control:hover) .master-control__reset::after,
+:is(
+    .adv-card__reset,
+    .adv-cat__reset,
+    .picker__reset,
+    .master-control__reset
+  ):focus-visible::after {
   opacity: 1;
   transform: scale(1);
 }
 
 :where(.adv-card:hover) .adv-card__reset,
-:where(.adv-cat__head:hover) .adv-cat__reset {
+:where(.adv-cat__head:hover) .adv-cat__reset,
+:where(.picker:hover) .picker__reset,
+:where(.master-control:hover) .master-control__reset {
   border-color: var(--hover-line);
 }
 
-:is(.adv-card__reset, .adv-cat__reset):where(:hover) {
+:is(
+  .adv-card__reset,
+  .adv-cat__reset,
+  .picker__reset,
+  .master-control__reset
+):where(:hover) {
   border-color: var(--color-accent);
 }
 
 /* Focus outranks hover: the ring, never the hover border alone. */
-:is(.adv-card__reset, .adv-cat__reset):focus-visible {
+:is(
+  .adv-card__reset,
+  .adv-cat__reset,
+  .picker__reset,
+  .master-control__reset
+):focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 /* Clean: the marker vanishes; the slot stays, rows never shift. */
-:is(.adv-card__reset, .adv-cat__reset):disabled {
+:is(
+  .adv-card__reset,
+  .adv-cat__reset,
+  .picker__reset,
+  .master-control__reset
+):disabled {
   opacity: 0;
   pointer-events: none;
 }

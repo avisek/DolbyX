@@ -2,6 +2,7 @@
 import { render } from 'solid-js/web'
 import './skins/classic/index.css'
 import App from './App'
+import { installProtoSkin } from './proto/skin'
 import { startWs } from './store/ws'
 
 // Devs visiting :5173 directly get no daemon-injected bootstrap — bounce
@@ -9,13 +10,16 @@ import { startWs } from './store/ws'
 // host: a phone tapping Vite's printed network URL must not land on
 // its own localhost (issue #72).
 if (!window.__BOOTSTRAP__) {
-  location.replace(`http://${location.hostname}:9876${location.pathname}`)
+  location.replace(
+    `http://${location.hostname}:9876${location.pathname}${location.search}`,
+  )
   throw new Error('Bootstrap missing — redirecting to daemon')
 }
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root element missing')
 
+installProtoSkin()
 render(() => <App />, root)
 
 // First paint is already fully populated from the bootstrap — the WS

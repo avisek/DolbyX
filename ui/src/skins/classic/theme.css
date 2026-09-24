@@ -21,6 +21,27 @@
 
   /* One height for input / toggle / tristate / slider */
   --control-h: 1.7rem;
+  /* The header power switch, where a skin scopes --control-h up */
+  --power-h: 2.1rem;
+  /* The Reset marker's square (cards, headers, pickers, master rows) */
+  --reset-w: 1.4rem;
+
+  /* Type scale */
+  --text-xs: 0.68rem;
+  --text-sm: 0.8rem;
+  --text-md: 0.95rem;
+  --text-lg: 1.1rem;
+  --text-title: 1.6rem;
+  --tracking-wide: 0.2em;
+  --tracking: 0.04em;
+
+  /* Page column + layout minima */
+  --page-w: 64rem;
+  --vis-min: 24rem; /* visualizer column, side-by-side layouts */
+  --wrap-min: 14rem; /* a wrapping row's grow-trick basis */
+  --hero-min: 18rem; /* master hero card */
+  --qr-w: 8rem;
+  --label-w: 5.5rem; /* picker row label */
 
   /* Radii: controls / cards */
   --radius-1: 0.35rem;
@@ -37,6 +58,18 @@
 
   /* Reset marker morph (dot ↔ ↺) */
   --morph-ms: 180ms;
+  /* Hover chrome fade */
+  --hover-ms: 120ms;
+
+  /* Power off: everything under the header dims */
+  --off-opacity: 0.45;
+  /* Disabled action buttons */
+  --disabled-opacity: 0.3;
+  /* Surface lift on hover (cards, rows) */
+  --hover-bg: rgb(255 255 255 / 3%);
+  /* Tinted surfaces (badge pill, focused card) */
+  --tint: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --focus-tint: color-mix(in srgb, var(--color-accent) 7%, transparent);
 
   /* Focus ring: always outranks hover chrome; hover line sits under it */
   --focus-ring: 1px solid var(--color-accent);

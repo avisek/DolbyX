@@ -31,7 +31,7 @@
     #001322 88%,
     #000 100%
   );
-  inline-size: min(36rem, 90vw);
+  inline-size: 100%;
   aspect-ratio: 885 / 390; /* the background asset's own proportions */
   /* Vis idle descent duration — HITL-eyeballed Classic constant. */
   --idle-descent: 700ms;
@@ -146,12 +146,8 @@
   );
 }
 
-/* Power off (`app--off`, the whole-UI marker): bricks off + greyed,
-   like the original's disabled surface; chrome and background stay. */
-.app--off .visualizer {
-  filter: grayscale(100%) brightness(60%);
-}
-
+/* Power off (`app--off`, the whole-UI marker): bricks off; the greying
+   is the skin's whole-screen off rule. Chrome and background stay. */
 .app--off .vis-column__fill,
 .app--off .vis-column__pip {
   visibility: hidden;

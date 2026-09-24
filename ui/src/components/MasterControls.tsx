@@ -1,3 +1,4 @@
+// PROTOTYPE — throwaway, do not review
 import { For, type Component } from 'solid-js'
 import {
   onValue,
@@ -5,17 +6,19 @@ import {
   unitLabel,
   type ParameterDef,
 } from '../lib/parameters'
-import { displayToRaw, rawToDisplay } from '../lib/units'
-import { selectedProfile, state } from '../store/state'
-import { editProfile, editProfileLive } from '../store/ws'
+import { axisOf, displayValue, rawValue } from '../lib/scalar'
+import { paramsDiverge, selectedProfile, state } from '../store/state'
+import { editProfile, editProfileLive, resetProfile } from '../store/ws'
+import NumberInput from './NumberInput'
+import Slider from './Slider'
+import Toggle from './Toggle'
 
 /**
- * The three signature DDP controls — a curated UI overlay pairing an
+ * The three signature DDP controls — a curated overlay pairing an
  * enable param with an amount param (CONTEXT.md "Master control"), in
- * the original's order. Nothing beyond the 4-CCs is hardcoded: each
- * half resolves its kind, range, and `frac_bits` from the bootstrap
- * table. The same params also appear in the Advanced panel (Slice 20)
- * under their feature categories.
+ * the original's order. Each half resolves kind, range, `frac_bits`
+ * from the bootstrap table; the same params sit in the Advanced panel
+ * on the same shared controls. Profile path only.
  */
 const MASTER_CONTROLS = [
   { label: 'Surround Virtualizer', enable: 'vdhe', amount: 'dhsb' },
@@ -23,96 +26,120 @@ const MASTER_CONTROLS = [
   { label: 'Volume Leveller', enable: 'dvle', amount: 'dvla' },
 ] as const
 
-/** The active profile's raw value for `def` (scalar head slot). */
-function rawValue(def: ParameterDef): number {
+/** The active profile's raw head value for `def`. */
+function head(def: ParameterDef): number {
   return selectedProfile()?.params[def.name]?.[0] ?? def.default[0] ?? 0
 }
 
-/**
- * The bespoke enable switch of one master control: "on" writes the
- * kind's on-value (a tristate's declared `on` — `vdhe` writes 2), "off"
- * writes 0, each a 1-entry `edit_profile` applied local-first on ack.
- */
-const EnableToggle: Component<{ label: string; def: ParameterDef }> = (
-  props,
-) => (
-  <button
-    type="button"
-    class="master-control__toggle"
-    role="switch"
-    aria-checked={rawValue(props.def) !== 0}
-    aria-label={`${props.label} enable`}
-    onClick={() => {
-      editProfile(state.selected_profile, {
-        [props.def.name]: [
-          rawValue(props.def) === 0 ? onValue(props.def.kind) : 0,
-        ],
-      })
-    }}
-  >
-    <span class="master-control__track" aria-hidden="true">
-      <span class="master-control__thumb" />
-    </span>
-  </button>
-)
+/** Distinct from the panel's `adv-<4-CC>`, which renders the same params. */
+const controlId = (def: ParameterDef): string => `master-${def.name}`
 
 /**
- * The bespoke amount slider of one master control, working in display
- * units (`raw / 2^frac_bits`; the wire stays engine-native i16). Every
- * drag step is its own 1-entry `edit_profile` batch, applied
- * optimistically.
+ * One master control: a `label` for its SWITCH — clicking the title
+ * toggles it — with the Reset marker (#92) and the control region:
+ * switch, numeric box, Slider. The box, Slider, and marker keep their
+ * own click (the native guard). Skin reads `master-control--diverged`.
  */
-const AmountSlider: Component<{ label: string; def: ParameterDef }> = (
-  props,
-) => {
-  const display = () => rawToDisplay(rawValue(props.def), props.def.frac_bits)
-  // ≤ 2 decimals, float noise trimmed — a readout, not the value.
-  const readout = () => {
-    const text = String(Number(display().toFixed(2)))
-    const unit = unitLabel(props.def.kind)
-    return unit === '' ? text : `${text} ${unit}`
+const MasterControl: Component<{
+  label: string
+  enable: ParameterDef
+  amount: ParameterDef
+}> = (props) => {
+  // eslint-disable-next-line solid/reactivity
+  const enable = props.enable
+  // eslint-disable-next-line solid/reactivity
+  const amount = props.amount
+  const pair = [enable.name, amount.name]
+  const profileId = () => state.selected_profile
+
+  const diverged = () => {
+    const profile = selectedProfile()
+    return profile !== undefined && paramsDiverge(profile, pair)
   }
+
+  const onToggle = (on: boolean) => {
+    editProfile(profileId(), { [enable.name]: [on ? onValue(enable.kind) : 0] })
+  }
+
+  const value = () => displayValue(amount, head(amount))
+  const axis = axisOf(amount)
+  const unit = unitLabel(amount.kind)
+  const onLive = (next: number) => {
+    editProfileLive(profileId(), { [amount.name]: [rawValue(amount, next)] })
+  }
+  const onCommit = (next: number) => {
+    const raw = rawValue(amount, next)
+    if (raw !== head(amount)) editProfile(profileId(), { [amount.name]: [raw] })
+  }
+
+  const resetName = () => `Reset ${props.label}`
   return (
-    <div class="master-control__amount">
-      <input
-        type="range"
-        class="master-control__slider"
-        aria-label={`${props.label} amount`}
-        min={rawToDisplay(props.def.min, props.def.frac_bits)}
-        max={rawToDisplay(props.def.max, props.def.frac_bits)}
-        step={rawToDisplay(1, props.def.frac_bits)}
-        value={display()}
-        onInput={(event) => {
-          editProfileLive(state.selected_profile, {
-            [props.def.name]: [
-              displayToRaw(
-                event.currentTarget.valueAsNumber,
-                props.def.frac_bits,
-              ),
-            ],
-          })
+    <label
+      class="master-control"
+      classList={{ 'master-control--diverged': diverged() }}
+      for={controlId(enable)}
+      on:click={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest(
+            '.adv-input, .adv-slider, .master-control__reset',
+          )
+        ) {
+          event.preventDefault()
+        }
+      }}
+    >
+      <span class="master-control__label">{props.label}</span>
+      <button
+        type="button"
+        class="master-control__reset"
+        disabled={!diverged()}
+        aria-label={resetName()}
+        title={resetName()}
+        onClick={() => {
+          resetProfile(profileId(), pair)
         }}
       />
-      <span class="master-control__value">{readout()}</span>
-    </div>
+      <div class="master-control__control">
+        <Toggle
+          id={controlId(enable)}
+          name={`${props.label} enable`}
+          checked={head(enable) !== 0}
+          onToggle={onToggle}
+        />
+        <NumberInput
+          id={controlId(amount)}
+          name={`${props.label} amount`}
+          value={value}
+          axis={axis}
+          unit={unit}
+          scrub
+          onLive={onLive}
+          onCommit={onCommit}
+        />
+        <Slider
+          name={`${props.label} amount`}
+          value={value}
+          axis={axis}
+          unit={unit}
+          onLive={onLive}
+          onCommit={onCommit}
+        />
+      </div>
+    </label>
   )
 }
 
-/** The main screen's three master controls (Slice 14, #22). */
+/** The main screen's three master controls (Slice 14, #22; #93). */
 const MasterControls: Component = () => (
   <section class="master-controls" aria-label="Master controls">
     <For each={MASTER_CONTROLS}>
       {(control) => (
-        <div class="master-control">
-          <div class="master-control__head">
-            <span class="master-control__label">{control.label}</span>
-            <EnableToggle
-              label={control.label}
-              def={paramDef(control.enable)}
-            />
-          </div>
-          <AmountSlider label={control.label} def={paramDef(control.amount)} />
-        </div>
+        <MasterControl
+          label={control.label}
+          enable={paramDef(control.enable)}
+          amount={paramDef(control.amount)}
+        />
       )}
     </For>
   </section>

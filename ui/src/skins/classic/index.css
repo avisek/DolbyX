@@ -3,12 +3,6 @@
    TSX imports once produced) — swapping this file swaps the skin. */
 @import './theme.css';
 @import './base.css';
-@import './ConnectionBadge.css';
-@import './ActionRow.css';
-@import './RenameInput.css';
-@import './EqPresetPicker.css';
-@import './LanToggle.css';
-@import './MasterControls.css';
 @import './AdvancedPanel.css';
 @import './CategorySection.css';
 @import './ParamCard.css';
@@ -18,8 +12,5 @@
 @import './NumberInput.css';
 @import './Slider.css';
 @import './BandArray.css';
-@import './PowerToggle.css';
-@import './ProfileTabs.css';
 @import './EqCurve.css';
 @import './Visualizer.css';
-@import './App.css';

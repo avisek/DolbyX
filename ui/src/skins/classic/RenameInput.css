@@ -1,8 +1,0 @@
-.rename-input {
-  border: 0;
-  border-radius: 0.375rem;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font: inherit;
-  outline: 1px solid var(--color-accent);
-}
