@@ -415,3 +415,55 @@ _Avoid_: brush (Brush buffer is the GEQ smoother's), draw.
 **Band editor**:
 The popover field opened on one band by click, Enter, or a digit.
 _Avoid_: inline input, cell.
+
+### Main screen
+
+**Main screen**:
+Everything above the Advanced panel — header, LAN Access row, the two
+Pickers, the visualizer, the Master controls — laid into the Shell by
+the skin.
+_Avoid_: dashboard, home, basic view.
+
+**Shell**:
+The page column the skin lays regions into — fluid to any viewport
+without viewport units or width media queries (container queries,
+wrapping, `100%` height chains).
+_Avoid_: layout (the skin's), page, frame.
+
+**Row**:
+A main-screen surface that is the `label` of its primary control — the
+LAN Access row for its switch, a Master control for its switch — so the
+whole surface is the hit area; clicks landing in a nested control keep
+their own focus (the card rule).
+_Avoid_: card (the Advanced panel's), tile, bar.
+
+**Picker**:
+The one shared item chooser behind the profile and EQ preset rows: a
+label, a radio group of pills (arrow keys move, ack-then-apply), the
+rename field inside the checked pill, and the four Picker actions.
+_Avoid_: tabs, tablist, segmented control, preset bar.
+
+**Picker action**:
+One of Add · Rename · Delete · Reset on a Picker — a plain button named
+by `aria-label`, glyph supplied by the skin, `disabled` when it means
+nothing (Reset while clean, Rename/Delete on a Factory item).
+_Avoid_: action row (the removed component), toolbar, reset marker (a
+Picker's Reset is a plain button, not a marker).
+
+**Popover**:
+Chrome whose open state is component state — a modifier plus focus
+management (opening focuses it; Esc, Enter, or focus leaving closes it
+and returns focus) — while placement and motion are the skin's. The QR
+code is one.
+_Avoid_: modal, dialog, tooltip, overlay (taken — EQ preset).
+
+**Icon token**:
+A Token holding an SVG mask the skin paints onto an otherwise empty,
+`aria-label`-named button; components never carry glyphs.
+_Avoid_: icon font, inline SVG (the QR code is data, not an icon).
+
+**Off-look**:
+The whole-UI dimming under the root `app--off` modifier — one Shell
+rule, every control still operable; the header stays undimmed so power
+reads at full strength.
+_Avoid_: disabled state, bypass look.
