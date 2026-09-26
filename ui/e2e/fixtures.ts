@@ -158,6 +158,25 @@ export async function openAt(page: Page, width: number): Promise<void> {
 
 export const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 
+/** Rendered edges of one element — a DOMRect won't cross the wire. */
+export const box = (page: Page, selector: string) =>
+  page.locator(selector).evaluate((el) => {
+    const { top, right, bottom, left, width, height } =
+      el.getBoundingClientRect()
+    return { top, right, bottom, left, width, height }
+  })
+
+/** A token's colour as the browser resolves it (a `color-mix` won't compare as text). */
+export const tokenColor = (page: Page, token: string) =>
+  page.evaluate((name) => {
+    const probe = document.createElement('div')
+    probe.style.background = `var(${name})`
+    document.body.append(probe)
+    const color = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return color
+  }, token)
+
 /** The computed background of `selector`'s `::before` — a hover / focus surface. */
 export const pseudoBackground = (page: Page, selector: string) =>
   page

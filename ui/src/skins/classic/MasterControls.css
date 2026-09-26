@@ -1,82 +1,88 @@
+/* The Master controls (#93): one surface card, three Rows on shared
+   tracks — title | marker | switch | box | slider — the panel's subgrid
+   idiom, beside the visualizer when the Shell has two tracks. Below the
+   one-line width each Row is its own two-line grid: title · marker ·
+   switch, then the amount region (box + slider) stretched to the Row's
+   edge. Hover chrome on the switch, box and thumb is the widgets' own
+   `label:hover` rule. The Reset marker's morph lives in ResetMarker.css. */
+
 .master-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-columns: auto var(--reset-w) auto auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  container-type: inline-size;
 }
 
 .master-control {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
-  border: 1px solid var(--color-surface);
-  border-radius: 0.5rem;
-  background: var(--color-surface);
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: default;
+  transition: background var(--hover-ms) ease;
 }
 
-.master-control__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* Hover under focus weight: a Row holding focus always wins. */
+:where(.master-control:hover) {
+  background: var(--hover-bg);
+}
+
+.master-control:has(:focus-visible) {
+  background: var(--focus-tint);
 }
 
 .master-control__label {
+  min-width: 0;
   color: var(--color-text);
-  font-size: 1rem;
+  font-size: var(--text-sm);
+  user-select: none;
 }
 
-.master-control__toggle {
-  display: inline-flex;
+/* The Reset marker's slot. */
+.master-control__reset {
+  width: var(--reset-w);
+  height: var(--reset-w);
   padding: 0;
-  border: none;
   background: none;
-  cursor: pointer;
 }
 
-.master-control__track {
-  display: inline-flex;
-  align-items: center;
-  width: 2.25rem;
-  height: 1.25rem;
-  padding: 0.1875rem;
-  border-radius: 0.625rem;
-  background: var(--color-bg);
-  transition: background 0.15s ease;
+/* Wide: the amount region carries no state and clips nothing, so its
+   members lay out on the Row's own tracks — the one wrapper #93 allows
+   `contents` on (ADR-0011 otherwise forbids it). */
+.master-control__control {
+  display: contents;
 }
 
-.master-control__thumb {
-  width: 0.875rem;
-  height: 0.875rem;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  transition:
-    transform 0.15s ease,
-    background 0.15s ease;
-}
+/* Below the one-line width (a literal: size queries take no tokens):
+   each Row is its own grid — line 1 title · marker · switch, line 2
+   the amount region as a flex line the slider fills to the right
+   edge. */
+@container (inline-size < 28rem) {
+  .master-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.master-control__toggle[aria-checked='true'] .master-control__track {
-  background: var(--color-accent);
-}
+  /* No subgrid to inherit the tracks' gutter from: the Row's own. */
+  .master-control {
+    grid-template-columns: minmax(0, 1fr) var(--reset-w) auto;
+    gap: var(--space-1) var(--space-2);
+  }
 
-.master-control__toggle[aria-checked='true'] .master-control__thumb {
-  transform: translateX(1rem);
-  background: var(--color-bg);
-}
+  .master-control__control {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
 
-.master-control__amount {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.master-control__slider {
-  flex: 1;
-  accent-color: var(--color-accent);
-}
-
-.master-control__value {
-  min-width: 3.5rem;
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
-  text-align: right;
+  .master-control__control .adv-slider {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
