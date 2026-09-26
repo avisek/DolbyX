@@ -135,74 +135,72 @@ const LanToggle: Component = () => {
       }}
     >
       <span class="lan-access__text">LAN Access</span>
-      <span class="lan-access__cluster">
-        <Toggle
-          id="lan"
-          name="LAN access"
-          checked={state.lan_access}
-          onToggle={setLanAccess}
-        />
-        <Show when={state.lan_url}>
-          {(url) => (
-            <>
-              <span class="lan-access__tools">
-                <input
-                  type="text"
-                  class="lan-access__url"
-                  aria-label="LAN URL"
-                  readonly
-                  value={url()}
-                />
-                <button
-                  type="button"
-                  class="lan-access__copy"
-                  aria-label="Copy URL"
-                  title="Copy URL"
-                  onClick={() => {
-                    copy(url())
-                  }}
-                />
-                <button
-                  ref={qrButton}
-                  type="button"
-                  class="lan-access__qr-toggle"
-                  aria-pressed={qr()}
-                  aria-label="Show QR code"
-                  title="Show QR code"
-                  onClick={() => {
-                    if (qr()) closeQr(false)
-                    else openQr()
-                  }}
-                />
-              </span>
-              <LanQr
-                url={url()}
-                ref={(element) => {
-                  figure = element
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape' || event.key === 'Enter') {
-                    event.preventDefault()
-                    closeQr(true)
-                  }
-                }}
-                onFocusOut={(event) => {
-                  const next = event.relatedTarget
-                  // Focus moving within the popover, or onto its own
-                  // button (whose click then toggles), keeps it open.
-                  if (
-                    next instanceof Node &&
-                    (figure?.contains(next) === true || next === qrButton)
-                  ) {
-                    return
-                  }
-                  closeQr(false)
+      <Toggle
+        id="lan"
+        name="LAN access"
+        checked={state.lan_access}
+        onToggle={setLanAccess}
+      />
+      <Show when={state.lan_url}>
+        {(url) => (
+          <>
+            <span class="lan-access__tools">
+              <input
+                type="text"
+                class="lan-access__url"
+                aria-label="LAN URL"
+                readonly
+                value={url()}
+              />
+              <button
+                type="button"
+                class="lan-access__copy"
+                aria-label="Copy URL"
+                title="Copy URL"
+                onClick={() => {
+                  copy(url())
                 }}
               />
-            </>
-          )}
-        </Show>
-      </span>
+              <button
+                ref={qrButton}
+                type="button"
+                class="lan-access__qr-toggle"
+                aria-pressed={qr()}
+                aria-label="Show QR code"
+                title="Show QR code"
+                onClick={() => {
+                  if (qr()) closeQr(false)
+                  else openQr()
+                }}
+              />
+            </span>
+            <LanQr
+              url={url()}
+              ref={(element) => {
+                figure = element
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' || event.key === 'Enter') {
+                  event.preventDefault()
+                  closeQr(true)
+                }
+              }}
+              onFocusOut={(event) => {
+                const next = event.relatedTarget
+                // Focus moving within the popover, or onto its own
+                // button (whose click then toggles), keeps it open.
+                if (
+                  next instanceof Node &&
+                  (figure?.contains(next) === true || next === qrButton)
+                ) {
+                  return
+                }
+                closeQr(false)
+              }}
+            />
+          </>
+        )}
+      </Show>
     </label>
   )
 }

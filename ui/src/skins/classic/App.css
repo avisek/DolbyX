@@ -9,7 +9,7 @@
     auto-fit,
     minmax(min(100%, var(--vis-min)), 1fr)
   );
-  gap: var(--space-4);
+  gap: var(--space-3);
   align-items: start;
   inline-size: min(100%, var(--page-w));
   margin-inline: auto;

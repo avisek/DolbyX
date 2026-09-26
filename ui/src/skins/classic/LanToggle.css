@@ -1,6 +1,7 @@
 /* The LAN access row: a surface card in the panel row language — text
-   left, a right-aligned cluster of switch · URL · copy · QR; the cluster
-   drops under the text when narrow, still right-aligned. The row is the
+   left, switch · URL · copy · QR right; text, switch and tools are
+   direct flex items, so when the row is narrow only the tools drop to
+   a second line (right-aligned) — the switch stays beside the text. The row is the
    switch's label, so it hovers and focus-tints like a card. The tools
    (URL, copy, QR) fold in and out with the switch (`--on`): inline
    size + opacity, then out of the tab order (delayed visibility). The
@@ -44,13 +45,6 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   user-select: none;
-}
-
-.lan-access__cluster {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
 }
 
 /* The fold: `auto` inline size interpolates (scoped keyword
