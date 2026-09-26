@@ -9,13 +9,12 @@ import { expect, test } from './fixtures'
  * Behavior 4's fixture: computed properties of the app root, the power
  * toggle, and a master-control slider, captured on `main` before the
  * move — skin-owned values only, nothing viewport-derived. Any drift
- * here means a stylesheet was lost, reordered, or edited.
+ * here means a stylesheet was lost, reordered, or edited. `.app` was
+ * re-pinned by the Shell (#116): `place-content` / `gap` gone.
  */
 const BASELINE = {
   '.app': {
     display: 'grid',
-    'place-content': 'center',
-    gap: '32px',
     color: 'rgb(232, 238, 245)',
     'font-family': 'system-ui, "Segoe UI", Roboto, sans-serif',
   },

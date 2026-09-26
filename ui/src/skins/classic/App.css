@@ -1,8 +1,34 @@
+/* The Shell (main screen): a centred column on a two-track grid —
+   every region spans it except the visualizer and the master controls,
+   which sit side by side when both fit (`--vis-min` each) and stack
+   otherwise. Fluid at every width with no viewport unit: the column is
+   the `app` query container the regions reflow against. */
+
 .app {
   display: grid;
-  place-content: center;
-  gap: 2rem;
-  min-height: 100vh;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, var(--vis-min)), 1fr)
+  );
+  gap: var(--space-3);
+  align-items: start;
+  inline-size: min(100%, var(--page-w));
+  margin-inline: auto;
+  /* Inline gutters ≥ --space-3, the bleed width: a header's hover fill
+     reaches into the gutter and nothing overflows. */
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  container: app / inline-size;
+}
+
+.app > :not(.visualizer, .master-controls) {
+  grid-column: 1 / -1;
+}
+
+/* Off-look: everything under the header dims; controls stay operable.
+   Opacity, never `filter` — a filter would become a popover's
+   containing block (ADR-0011, second addendum). */
+.app--off > :not(.app__header) {
+  opacity: var(--off-opacity);
 }
 
 .app__header {

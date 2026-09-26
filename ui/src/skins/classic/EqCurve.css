@@ -155,6 +155,6 @@
   stroke-linejoin: round;
 }
 
-/* Power off (`app--off`): the editor chrome greys with the whole
-   field (the ancestor filter covers it); `visualizer--off` leaves the
-   editor alone — it renders resolved state and stays editable. */
+/* Power off: the editor dims with the whole field under the Shell's
+   Off-look rule (App.css); `visualizer--off` leaves the editor
+   alone — it renders resolved state and stays editable. */

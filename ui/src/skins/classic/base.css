@@ -7,8 +7,18 @@
   margin: 0;
 }
 
+/* The Shell's height chain: `100%` down from `html`, never a viewport
+   unit (ADR-0011, second addendum). */
+html,
 body {
-  min-height: 100vh;
+  height: 100%;
+}
+
+#root {
+  min-height: 100%;
+}
+
+body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);

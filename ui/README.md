@@ -87,6 +87,13 @@ until the Classic sweep (#94); new stylesheets use tokens:
 | `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                  |
 | `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                          |
 | `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it    |
+| `--power-h` `--reset-w`                                                                                         | the header power switch; the Reset marker square  |
+| `--text-xs/sm/md/lg/title` `--tracking` `--tracking-wide`                                                       | type scale; letter-spacing                        |
+| `--page-w` `--vis-min` `--qr-w` `--label-w`                                                                     | Shell column; visualizer cell; QR; picker label   |
+| `--z-popover`                                                                                                   | the one layer above the flow                      |
+| `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions            |
+| `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)  |
+| `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks            |
 
 **Rules** (ADR-0011 + addendum):
 
@@ -107,3 +114,22 @@ until the Classic sweep (#94); new stylesheets use tokens:
   dot at rest, morph to ↺ on hover / `:focus-visible`.
 - Chromium is the target: subgrid, `:has`, anchor positioning,
   `@property`, `overflow: clip` are fair game.
+- **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`,
+  no width `@media`, no `!important` (`src/skins/audit.test.ts` pins
+  all three). `100%` height chains; wrapping and container queries
+  reflow regions (thresholds are rem literals — size queries can't
+  read tokens). The **Off-look** is one Shell rule dimming everything
+  but the header by `opacity`, never `filter`.
+- **Icons**: buttons render empty, named by `aria-label`; paint an
+  Icon token as a mask in `currentColor`:
+
+  ```css
+  .my-button::before {
+    content: '';
+    inline-size: var(--icon-size);
+    block-size: var(--icon-size);
+    background-color: currentColor;
+    mask-image: var(--icon-copy);
+    mask-size: contain;
+  }
+  ```
