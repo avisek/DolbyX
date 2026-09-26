@@ -5,7 +5,8 @@ import type { Component } from 'solid-js'
  * flips it natively and the skin paints it via `:checked` (ADR-0011). Commits are ack-then-apply: the click cancels the
  * native flip and hands the intended state to `onToggle`; `checked`
  * follows the store once the ack applies it. Consumed by the Advanced
- * panel and, later, the Master controls (#93) — never Advanced-private.
+ * panel, the header's power Row (#117) and, later, the Master controls
+ * (#93) — never Advanced-private.
  */
 const Toggle: Component<{
   id: string

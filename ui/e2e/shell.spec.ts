@@ -68,7 +68,7 @@ test('power off dims everything but the header, controls still flip', async ({
   await open(page, 1280)
   const power = page.getByRole('switch', { name: 'Power' })
   await power.click()
-  await expect(power).toHaveAttribute('aria-checked', 'false')
+  await expect(power).not.toBeChecked()
 
   const opacities = await page.evaluate(() => {
     // Numbers: the minified token reads `.45`, computed opacity `0.45`.

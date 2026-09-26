@@ -32,7 +32,8 @@ function renderConnected(): MockWebSocket {
   return socket
 }
 
-const powerToggle = () => screen.getByRole('switch', { name: 'Power' })
+const powerToggle = () =>
+  screen.getByRole<HTMLInputElement>('switch', { name: 'Power' })
 
 it('renders the DolbyX shell', () => {
   render(() => <App />)
@@ -48,10 +49,16 @@ it('renders the DolbyX shell', () => {
 })
 
 // Behavior 1 (#13): first paint comes fully populated from the
-// bootstrap — no WS round-trip involved.
+// bootstrap — no WS round-trip involved. Behavior 1 (#117): the power
+// switch is the shared Toggle — a native checkbox, `role=switch`,
+// `#power`, labelled "Power" — `checked` from `state.power`.
 it('paints the bootstrap power state on first render without any WS', () => {
   render(() => <App />)
-  expect(powerToggle().getAttribute('aria-checked')).toBe('true')
+  const power = powerToggle()
+  expect(power.tagName).toBe('INPUT')
+  expect(power.type).toBe('checkbox')
+  expect(power.id).toBe('power')
+  expect(power.checked).toBe(true)
   expect(MockWebSocket.instances).toHaveLength(0)
 })
 
@@ -70,15 +77,34 @@ it('sends set_power on click and applies the flip on the ack', async () => {
   ])
 
   // Not yet acked — the toggle still shows daemon truth.
-  expect(powerToggle().getAttribute('aria-checked')).toBe('true')
+  expect(powerToggle().checked).toBe(true)
 
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
   })
   await waitFor(() => {
-    expect(powerToggle().getAttribute('aria-checked')).toBe('false')
+    expect(powerToggle().checked).toBe(false)
   })
+})
+
+// Behavior 2 (#117): the power Row is a `label` for its switch — the
+// skin stretches it over the whole header — so a click landing on the
+// label (the wordmark, in a browser) forwards to the switch and sends
+// `set_power`; the flip still waits for the ack.
+it('a click on the power label forwards to the switch and sends set_power', () => {
+  const socket = renderConnected()
+
+  const row = powerToggle().closest('label')
+  expect(row?.getAttribute('for')).toBe('power')
+  row?.querySelector<HTMLElement>('.power__text')?.click()
+
+  expect(
+    socket.sentCommands().filter((frame) => frame.cmd === 'set_power'),
+  ).toEqual([
+    { cmd: 'set_power', request_id: expect.any(String) as string, on: false },
+  ])
+  expect(powerToggle().checked).toBe(true)
 })
 
 const lanToggle = () => screen.getByRole('switch', { name: 'LAN access' })
@@ -232,7 +258,7 @@ it('walks the badge through drop and recovery, reconciling state', () => {
     type: 'state',
     snapshot: fixtureState({ power: false }),
   })
-  expect(powerToggle().getAttribute('aria-checked')).toBe('false')
+  expect(powerToggle().checked).toBe(false)
   vi.useRealTimers()
 })
 
@@ -245,7 +271,7 @@ it('updates the toggle on a broadcast state event', () => {
     type: 'state',
     snapshot: fixtureState({ power: false }),
   })
-  expect(powerToggle().getAttribute('aria-checked')).toBe('false')
+  expect(powerToggle().checked).toBe(false)
 })
 
 const profileTab = (name: string) => screen.getByRole('tab', { name })
