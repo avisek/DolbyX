@@ -87,3 +87,59 @@ scale — spacing, `--control-h`, radius, access hues, fold timing, focus
 ring — that components never read. Chromium is the v2.0 target:
 subgrid, anchor positioning, `@property`, and `overflow: clip` are fair
 game.
+
+## Addendum (2026-09-26) — lessons from the main-screen prototype
+
+Fourth instance — the main screen, prototyped as one skeleton under three
+skins (branch `proto/main-screen`); the Dashboard skin became Classic.
+What held, beyond the first addendum:
+
+**A row is a `label`; the label serves both hit area and hover.** The
+LAN Access row and each Master control are `label`s for their switch;
+the power row's hit surface is the power label's stretched `::before`,
+not the header. Where a surface has no padding of its own (the header,
+the Advanced disclosure), the hover fill **bleeds**: the pseudo-element
+takes a negative inset and the Shell's gutters stay at least that wide,
+so content sits flush while the fill reaches into the gutter. Hover and
+focus tint live on the same pseudo; hover stays under `:where()`.
+
+**No layout wrappers in the skeleton.** A wrapper that groups controls
+for one skin's convenience (the LAN "cluster") forces every skin into
+that grouping — wrapping put the switch on the wrong line. Skins lay out
+direct children; a wrapper exists only when it carries state or clips
+its own fold.
+
+**Popover open state is component state.** The component publishes the
+modifier and owns focus: opening moves focus into the popover; Esc,
+Enter, or focus leaving closes it and returns focus. The skin positions
+it (anchor positioning, `--z-*` tokens for z-order) and may hide the
+closed state with `display: none` under `transition-behavior:
+allow-discrete` + `@starting-style` — the one place `display` is
+allowed, because an absolutely positioned box that is merely invisible
+still counts toward scrollable overflow. Ancestors between a popover
+and the Shell must not take `filter` or `transform` (they would become
+its containing block); the Off-look dims with `opacity` for that reason.
+
+**Timed state stays component-side.** "Copied" is a 1.5 s modifier the
+component raises and clears; the skin only decides what a copied button
+looks like. Same line as Vis idle.
+
+**Glyphs are tokens.** Buttons with icons render empty, named by
+`aria-label` and `title`; the skin paints an SVG mask token
+(`--icon-*`) with `currentColor`. Any text the skin wants to add is
+pseudo-element content, as before.
+
+**Fluid without viewport units.** No `vw`/`vh`/`svh`/`dvh` anywhere, not
+even on `body` — `100%` height chains instead — and no viewport-width
+media queries: wrapping (`flex-wrap`, `auto-fit`) first, container
+queries where a region must reflow. Container thresholds are literals
+(size queries cannot read tokens); every other length is a token.
+
+**Identity-stable rendering is keyboard accessibility.** A radio group
+re-rendered from a rebuilt array drops focus when its nodes are
+recreated; positional keying (`Index`) keeps the focused node alive
+across snapshots. Component-owned, like every keyboard rule.
+
+**Fields size to their content.** The rename field renders in flow with
+`field-sizing: content`, starting at the pill's width and growing as
+typed — no absolute overlay, no measured widths.
