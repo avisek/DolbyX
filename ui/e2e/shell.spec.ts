@@ -106,12 +106,9 @@ test('power off dims everything but the header, controls still flip', async ({
 
   // Dimmed, not disabled: a master switch flips on its ack.
   const dialog = page.getByRole('switch', { name: 'Dialog Enhancer enable' })
-  const before = await dialog.getAttribute('aria-checked')
+  const before = await dialog.isChecked()
   await dialog.click()
-  await expect(dialog).toHaveAttribute(
-    'aria-checked',
-    before === 'true' ? 'false' : 'true',
-  )
+  await expect(dialog).toBeChecked({ checked: !before })
 })
 
 // Behavior 5: hovering the Advanced disclosure header tints its pseudo,
