@@ -9,6 +9,9 @@
 import type { Page } from '@playwright/test'
 import { box, expect, openAt, pageOverflow, test } from './fixtures'
 
+/** The page-side fold sampler's slot (armFoldSampler / foldSamples). */
+type FoldWindow = Window & { __fold?: Promise<number[]> }
+
 const lanSwitch = (page: Page) =>
   page.getByRole('switch', { name: 'LAN access' })
 
@@ -36,8 +39,7 @@ async function armFoldSampler(page: Page): Promise<void> {
     const foldMs = fold.endsWith('ms')
       ? parseFloat(fold)
       : parseFloat(fold) * 1000
-    const window_ = window as Window & { __fold?: Promise<number[]> }
-    window_.__fold = new Promise<number[]>((resolve) => {
+    ;(window as FoldWindow).__fold = new Promise<number[]>((resolve) => {
       const observer = new MutationObserver(() => {
         observer.disconnect()
         const samples: number[] = []
@@ -56,9 +58,7 @@ async function armFoldSampler(page: Page): Promise<void> {
 }
 
 const foldSamples = (page: Page) =>
-  page.evaluate(
-    () => (window as Window & { __fold?: Promise<number[]> }).__fold,
-  )
+  page.evaluate(() => (window as FoldWindow).__fold)
 
 /** Waits until the tools' fold has landed — no transition still running. */
 const foldSettled = (page: Page) =>

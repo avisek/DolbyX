@@ -90,7 +90,7 @@ until the Classic sweep (#94); new stylesheets use tokens:
 | `--power-h` `--reset-w`                                                                                         | the header power switch; the Reset marker square  |
 | `--text-xs/sm/md/lg/title` `--tracking` `--tracking-wide`                                                       | type scale; letter-spacing                        |
 | `--page-w` `--vis-min` `--qr-w` `--label-w`                                                                     | Shell column; visualizer cell; QR; picker label   |
-| `--z-popover`                                                                                                   | the one layer above the flow                      |
+| `--z-popover` `--shadow-popover`                                                                                | the one layer above the flow; its lift            |
 | `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions            |
 | `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)  |
 | `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks            |

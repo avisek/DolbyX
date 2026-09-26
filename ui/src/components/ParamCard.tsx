@@ -1,4 +1,5 @@
 import { Show, type Component } from 'solid-js'
+import { cardRule } from '../lib/card_rule'
 import { paramDef } from '../lib/parameters'
 import {
   isWritable,
@@ -37,24 +38,14 @@ const ParamCard: Component<{ name: string; categoryLabel: string }> = (
       }}
       for={primaryControlId(def)}
       title={def.description}
-      // A native listener (not Solid's delegated one): the guard must
-      // have run by the time the label's activation behavior asks
-      // whether the click was cancelled.
-      on:click={(event) => {
-        // Only the card's own chrome forwards to the `for` target: a
-        // click inside a control that manages its own focus (numeric
-        // box, band strip — #87 on) keeps the focus it set. The Slider
-        // cancels its own click (#89); tristate segments are nested
-        // labels with their own radio forwarding — neither is listed.
-        // The Reset marker is interactive content — browsers skip the
-        // forward natively; listed so the rule holds everywhere.
-        if (
-          event.target instanceof Element &&
-          event.target.closest('.adv-input, .adv-bands, .adv-card__reset')
-        ) {
-          event.preventDefault()
-        }
-      }}
+      // Only the card's own chrome forwards to the `for` target: a
+      // click inside a control that manages its own focus (numeric
+      // box, band strip — #87 on) keeps the focus it set. The Slider
+      // cancels its own click (#89); tristate segments are nested
+      // labels with their own radio forwarding — neither is listed.
+      // The Reset marker is interactive content — browsers skip the
+      // forward natively; listed so the rule holds everywhere.
+      on:click={cardRule('.adv-input, .adv-bands, .adv-card__reset')}
     >
       <code class="adv-card__code">{def.name}</code>
       <span class="adv-card__label">{def.label}</span>

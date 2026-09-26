@@ -17,12 +17,15 @@
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-2);
   background-color: var(--color-surface);
+  /* The hover lift is a layer over the surface — a gradient, so the
+     card colour stays one token; the base is a gradient too, so the
+     two interpolate. */
+  background-image: linear-gradient(transparent, transparent);
   cursor: pointer;
   transition: background-image var(--hover-ms) ease;
 }
 
-/* Hover under focus weight: a Row holding focus always wins. Layered
-   over the surface, so the card colour stays a single token. */
+/* Hover under focus weight: a Row holding focus always wins. */
 :where(.lan-access:hover) {
   background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
 }
@@ -130,10 +133,13 @@
   inline-size: var(--icon-size);
   block-size: var(--icon-size);
   background-color: currentColor;
-  mask-image: var(--icon-copy);
   mask-position: center;
   mask-size: contain;
   mask-repeat: no-repeat;
+}
+
+.lan-access__copy::before {
+  mask-image: var(--icon-copy);
 }
 
 :where(.lan-access__copy:hover, .lan-access__qr-toggle:hover) {
@@ -191,7 +197,7 @@
   border: 1px solid var(--hover-line);
   border-radius: var(--radius-2);
   background: var(--color-surface);
-  box-shadow: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
+  box-shadow: var(--shadow-popover);
   cursor: default;
   opacity: 0;
   transition:

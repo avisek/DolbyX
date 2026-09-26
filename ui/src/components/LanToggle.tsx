@@ -8,6 +8,7 @@ import {
   type Component,
 } from 'solid-js'
 import { encode } from 'uqr'
+import { cardRule } from '../lib/card_rule'
 import { state } from '../store/state'
 import { setLanAccess } from '../store/ws'
 import Toggle from './Toggle'
@@ -29,38 +30,20 @@ function qrPath(data: boolean[][]): string {
 /**
  * The QR a phone scans to land on the UI (issue #71). Black on white
  * whatever the skin — scan contrast is function, not style; the
- * baked-in border is the quiet zone. A focus target (`tabindex=-1`):
- * opening moves focus here; the Row reads its keys and focus loss.
+ * baked-in border is the quiet zone.
  */
-const LanQr: Component<{
-  url: string
-  ref: (figure: HTMLElement) => void
-  onKeyDown: (event: KeyboardEvent) => void
-  onFocusOut: (event: FocusEvent) => void
-}> = (props) => {
+const LanQr: Component<{ url: string }> = (props) => {
   const qr = createMemo(() => encode(props.url, { border: 2 }))
   return (
-    <figure
-      ref={props.ref}
-      class="lan-access__qr"
-      tabindex="-1"
-      onKeyDown={(event) => {
-        props.onKeyDown(event)
-      }}
-      onFocusOut={(event) => {
-        props.onFocusOut(event)
-      }}
+    <svg
+      role="img"
+      aria-label="Scan to open DolbyX on your phone"
+      viewBox={`0 0 ${String(qr().size)} ${String(qr().size)}`}
+      shape-rendering="crispEdges"
     >
-      <svg
-        role="img"
-        aria-label="Scan to open DolbyX on your phone"
-        viewBox={`0 0 ${String(qr().size)} ${String(qr().size)}`}
-        shape-rendering="crispEdges"
-      >
-        <rect width={qr().size} height={qr().size} fill="#fff" />
-        <path d={qrPath(qr().data)} fill="#000" />
-      </svg>
-    </figure>
+      <rect width={qr().size} height={qr().size} fill="#fff" />
+      <path d={qrPath(qr().data)} fill="#000" />
+    </svg>
   )
 }
 
@@ -80,7 +63,7 @@ const LanQr: Component<{
  */
 const LanToggle: Component = () => {
   const [qr, setQr] = createSignal(false)
-  let figure: HTMLElement | undefined
+  let figure!: HTMLElement
   let qrButton!: HTMLButtonElement
   // Off folds the popover's anchor away: the popover goes with it.
   createEffect(
@@ -89,11 +72,12 @@ const LanToggle: Component = () => {
       (lanOn) => {
         if (!lanOn) setQr(false)
       },
+      { defer: true },
     ),
   )
   const openQr = () => {
     setQr(true)
-    figure?.focus()
+    figure.focus()
   }
   const closeQr = (refocus: boolean) => {
     setQr(false)
@@ -102,11 +86,15 @@ const LanToggle: Component = () => {
 
   const [copied, setCopied] = createSignal(false)
   let copiedTimer: ReturnType<typeof setTimeout> | undefined
+  let mounted = true
   onCleanup(() => {
+    mounted = false
     clearTimeout(copiedTimer)
   })
   const copy = (url: string) => {
     void navigator.clipboard.writeText(url).then(() => {
+      // The write may resolve after the Row is gone: no timer then.
+      if (!mounted) return
       setCopied(true)
       clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => setCopied(false), COPIED_MS)
@@ -121,22 +109,11 @@ const LanToggle: Component = () => {
         'lan-access--copied': copied(),
       }}
       for="lan"
-      // A native listener (not Solid's delegated one): the guard must
-      // have run by the time the label's activation behavior asks
-      // whether the click was cancelled.
-      on:click={(event) => {
-        // The URL field, the buttons and the popover keep their own
-        // click and focus (the card rule); the text and empty space
-        // forward to the switch.
-        if (
-          event.target instanceof Element &&
-          event.target.closest(
-            '.lan-access__url, .lan-access__copy, .lan-access__qr-toggle, .lan-access__qr',
-          )
-        ) {
-          event.preventDefault()
-        }
-      }}
+      // The URL field, the buttons and the popover keep their own click
+      // and focus; the text and empty space forward to the switch.
+      on:click={cardRule(
+        '.lan-access__url, .lan-access__copy, .lan-access__qr-toggle, .lan-access__qr',
+      )}
     >
       <span class="lan-access__text">LAN Access</span>
       <Toggle
@@ -178,11 +155,12 @@ const LanToggle: Component = () => {
                 }}
               />
             </span>
-            <LanQr
-              url={url()}
-              ref={(element) => {
-                figure = element
-              }}
+            {/* The Popover's focus target (`tabindex=-1`): opening
+                moves focus here, and it stays open while it holds it. */}
+            <figure
+              ref={figure}
+              class="lan-access__qr"
+              tabindex="-1"
               onKeyDown={(event) => {
                 if (event.key === 'Escape' || event.key === 'Enter') {
                   event.preventDefault()
@@ -195,13 +173,15 @@ const LanToggle: Component = () => {
                 // button (whose click then toggles), keeps it open.
                 if (
                   next instanceof Node &&
-                  (figure?.contains(next) === true || next === qrButton)
+                  (figure.contains(next) || next === qrButton)
                 ) {
                   return
                 }
                 closeQr(false)
               }}
-            />
+            >
+              <LanQr url={url()} />
+            </figure>
           </>
         )}
       </Show>

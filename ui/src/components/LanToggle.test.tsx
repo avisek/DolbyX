@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@solidjs/testing-library'
+import { cleanup, render, screen, within } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from '../test/mock-ws'
 import {
@@ -131,8 +131,10 @@ it('the QR button opens a focus-managed popover that Escape, focus loss and LAN 
   const socket = renderConnected()
   applySnapshot(fixtureState({ lan_access: true }))
   expect(
-    figure().querySelector('svg[role=img]')?.getAttribute('aria-label'),
-  ).toBe('Scan to open DolbyX on your phone')
+    within(figure()).getByRole('img', {
+      name: 'Scan to open DolbyX on your phone',
+    }),
+  ).toBeTruthy()
   expect(qrOpen()).toBe(false)
   expect(qrButton().getAttribute('aria-pressed')).toBe('false')
 
