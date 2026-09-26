@@ -4,9 +4,9 @@
  * as one rule, the Advanced header's bleed. Rendered-geometry truth
  * needs a browser (ADR-0011); jsdom sees only the var/class seam.
  */
-import type { Page } from '@playwright/test'
 import {
   bleedHits,
+  box,
   expect,
   openAt,
   pageOverflow,
@@ -21,13 +21,6 @@ const LAYOUTS = [
   { width: 700, sideBySide: false },
   { width: 1280, sideBySide: true },
 ]
-
-/** Rendered edges of one element — a DOMRect won't cross the wire. */
-const box = (page: Page, selector: string) =>
-  page.locator(selector).evaluate((el) => {
-    const { top, right, bottom, left, width } = el.getBoundingClientRect()
-    return { top, right, bottom, left, width }
-  })
 
 // Behavior 3: no horizontal overflow at any width; the visualizer's box
 // is exactly its grid cell; the two-up region stacks or shares a row.
@@ -106,12 +99,9 @@ test('power off dims everything but the header, controls still flip', async ({
 
   // Dimmed, not disabled: a master switch flips on its ack.
   const dialog = page.getByRole('switch', { name: 'Dialog Enhancer enable' })
-  const before = await dialog.getAttribute('aria-checked')
+  const before = await dialog.isChecked()
   await dialog.click()
-  await expect(dialog).toHaveAttribute(
-    'aria-checked',
-    before === 'true' ? 'false' : 'true',
-  )
+  await expect(dialog).toBeChecked({ checked: !before })
 })
 
 // Behavior 5: hovering the Advanced disclosure header tints its pseudo,

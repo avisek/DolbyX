@@ -46,14 +46,14 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
 
   // Edit: flip Dialog Enhancer off (Music ships it on).
   const dialog = page.getByRole('switch', { name: 'Dialog Enhancer enable' })
-  await expect(dialog).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog).toBeChecked()
   await dialog.click()
-  await expect(dialog).toHaveAttribute('aria-checked', 'false')
+  await expect(dialog).not.toBeChecked()
 
   // Whole-item reset: the custom falls to the shared layers — never
   // its Music birth clone — so dvla lands the table default 7, not
   // Music's 4. The name survives; nothing is left to clear.
-  const leveller = page.getByRole('slider', { name: 'Volume Leveller amount' })
+  const leveller = page.getByRole('textbox', { name: 'Volume Leveller amount' })
   await expect(leveller).toHaveValue('4')
   await reset.click()
   await expect(leveller).toHaveValue('7')
@@ -63,7 +63,7 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   // Behavior 2, live both ways on the originating tab: an edit off
   // the just-reset baseline enables Reset…
   await dialog.click()
-  await expect(dialog).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog).toBeChecked()
   await expect(reset).toBeEnabled()
 
   // …and reverting it — divergence is derived, never a kept list —
@@ -71,7 +71,7 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   // the spec correction exists for: the daemon suppresses the
   // originator's broadcasts, so only a derived memo can flip back).
   await dialog.click()
-  await expect(dialog).toHaveAttribute('aria-checked', 'false')
+  await expect(dialog).not.toBeChecked()
   await expect(reset).toBeDisabled()
 
   // Delete: the tab goes; the active profile falls to the Fallback

@@ -11,7 +11,9 @@ import { expect, test } from './fixtures'
  * move — skin-owned values only, nothing viewport-derived. Any drift
  * here means a stylesheet was lost, reordered, or edited. `.app` was
  * re-pinned by the Shell (#116): `place-content` / `gap` gone; the power
- * toggle by the header (#117): the shared switch scoped to `--power-h`.
+ * toggle by the header (#117): the shared switch scoped to `--power-h`;
+ * the master controls by their redesign (#93): one card of Rows on the
+ * shared Slider.
  */
 const BASELINE = {
   '.app': {
@@ -30,16 +32,16 @@ const BASELINE = {
     'background-color': 'rgb(0, 180, 255)',
     'border-radius': '999px',
   },
-  '.master-control': {
-    padding: '12px 20px',
-    'border-radius': '8px',
+  '.master-controls': {
+    padding: '8px',
+    'border-radius': '9.6px',
     'background-color': 'rgb(22, 34, 47)',
-    gap: '8px',
+    display: 'grid',
   },
-  '.master-control__slider': {
-    'accent-color': 'rgb(0, 180, 255)',
+  '.master-control .adv-slider': {
+    height: '27.1875px',
     'flex-grow': '1',
-    height: '16px',
+    cursor: 'pointer',
   },
 }
 
