@@ -1,0 +1,65 @@
+/* The shell (main screen): a page column on a two-track grid — every
+   row spans it except the visualizer and the master controls, which sit
+   side by side when both fit (`--vis-min` each) and stack otherwise. The
+   column is the `app` query container the pickers reflow against. */
+
+.app {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, var(--vis-min)), 1fr)
+  );
+  gap: var(--space-4);
+  align-items: start;
+  inline-size: min(100%, var(--page-w));
+  margin-inline: auto;
+  /* Inline gutter ≥ the header's bleed (--space-3): nothing overflows. */
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  container: app / inline-size;
+}
+
+.app > :not(.visualizer, .master-controls) {
+  grid-column: 1 / -1;
+}
+
+/* Power off: everything under the header dims; controls stay live.
+   Opacity only — a filter would become the QR popover's containing
+   block. */
+.app--off > :not(.app__header) {
+  opacity: var(--off-opacity);
+}
+
+/* — Header: wordmark · badge … Power · switch. No surface of its own;
+   the whole row is the power switch's hit area (PowerToggle.css
+   stretches the label's `::before` over it), so it hovers like a card.
+   The fill bleeds into the gutter by --space-3 while the content stays
+   flush with the column edge. — */
+
+.app__header {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-inline: calc(-1 * var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  transition: background var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a header holding focus always wins. */
+:where(.app__header:hover) {
+  background: var(--hover-bg);
+}
+
+.app__header:has(:focus-visible) {
+  background: var(--focus-tint);
+}
+
+.app__title {
+  color: var(--color-accent);
+  font-size: var(--text-title);
+  letter-spacing: var(--tracking-wide);
+  user-select: none;
+}

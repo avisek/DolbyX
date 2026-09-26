@@ -1,0 +1,224 @@
+/* The item picker (profiles, EQ presets): a surface card laid out by
+   grid areas — wide: [label] [pills …] … [actions]; narrow (the `app`
+   column below --picker-2line): [label … actions] over [pills,
+   wrapping]. DOM order never moves. Pills are radios' labels; the
+   checked one fills accent. Renaming lays the field over the checked
+   pill, so its width never changes. Actions are ghost buttons — icon
+   (`::before`, a masked token glyph) + skin-supplied text (`::after`),
+   text dropped below --picker-icons. */
+
+.picker {
+  display: grid;
+  grid-template-areas: 'label options actions';
+  grid-template-columns: var(--label-w) minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-2);
+  background-color: var(--color-surface);
+  transition: background-image var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a card holding focus always wins. */
+:where(.picker:hover) {
+  background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
+}
+
+.picker:has(:focus-visible) {
+  background-image: linear-gradient(var(--focus-tint), var(--focus-tint));
+}
+
+.picker__label {
+  grid-area: label;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  user-select: none;
+}
+
+.picker__options {
+  position: relative;
+  display: flex;
+  grid-area: options;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The radio: present for the keyboard, painted through its pill. */
+.picker__radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.picker__option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-bg);
+  border-radius: calc(var(--control-h) / 2);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    color var(--hover-ms) ease;
+}
+
+.picker__radio:checked + .picker__option {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+:where(.picker__option:hover) {
+  border-color: var(--hover-line);
+  color: var(--color-text);
+}
+
+.picker__radio:checked + :where(.picker__option:hover) {
+  color: var(--color-bg);
+}
+
+.picker__radio:focus-visible + .picker__option {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Renaming: the name keeps the pill's width, invisible; the field lies
+   over it, inheriting the pill's type and padding — the field IS the
+   pill, whatever is typed. */
+.picker__option--renaming .picker__name {
+  visibility: hidden;
+}
+
+.picker__field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: inherit;
+  border-radius: inherit;
+  font: inherit;
+  text-align: inherit;
+  outline-offset: -1px;
+}
+
+/* — Actions: four ghost buttons at the row's end — */
+
+.picker__actions {
+  display: flex;
+  grid-area: actions;
+  justify-self: end;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.picker__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--hover-ms) ease,
+    background var(--hover-ms) ease;
+}
+
+/* The glyph: a token mask painted in the button's colour. */
+.picker__action::before {
+  content: '';
+  flex: none;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  background-color: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+}
+
+.picker__add::before {
+  mask-image: var(--icon-plus);
+}
+
+.picker__rename::before {
+  mask-image: var(--icon-pencil);
+}
+
+.picker__delete::before {
+  mask-image: var(--icon-trash);
+}
+
+.picker__reset::before {
+  mask-image: var(--icon-rotate-ccw);
+}
+
+/* The caption: skin-supplied words (ADR-0011 addendum). */
+.picker__add::after {
+  content: 'Add';
+}
+
+.picker__rename::after {
+  content: 'Rename';
+}
+
+.picker__delete::after {
+  content: 'Delete';
+}
+
+.picker__reset::after {
+  content: 'Reset';
+}
+
+/* Hover under focus weight; a disabled action never lifts. */
+:where(.picker__action:hover:enabled) {
+  background: var(--hover-bg);
+  color: var(--color-text);
+}
+
+.picker__action:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.picker__action:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+/* — Narrow column: label and actions share line 1, pills take line 2
+   (literals: size queries take no tokens). — */
+
+@container app (inline-size < 48rem) {
+  .picker {
+    grid-template-areas:
+      'label actions'
+      'options options';
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* Narrower still: icons only — the `title` still names each. */
+@container app (inline-size < 30rem) {
+  .picker__action::after {
+    content: none;
+  }
+}

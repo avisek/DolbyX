@@ -1,0 +1,97 @@
+/* The master controls: one surface card, three compact rows on shared
+   tracks — label | marker | switch | box | slider — the panel's subgrid
+   idiom, beside the visualizer when the shell has two tracks. Below the
+   one-line width each row is its own two-line grid: label · marker ·
+   switch, then the amount region (box + slider) stretched edge to
+   edge. */
+
+.master-controls {
+  display: grid;
+  grid-template-columns: auto var(--reset-w) auto auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-2);
+  background-color: var(--color-surface);
+  container-type: inline-size;
+}
+
+.master-control {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: default;
+  transition: background-image var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a row holding focus always wins. */
+:where(.master-control:hover) {
+  background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
+}
+
+.master-control:has(:focus-visible) {
+  background-image: linear-gradient(var(--focus-tint), var(--focus-tint));
+}
+
+.master-control__label {
+  min-width: 0;
+  font-size: var(--text-sm);
+  user-select: none;
+}
+
+/* The Reset marker's slot; its morph lives in ResetMarker.css. */
+.master-control__reset {
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  background: none;
+}
+
+/* Wide: the amount region's members lay out on the row's own tracks. */
+.master-control__control {
+  display: contents;
+}
+
+/* The row's hover chrome on its controls, under focus weight. */
+:where(.master-control:hover) .adv-toggle {
+  box-shadow: inset 0 0 0 1px var(--hover-line);
+}
+
+:where(.master-control:hover) .adv-input__field:where(:read-write) {
+  border-color: var(--hover-line);
+}
+
+:where(.master-control:hover)
+  .adv-slider:where(:not(.adv-slider--disabled))
+  .adv-slider__thumb {
+  scale: 1.2;
+}
+
+/* Below the one-line width (a literal: size queries take no tokens):
+   each row is its own grid — line 1 label · marker · switch, line 2 the
+   amount region as a flex line the slider fills to the right edge. */
+@container (inline-size < 28rem) {
+  .master-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .master-control {
+    grid-template-columns: minmax(0, 1fr) var(--reset-w) auto;
+    row-gap: var(--space-1);
+  }
+
+  .master-control__control {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .master-control__control .adv-slider {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}

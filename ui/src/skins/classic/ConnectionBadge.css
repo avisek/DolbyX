@@ -1,0 +1,17 @@
+/* The live WS state as a small pill: muted while reconnecting, tinted
+   accent once connected. */
+
+.connection-badge {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--control-h);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking);
+  user-select: none;
+}
+
+.connection-badge--connected {
+  background: var(--tint);
+  color: var(--color-accent);
+}

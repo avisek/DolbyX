@@ -8,7 +8,6 @@ import MasterControls from './components/MasterControls'
 import PowerToggle from './components/PowerToggle'
 import ProfileTabs from './components/ProfileTabs'
 import Visualizer from './components/Visualizer'
-import Switcher from './proto/Switcher'
 import { state } from './store/state'
 
 /**
@@ -18,22 +17,19 @@ import { state } from './store/state'
  * whole-UI power marker every skin reads (ADR-0011).
  */
 const App: Component = () => (
-  <>
-    <main class="app" classList={{ 'app--off': !state.power }}>
-      <header class="app__header">
-        <h1 class="app__title">DolbyX</h1>
-        <ConnectionBadge />
-        <PowerToggle />
-      </header>
-      <LanToggle />
-      <ProfileTabs />
-      <EqPresetPicker />
-      <Visualizer />
-      <MasterControls />
-      <AdvancedPanel />
-    </main>
-    <Switcher />
-  </>
+  <main class="app" classList={{ 'app--off': !state.power }}>
+    <header class="app__header">
+      <h1 class="app__title">DolbyX</h1>
+      <ConnectionBadge />
+      <PowerToggle />
+    </header>
+    <LanToggle />
+    <ProfileTabs />
+    <EqPresetPicker />
+    <Visualizer />
+    <MasterControls />
+    <AdvancedPanel />
+  </main>
 )
 
 export default App

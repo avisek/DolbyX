@@ -14,3 +14,10 @@
 @import './BandArray.css';
 @import './EqCurve.css';
 @import './Visualizer.css';
+@import './App.css';
+@import './ConnectionBadge.css';
+@import './PowerToggle.css';
+@import './LanToggle.css';
+@import './RenameInput.css';
+@import './Picker.css';
+@import './MasterControls.css';

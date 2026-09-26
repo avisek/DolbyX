@@ -1,0 +1,12 @@
+/* The inline rename field: a bare text box in the surface's colours,
+   ringed while it has focus (it always does — it mounts focused). The
+   host decides its geometry (Picker.css lays it over the pill). */
+
+.rename-input {
+  border: 0;
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  outline: var(--focus-ring);
+}

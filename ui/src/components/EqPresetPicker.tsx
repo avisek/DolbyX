@@ -38,7 +38,7 @@ const EqPresetPicker: Component = () => {
   return (
     <Picker
       kind="eq"
-      label="EQ preset"
+      label="EQ Preset"
       noun="EQ preset"
       options={[
         { id: null, name: 'None', checked: picked() === null, factory: true },

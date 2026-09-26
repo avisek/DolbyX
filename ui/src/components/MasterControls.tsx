@@ -36,9 +36,10 @@ const controlId = (def: ParameterDef): string => `master-${def.name}`
 
 /**
  * One master control: a `label` for its SWITCH — clicking the title
- * toggles it — with the Reset marker (#92) and the control region:
- * switch, numeric box, Slider. The box, Slider, and marker keep their
- * own click (the native guard). Skin reads `master-control--diverged`.
+ * toggles it — with the Reset marker (#92), the switch, and the amount
+ * region: numeric box + Slider (one line the skin may drop under the
+ * title when narrow). The box, Slider, and marker keep their own click
+ * (the native guard). Skin reads `master-control--diverged`.
  */
 const MasterControl: Component<{
   label: string
@@ -100,13 +101,13 @@ const MasterControl: Component<{
           resetProfile(profileId(), pair)
         }}
       />
+      <Toggle
+        id={controlId(enable)}
+        name={`${props.label} enable`}
+        checked={head(enable) !== 0}
+        onToggle={onToggle}
+      />
       <div class="master-control__control">
-        <Toggle
-          id={controlId(enable)}
-          name={`${props.label} enable`}
-          checked={head(enable) !== 0}
-          onToggle={onToggle}
-        />
         <NumberInput
           id={controlId(amount)}
           name={`${props.label} amount`}

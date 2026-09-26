@@ -1,0 +1,30 @@
+/* The master power switch: `Power` · a larger switch at the header's
+   end. The label's `::before` stretches over the header (its positioned
+   ancestor), so a click anywhere on the row forwards to the switch; the
+   switch itself, positioned and later in the tree, stays on top. */
+
+.power {
+  --control-h: var(--power-h);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+  cursor: pointer;
+}
+
+.power::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.power__text {
+  font-size: var(--text-md);
+  user-select: none;
+}
+
+/* The switch's hover chrome follows the row, under focus weight. */
+:where(.app__header:hover) .adv-toggle {
+  box-shadow: inset 0 0 0 1px var(--hover-line);
+}
