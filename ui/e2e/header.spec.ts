@@ -5,17 +5,20 @@
  * browser (ADR-0011); jsdom sees only the label → input forward.
  */
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
-
-const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+import {
+  bleedHits,
+  expect,
+  openAt,
+  pageOverflow,
+  pseudoBackground,
+  test,
+  TRANSPARENT,
+} from './fixtures'
 
 const power = (page: Page) => page.getByRole('switch', { name: 'Power' })
 
 /** The power row's `::before` — the hit + hover surface. */
-const rowPseudoBackground = (page: Page) =>
-  page
-    .locator('.power')
-    .evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
+const rowPseudoBackground = (page: Page) => pseudoBackground(page, '.power')
 
 /** A token's colour as the browser resolves it (a `color-mix` won't compare as text). */
 const tokenColor = (page: Page, token: string) =>
@@ -35,18 +38,12 @@ async function titleCentre(page: Page): Promise<{ x: number; y: number }> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
-async function open(page: Page, width = 1280) {
-  await page.setViewportSize({ width, height: 900 })
-  await page.goto('/')
-  await expect(page.getByRole('status')).toHaveText('Connected')
-}
-
 // Behavior 2: a click on the wordmark lands on the label's pseudo and
 // forwards to the switch — power flips on the real daemon, then back.
 test('clicking the wordmark flips power, and again restores it', async ({
   page,
 }) => {
-  await open(page)
+  await openAt(page, 1280)
   await expect(power(page)).toBeChecked()
 
   const { x, y } = await titleCentre(page)
@@ -63,7 +60,7 @@ test('clicking the wordmark flips power, and again restores it', async ({
 test('hovering the title tints the power row; Tab carries the focus tint and rings the switch', async ({
   page,
 }) => {
-  await open(page)
+  await openAt(page, 1280)
   expect(await rowPseudoBackground(page)).toBe(TRANSPARENT)
 
   const { x, y } = await titleCentre(page)
@@ -94,31 +91,9 @@ for (const width of [390, 1280]) {
   test(`at ${String(width)}px the power row's surface bleeds into the gutter without overflow`, async ({
     page,
   }) => {
-    await open(page, width)
+    await openAt(page, width)
 
-    const geometry = await page.locator('.power').evaluate((el) => {
-      const header = el.closest('.app__header')
-      const app = el.closest('.app')
-      if (!header || !app) throw new Error('header not rendered')
-      const appStyle = getComputedStyle(app)
-      const appBox = app.getBoundingClientRect()
-      const { top, height } = header.getBoundingClientRect()
-      const rootStyle = getComputedStyle(document.documentElement)
-      const bleed =
-        parseFloat(rootStyle.getPropertyValue('--space-3')) *
-        parseFloat(rootStyle.fontSize)
-      const columnLeft = appBox.left + parseFloat(appStyle.paddingLeft)
-      const columnRight = appBox.right - parseFloat(appStyle.paddingRight)
-      const y = top + height / 2
-      const hit = (x: number) => document.elementFromPoint(x, y) === el
-      return {
-        insideLeft: hit(columnLeft - bleed + 1),
-        outsideLeft: hit(columnLeft - bleed - 1),
-        insideRight: hit(columnRight + bleed - 1),
-        outsideRight: hit(columnRight + bleed + 1),
-      }
-    })
-    expect(geometry).toEqual({
+    expect(await bleedHits(page, '.power', '.app__header')).toMatchObject({
       insideLeft: true,
       outsideLeft: false,
       insideRight: true,
@@ -128,10 +103,7 @@ for (const width of [390, 1280]) {
     const { x, y } = await titleCentre(page)
     await page.mouse.move(x, y)
     await expect.poll(() => rowPseudoBackground(page)).not.toBe(TRANSPARENT)
-    const overflow = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      innerWidth: window.innerWidth,
-    }))
+    const overflow = await pageOverflow(page)
     expect(overflow.scrollWidth).toBe(overflow.innerWidth)
   })
 }

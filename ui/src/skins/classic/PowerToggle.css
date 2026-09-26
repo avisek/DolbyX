@@ -34,10 +34,4 @@
 
 .power__text {
   font-size: var(--text-md);
-  user-select: none;
-}
-
-/* The switch's hover chrome follows the row, under focus weight. */
-:where(.power:hover) .adv-toggle {
-  box-shadow: inset 0 0 0 1px var(--hover-line);
 }

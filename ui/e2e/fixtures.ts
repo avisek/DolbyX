@@ -149,4 +149,58 @@ export function countStateFrames(page: Page): () => number {
   return () => count
 }
 
+/** Opens the app at `width` and waits for the WS to be up. */
+export async function openAt(page: Page, width: number): Promise<void> {
+  await page.setViewportSize({ width, height: 900 })
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('Connected')
+}
+
+export const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+
+/** The computed background of `selector`'s `::before` — a hover / focus surface. */
+export const pseudoBackground = (page: Page, selector: string) =>
+  page
+    .locator(selector)
+    .evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
+
+/** `scrollWidth` vs `innerWidth` — equal when nothing overflows sideways. */
+export const pageOverflow = (page: Page) =>
+  page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }))
+
+/**
+ * Whether `target` is what `elementFromPoint` finds 1 px inside and
+ * 1 px outside each edge of the Shell column's `--space-3` bleed, at
+ * the vertical centre of `row` (ADR-0011, second addendum: a surface
+ * that bleeds reaches exactly that far into the gutter, never past).
+ */
+export const bleedHits = (page: Page, target: string, row = target) =>
+  page.locator(target).evaluate((el, rowSelector) => {
+    const rowEl = el.closest(rowSelector)
+    const app = el.closest('.app')
+    if (!rowEl || !app) throw new Error(`${rowSelector} / .app not rendered`)
+    const appStyle = getComputedStyle(app)
+    const appBox = app.getBoundingClientRect()
+    const { top, height } = rowEl.getBoundingClientRect()
+    const rootStyle = getComputedStyle(document.documentElement)
+    const bleed =
+      parseFloat(rootStyle.getPropertyValue('--space-3')) *
+      parseFloat(rootStyle.fontSize)
+    const columnLeft = appBox.left + parseFloat(appStyle.paddingLeft)
+    const columnRight = appBox.right - parseFloat(appStyle.paddingRight)
+    const y = top + height / 2
+    const hit = (x: number) => document.elementFromPoint(x, y) === el
+    return {
+      columnLeft,
+      columnRight,
+      insideLeft: hit(columnLeft - bleed + 1),
+      outsideLeft: hit(columnLeft - bleed - 1),
+      insideRight: hit(columnRight + bleed - 1),
+      outsideRight: hit(columnRight + bleed + 1),
+    }
+  }, row)
+
 export { expect }

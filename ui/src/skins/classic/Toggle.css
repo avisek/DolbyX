@@ -44,8 +44,9 @@
   translate: calc(var(--control-h) * 0.75) 0;
 }
 
-/* Hover under focus weight: a focused switch always wins. */
-:where(.adv-card:hover) .adv-toggle {
+/* The switch lifts with its label — an Advanced card, the power Row,
+   any Row for its switch — under focus weight: a focused switch wins. */
+:where(label:hover) .adv-toggle {
   box-shadow: inset 0 0 0 1px var(--hover-line);
 }
 

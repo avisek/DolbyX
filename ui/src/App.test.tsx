@@ -96,8 +96,9 @@ it('a click on the power label forwards to the switch and sends set_power', () =
   const socket = renderConnected()
 
   const row = powerToggle().closest('label')
-  expect(row?.getAttribute('for')).toBe('power')
-  row?.querySelector<HTMLElement>('.power__text')?.click()
+  if (!row) throw new Error('power switch has no label')
+  expect(row.getAttribute('for')).toBe('power')
+  row.click()
 
   expect(
     socket.sentCommands().filter((frame) => frame.cmd === 'set_power'),

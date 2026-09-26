@@ -35,18 +35,19 @@
    the power label's `::before` (PowerToggle.css) stretches over the
    row — hover and click are both the label's — bleeding --space-3 into
    the gutter while the content stays flush with the column edge. The
-   header only positions it. */
+   header only positions it — and, being one click surface, selects no
+   text. */
 .app__header {
   position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
+  user-select: none;
 }
 
 .app__title {
   color: var(--color-accent);
   font-size: var(--text-title);
   letter-spacing: var(--tracking-wide);
-  user-select: none;
 }
