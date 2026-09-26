@@ -1,43 +1,37 @@
-.power-toggle {
+/* The power Row: `Power` · a larger switch at the header's end. The
+   label's `::before` stretches over the header (its positioned
+   ancestor) and bleeds past it by --space-3 — the row's whole hit
+   surface, so a hover anywhere on the row (the wordmark included) tints
+   it and a click forwards to the switch; the switch, positioned and
+   later in the tree, stays on top. */
+
+.power {
+  --control-h: var(--power-h);
+
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1.25rem;
-  border: 1px solid var(--color-surface);
-  border-radius: 0.5rem;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: 1.125rem;
+  gap: var(--space-3);
+  margin-inline-start: auto;
   cursor: pointer;
 }
 
-.power-toggle__track {
-  display: inline-flex;
-  align-items: center;
-  width: 2.75rem;
-  height: 1.5rem;
-  padding: 0.1875rem;
-  border-radius: 0.75rem;
-  background: var(--color-bg);
-  transition: background 0.15s ease;
+.power::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+  border-radius: var(--radius-2);
+  transition: background var(--hover-ms) ease;
 }
 
-.power-toggle__thumb {
-  width: 1.125rem;
-  height: 1.125rem;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-  transition:
-    transform 0.15s ease,
-    background 0.15s ease;
+/* Hover under focus weight: a row holding focus always wins. */
+:where(.power:hover)::before {
+  background: var(--hover-bg);
 }
 
-.power-toggle[aria-checked='true'] .power-toggle__track {
-  background: var(--color-accent);
+.power:has(:focus-visible)::before {
+  background: var(--focus-tint);
 }
 
-.power-toggle[aria-checked='true'] .power-toggle__thumb {
-  transform: translateX(1.25rem);
-  background: var(--color-bg);
+.power__text {
+  font-size: var(--text-md);
 }

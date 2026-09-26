@@ -1,7 +1,7 @@
 /**
  * Slice 09 (#17): the power toggle end-to-end — real browser, real
  * daemon, real engine. Selectors are the accessible roles the
- * components ship (`switch` = PowerToggle, `status` = ConnectionBadge).
+ * components ship (`switch` = the power Toggle, `status` = ConnectionBadge).
  */
 import { countStateFrames, expect, test } from './fixtures'
 
@@ -26,7 +26,7 @@ test('first paint is fully populated straight from the bootstrap', async ({
   // Power is on out of the box (defaults.toml), and the daemon injected
   // that truth into the document itself.
   const power = page.getByRole('switch', { name: 'Power' })
-  await expect(power).toHaveAttribute('aria-checked', 'true')
+  await expect(power).toBeChecked()
   const bootstrap = await page.evaluate(() => window.__BOOTSTRAP__)
   expect(bootstrap?.state.power).toBe(true)
 
@@ -47,32 +47,35 @@ test('a power flip survives a daemon restart and the page reconnects', async ({
   const stateFrames = countStateFrames(page)
   await page.goto('/')
   const power = page.getByRole('switch', { name: 'Power' })
-  await expect(power).toHaveAttribute('aria-checked', 'true')
+  await expect(power).toBeChecked()
   // Connect traffic settles at exactly two `state` frames: the
   // snapshot-on-connect plus the get_state reconcile reply.
   await expect.poll(stateFrames).toBe(2)
 
   // Local-first: the originator's flip lands on its ack.
   await power.click()
-  await expect(power).toHaveAttribute('aria-checked', 'false')
+  await expect(power).not.toBeChecked()
 
-  // Down: SIGTERM flushes the flip to config.toml; the badge notices.
+  // Down: SIGTERM flushes the flip to config.toml; the badge notices —
+  // text and, for the skin, its `--connected` modifier (#117).
   await daemon.stop()
   const badge = page.getByRole('status')
   await expect(badge).toHaveText('Reconnecting…')
+  await expect(badge).not.toHaveClass(/connection-badge--connected/)
 
   // Up on the same port over the same config dir: the WS reconnects
   // with backoff and the flip is still there.
   await daemon.start()
   await expect(badge).toHaveText('Connected')
+  await expect(badge).toHaveClass(/connection-badge--connected/)
   // Reconciled, not merely reconnected: fresh `state` frames beyond the
   // pre-restart two carry the restarted daemon's truth to the page.
   await expect.poll(stateFrames).toBeGreaterThan(2)
-  await expect(power).toHaveAttribute('aria-checked', 'false')
+  await expect(power).not.toBeChecked()
 
   // A cold reload paints from the restarted daemon's bootstrap.
   await page.reload()
-  await expect(power).toHaveAttribute('aria-checked', 'false')
+  await expect(power).not.toBeChecked()
 })
 
 /**
@@ -96,13 +99,13 @@ test('a flip in one page reaches the other, with no snapshot pushed at the origi
   const peer = await context.newPage()
   await peer.goto('/')
   const peerPower = peer.getByRole('switch', { name: 'Power' })
-  await expect(peerPower).toHaveAttribute('aria-checked', 'true')
+  await expect(peerPower).toBeChecked()
 
   await originatorPower.click()
 
   // The peer hears the broadcast; the originator applied its own ack…
-  await expect(peerPower).toHaveAttribute('aria-checked', 'false')
-  await expect(originatorPower).toHaveAttribute('aria-checked', 'false')
+  await expect(peerPower).not.toBeChecked()
+  await expect(originatorPower).not.toBeChecked()
   // …and got no snapshot pushed at it — not for the peer joining, not
   // for its own flip: nothing fights the originator's in-flight edits.
   expect(originatorStates()).toBe(2)

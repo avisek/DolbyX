@@ -5,7 +5,15 @@
  * needs a browser (ADR-0011); jsdom sees only the var/class seam.
  */
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import {
+  bleedHits,
+  expect,
+  openAt,
+  pageOverflow,
+  pseudoBackground,
+  test,
+  TRANSPARENT,
+} from './fixtures'
 
 /** Viewport width → whether the visualizer and master controls share a row. */
 const LAYOUTS = [
@@ -21,24 +29,15 @@ const box = (page: Page, selector: string) =>
     return { top, right, bottom, left, width }
   })
 
-async function open(page: Page, width: number) {
-  await page.setViewportSize({ width, height: 900 })
-  await page.goto('/')
-  await expect(page.getByRole('status')).toHaveText('Connected')
-}
-
 // Behavior 3: no horizontal overflow at any width; the visualizer's box
 // is exactly its grid cell; the two-up region stacks or shares a row.
 for (const { width, sideBySide } of LAYOUTS) {
   test(`at ${String(width)}px nothing overflows and the visualizer fills its cell`, async ({
     page,
   }) => {
-    await open(page, width)
+    await openAt(page, width)
 
-    const overflow = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      innerWidth: window.innerWidth,
-    }))
+    const overflow = await pageOverflow(page)
     expect(overflow.scrollWidth).toBe(overflow.innerWidth)
 
     // The grid's resolved first track is the cell the visualizer sits in.
@@ -65,10 +64,10 @@ for (const { width, sideBySide } of LAYOUTS) {
 test('power off dims everything but the header, controls still flip', async ({
   page,
 }) => {
-  await open(page, 1280)
+  await openAt(page, 1280)
   const power = page.getByRole('switch', { name: 'Power' })
   await power.click()
-  await expect(power).toHaveAttribute('aria-checked', 'false')
+  await expect(power).not.toBeChecked()
 
   const opacities = await page.evaluate(() => {
     // Numbers: the minified token reads `.45`, computed opacity `0.45`.
@@ -120,44 +119,20 @@ test('power off dims everything but the header, controls still flip', async ({
 test('the Advanced header tints on hover and bleeds into the gutter', async ({
   page,
 }) => {
-  await open(page, 1280)
+  await openAt(page, 1280)
   const header = page.getByRole('button', { name: 'Advanced' })
-  const pseudoBackground = () =>
-    header.evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
+  const headerBackground = () => pseudoBackground(page, '.advanced__header')
 
-  expect(await pseudoBackground()).toBe('rgba(0, 0, 0, 0)')
+  expect(await headerBackground()).toBe(TRANSPARENT)
   await header.hover()
-  await expect.poll(pseudoBackground).not.toBe('rgba(0, 0, 0, 0)')
+  await expect.poll(headerBackground).not.toBe(TRANSPARENT)
 
   // Text flush with the column: the header's box is the column's
   // content box; hits land `--space-3` beyond it on each side, not past.
-  const geometry = await header.evaluate((el) => {
-    const app = el.closest('.app')
-    if (!app) throw new Error('.app not rendered')
-    const appStyle = getComputedStyle(app)
-    const appBox = app.getBoundingClientRect()
-    const { top, right, left, height } = el.getBoundingClientRect()
-    const rootStyle = getComputedStyle(document.documentElement)
-    const bleed =
-      parseFloat(rootStyle.getPropertyValue('--space-3')) *
-      parseFloat(rootStyle.fontSize)
-    const columnLeft = appBox.left + parseFloat(appStyle.paddingLeft)
-    const columnRight = appBox.right - parseFloat(appStyle.paddingRight)
-    const y = top + height / 2
-    const hit = (x: number) => document.elementFromPoint(x, y) === el
-    return {
-      columnLeft,
-      columnRight,
-      left,
-      right,
-      insideLeft: hit(columnLeft - bleed + 1),
-      outsideLeft: hit(columnLeft - bleed - 1),
-      insideRight: hit(columnRight + bleed - 1),
-      outsideRight: hit(columnRight + bleed + 1),
-    }
-  })
-  expect(geometry.left).toBeCloseTo(geometry.columnLeft, 1)
-  expect(geometry.right).toBeCloseTo(geometry.columnRight, 1)
+  const geometry = await bleedHits(page, '.advanced__header')
+  const { left, right } = await box(page, '.advanced__header')
+  expect(left).toBeCloseTo(geometry.columnLeft, 1)
+  expect(right).toBeCloseTo(geometry.columnRight, 1)
   expect(geometry).toMatchObject({
     insideLeft: true,
     outsideLeft: false,

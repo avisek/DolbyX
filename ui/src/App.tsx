@@ -10,18 +10,19 @@ import Visualizer from './components/Visualizer'
 import { state } from './store/state'
 
 /**
- * Root shell — power, LAN access, profiles, EQ presets, visualizer,
- * master controls, the Advanced panel, connection (Slices 05 #13, 10
- * #18, 14 #22, 15 #23, 16 #24; LAN access #70; Advanced #85). `app--off`
- * is the whole-UI power marker every skin reads (ADR-0011).
+ * Root Shell — header (wordmark, connection badge, power), LAN access,
+ * profiles, EQ presets, visualizer, master controls, the Advanced panel
+ * (Slices 05 #13, 10 #18, 14 #22, 15 #23, 16 #24; LAN access #70;
+ * Advanced #85; header #117). Fixed DOM order; the skin lays it out.
+ * `app--off` is the whole-UI power marker every skin reads (ADR-0011).
  */
 const App: Component = () => (
   <main class="app" classList={{ 'app--off': !state.power }}>
     <header class="app__header">
       <h1 class="app__title">DolbyX</h1>
       <ConnectionBadge />
+      <PowerToggle />
     </header>
-    <PowerToggle />
     <LanToggle />
     <ProfileTabs />
     <EqPresetPicker />

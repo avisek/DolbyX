@@ -10,7 +10,8 @@ import { expect, test } from './fixtures'
  * toggle, and a master-control slider, captured on `main` before the
  * move — skin-owned values only, nothing viewport-derived. Any drift
  * here means a stylesheet was lost, reordered, or edited. `.app` was
- * re-pinned by the Shell (#116): `place-content` / `gap` gone.
+ * re-pinned by the Shell (#116): `place-content` / `gap` gone; the power
+ * toggle by the header (#117): the shared switch scoped to `--power-h`.
  */
 const BASELINE = {
   '.app': {
@@ -18,22 +19,16 @@ const BASELINE = {
     color: 'rgb(232, 238, 245)',
     'font-family': 'system-ui, "Segoe UI", Roboto, sans-serif',
   },
-  '.power-toggle': {
+  '.power': {
     display: 'flex',
     gap: '12px',
-    padding: '12px 20px',
-    'border-radius': '8px',
-    'border-color': 'rgb(22, 34, 47)',
-    'background-color': 'rgb(22, 34, 47)',
-    color: 'rgb(232, 238, 245)',
-    'font-size': '18px',
     cursor: 'pointer',
   },
-  '.power-toggle__track': {
-    width: '44px',
-    height: '24px',
+  '.power .adv-toggle': {
+    width: '58.7969px',
+    height: '33.5938px',
     'background-color': 'rgb(0, 180, 255)',
-    'border-radius': '12px',
+    'border-radius': '999px',
   },
   '.master-control': {
     padding: '12px 20px',
