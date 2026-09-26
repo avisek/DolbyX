@@ -12,6 +12,7 @@ import {
   pageOverflow,
   pseudoBackground,
   test,
+  tokenColor,
   TRANSPARENT,
 } from './fixtures'
 
@@ -19,17 +20,6 @@ const power = (page: Page) => page.getByRole('switch', { name: 'Power' })
 
 /** The power row's `::before` — the hit + hover surface. */
 const rowPseudoBackground = (page: Page) => pseudoBackground(page, '.power')
-
-/** A token's colour as the browser resolves it (a `color-mix` won't compare as text). */
-const tokenColor = (page: Page, token: string) =>
-  page.evaluate((name) => {
-    const probe = document.createElement('div')
-    probe.style.background = `var(${name})`
-    document.body.append(probe)
-    const color = getComputedStyle(probe).backgroundColor
-    probe.remove()
-    return color
-  }, token)
 
 /** Centre of the wordmark — the pointer's target; the label's pseudo is what receives it. */
 async function titleCentre(page: Page): Promise<{ x: number; y: number }> {

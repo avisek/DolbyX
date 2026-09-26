@@ -5,31 +5,13 @@
  * daemon, the Classic skin.
  */
 import type { Page } from '@playwright/test'
-import { expect, openAt, pageOverflow, test } from './fixtures'
-
-/** Rendered edges of one element — a DOMRect won't cross the wire. */
-const box = (page: Page, selector: string) =>
-  page.locator(selector).evaluate((el) => {
-    const { top, right, bottom, left, height } = el.getBoundingClientRect()
-    return { top, right, bottom, left, height }
-  })
+import { box, expect, openAt, pageOverflow, test, tokenColor } from './fixtures'
 
 /** A token's length in px as the root resolves it (rem tokens). */
 const tokenPx = (page: Page, token: string) =>
   page.evaluate((name) => {
     const root = getComputedStyle(document.documentElement)
     return parseFloat(root.getPropertyValue(name)) * parseFloat(root.fontSize)
-  }, token)
-
-/** A token's colour as the browser resolves it (a `color-mix` won't compare as text). */
-const tokenColor = (page: Page, token: string) =>
-  page.evaluate((name) => {
-    const probe = document.createElement('div')
-    probe.style.background = `var(${name})`
-    document.body.append(probe)
-    const color = getComputedStyle(probe).backgroundColor
-    probe.remove()
-    return color
   }, token)
 
 const rowBackground = (page: Page, row: string) =>
@@ -110,9 +92,10 @@ test('at 390px the amount line drops under the title and the Slider reaches the 
   expect(overflow.scrollWidth).toBe(overflow.innerWidth)
 })
 
-// Behavior 10: hovering a Row paints the hover fill; Tab into its box
-// swaps it for the focus tint and rings the box — focus outranks hover,
-// the hover tint never stacks on top.
+// Behavior 10: hovering a Row paints the hover fill and lifts its
+// thumb, like a panel card; Tab into its box swaps the fill for the
+// focus tint and rings the box — focus outranks hover, the hover tint
+// never stacks on top.
 test('hovering a row tints it; focus in its box carries the focus tint and a ring', async ({
   page,
 }) => {
@@ -122,6 +105,10 @@ test('hovering a row tints it; focus in its box carries the focus tint and a rin
   await expect
     .poll(() => rowBackground(page, DIALOG))
     .toBe(await tokenColor(page, '--hover-bg'))
+  await expect(page.locator(`${DIALOG} .adv-slider__thumb`)).toHaveCSS(
+    'scale',
+    '1.2',
+  )
 
   // Keep the pointer on the row: focus must win the contest, not
   // merely replace a departed hover.

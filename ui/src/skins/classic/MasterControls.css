@@ -52,8 +52,8 @@
 }
 
 /* Wide: the amount region carries no state and clips nothing, so its
-   members lay out on the Row's own tracks (ADR-0011: the one wrapper
-   `contents` is allowed on). */
+   members lay out on the Row's own tracks — the one wrapper #93 allows
+   `contents` on (ADR-0011 otherwise forbids it). */
 .master-control__control {
   display: contents;
 }

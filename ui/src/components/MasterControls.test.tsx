@@ -156,13 +156,14 @@ it('shows display values in the box + unit, and on the Slider as aria-value* + -
   ).toBeNull()
 })
 
-// Behavior 3 (#93), the guard: a click inside the box never forwards
-// to the switch — no command, focus stays in the box.
+// Behavior 3 (#93), the guard: a click inside the box — its wrapper,
+// where a browser would otherwise forward to the `for` target — never
+// reaches the switch: no command, focus stays in the box.
 it('a click inside the box sends nothing and keeps focus in the box', () => {
   const socket = renderConnected()
   const box = amountBox('Volume Leveller')
   box.focus()
-  box.click()
+  box.parentElement?.click() // the `.adv-input` wrapper
   expect(sentEdits(socket)).toEqual([])
   expect(document.activeElement).toBe(box)
   expect(enableSwitch('Volume Leveller').checked).toBe(false)
@@ -254,7 +255,7 @@ it('stepping Dialog Enhancer amount on the Slider streams display→i16 writes',
 // Behavior 6 (#93): the Reset marker is one button per pair — disabled
 // at Baseline, enabled when either half diverges — and its click is
 // `reset_profile { only: [enable, amount] }` chased by `get_state`.
-it('the reset marker enables when either half diverges and resets the pair', async () => {
+it('the Reset marker enables when either half diverges and resets the pair', async () => {
   const socket = renderConnected()
   const reset = screen.getByRole('button', { name: 'Reset Volume Leveller' })
   const leveller = row('Volume Leveller')
