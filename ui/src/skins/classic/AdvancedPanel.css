@@ -9,7 +9,11 @@
   width: 100%;
 }
 
+/* The header: text flush with the column edge; its `::before` is the
+   hit surface, bleeding into the gutter like the power row, tinted on
+   hover (under focus weight) and focus, ringed on focus. */
 .advanced__header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -22,9 +26,25 @@
   cursor: pointer;
 }
 
+.advanced__header::before {
+  content: '';
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-3));
+  border-radius: var(--radius-2);
+  transition: background var(--hover-ms) ease;
+}
+
+:where(.advanced__header:hover)::before {
+  background: var(--hover-bg);
+}
+
 .advanced__header:focus-visible {
+  outline: none;
+}
+
+.advanced__header:focus-visible::before {
   outline: var(--focus-ring);
-  outline-offset: 2px;
+  background: var(--focus-tint);
 }
 
 .advanced__chevron {

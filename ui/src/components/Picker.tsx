@@ -1,5 +1,5 @@
 // PROTOTYPE — throwaway, do not review
-import { For, Show, type Component } from 'solid-js'
+import { Index, Show, type Component } from 'solid-js'
 import RenameInput from './RenameInput'
 
 export interface PickerOption {
@@ -17,8 +17,11 @@ export interface PickerOption {
  * Rename / Delete / Reset — the skin captions (icon + text via
  * pseudo-elements); Rename / Delete / Reset `disabled` when they mean
  * nothing. Renaming keeps the checked pill in place (`--renaming`) and
- * mounts the inline field inside it, so the pill's width never moves.
- * Zero appearance policy (ADR-0011).
+ * mounts the inline field inside it beside the name — the skin swaps
+ * one for the other. Options render by position (`Index`): callers
+ * rebuild the array on every snapshot, and keying by object identity
+ * would recreate every radio — and drop the one holding focus. Zero
+ * appearance policy (ADR-0011).
  */
 const Picker: Component<{
   kind: 'profile' | 'eq'
@@ -52,29 +55,29 @@ const Picker: Component<{
     >
       <span class="picker__label">{props.label}</span>
       <div class="picker__options" role="radiogroup" aria-label={props.label}>
-        <For each={props.options}>
+        <Index each={props.options}>
           {(option) => {
-            const renaming = () => props.renaming && option.checked
+            const renaming = () => props.renaming && option().checked
             return (
               <>
                 <input
                   type="radio"
-                  id={radioId(option.id)}
+                  id={radioId(option().id)}
                   class="picker__radio"
                   name={`picker-${props.kind}`}
-                  checked={option.checked}
+                  checked={option().checked}
                   onClick={(event) => {
                     event.preventDefault()
-                    if (!option.checked) props.onPick(option.id)
+                    if (!option().checked) props.onPick(option().id)
                   }}
                 />
                 <label
                   class="picker__option"
                   classList={{
-                    'picker__option--factory': option.factory,
+                    'picker__option--factory': option().factory,
                     'picker__option--renaming': renaming(),
                   }}
-                  for={radioId(option.id)}
+                  for={radioId(option().id)}
                   // Native: a click landing in the rename field must not
                   // forward to the radio (which would steal its focus
                   // and blur-commit the rename).
@@ -87,11 +90,11 @@ const Picker: Component<{
                     }
                   }}
                 >
-                  <span class="picker__name">{option.name}</span>
+                  <span class="picker__name">{option().name}</span>
                   <Show when={renaming()}>
                     <RenameInput
                       label={`${props.label} name`}
-                      name={option.name}
+                      name={option().name}
                       class="picker__field"
                       onCommit={props.onRenameCommit}
                       onCancel={props.onRenameCancel}
@@ -101,7 +104,7 @@ const Picker: Component<{
               </>
             )
           }}
-        </For>
+        </Index>
       </div>
       <div class="picker__actions">
         <button

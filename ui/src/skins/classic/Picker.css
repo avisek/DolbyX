@@ -2,10 +2,10 @@
    grid areas — wide: [label] [pills …] … [actions]; narrow (the `app`
    column below --picker-2line): [label … actions] over [pills,
    wrapping]. DOM order never moves. Pills are radios' labels; the
-   checked one fills accent. Renaming lays the field over the checked
-   pill, so its width never changes. Actions are ghost buttons — icon
-   (`::before`, a masked token glyph) + skin-supplied text (`::after`),
-   text dropped below --picker-icons. */
+   checked one fills accent. Renaming swaps the name for a field sized
+   to its text, so the pill grows as typed. Actions are square ghost
+   buttons — an icon each (`::before`, a masked token glyph), named by
+   `title`. */
 
 .picker {
   display: grid;
@@ -30,7 +30,7 @@
 
 .picker__label {
   grid-area: label;
-  color: var(--color-text-muted);
+  color: var(--color-text);
   font-size: var(--text-sm);
   user-select: none;
 }
@@ -55,7 +55,6 @@
 }
 
 .picker__option {
-  position: relative;
   display: inline-flex;
   align-items: center;
   height: var(--control-h);
@@ -94,26 +93,30 @@
   outline-offset: 2px;
 }
 
-/* Renaming: the name keeps the pill's width, invisible; the field lies
-   over it, inheriting the pill's type and padding — the field IS the
-   pill, whatever is typed. */
+/* Renaming: the name leaves, the field takes its place — the pill's
+   type and padding, sized to its text (the numeric box idiom), so it
+   starts at the name's width and grows as typed; the field IS the pill,
+   whatever is typed. */
+.picker__option--renaming {
+  padding: 0;
+}
+
 .picker__option--renaming .picker__name {
-  visibility: hidden;
+  display: none;
 }
 
 .picker__field {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  padding: inherit;
+  align-self: stretch;
+  min-inline-size: 3ch;
+  padding: 0 var(--space-3);
   border-radius: inherit;
   font: inherit;
   text-align: inherit;
   outline-offset: -1px;
+  field-sizing: content;
 }
 
-/* — Actions: four ghost buttons at the row's end — */
+/* — Actions: four square ghost buttons at the row's end — */
 
 .picker__actions {
   display: flex;
@@ -124,18 +127,16 @@
 }
 
 .picker__action {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
   height: var(--control-h);
-  padding: 0 var(--space-2);
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-1);
   background: transparent;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: var(--text-sm);
-  line-height: 1;
   cursor: pointer;
   user-select: none;
   transition:
@@ -146,7 +147,6 @@
 /* The glyph: a token mask painted in the button's colour. */
 .picker__action::before {
   content: '';
-  flex: none;
   width: var(--icon-size);
   height: var(--icon-size);
   background-color: currentColor;
@@ -171,25 +171,8 @@
   mask-image: var(--icon-rotate-ccw);
 }
 
-/* The caption: skin-supplied words (ADR-0011 addendum). */
-.picker__add::after {
-  content: 'Add';
-}
-
-.picker__rename::after {
-  content: 'Rename';
-}
-
-.picker__delete::after {
-  content: 'Delete';
-}
-
-.picker__reset::after {
-  content: 'Reset';
-}
-
 /* Hover under focus weight; a disabled action never lifts. */
-:where(.picker__action:hover:enabled) {
+:where(.picker__action:hover):enabled {
   background: var(--hover-bg);
   color: var(--color-text);
 }
@@ -205,7 +188,7 @@
 }
 
 /* — Narrow column: label and actions share line 1, pills take line 2
-   (literals: size queries take no tokens). — */
+   (a literal: size queries take no tokens). — */
 
 @container app (inline-size < 48rem) {
   .picker {
@@ -213,12 +196,5 @@
       'label actions'
       'options options';
     grid-template-columns: minmax(0, 1fr) auto;
-  }
-}
-
-/* Narrower still: icons only — the `title` still names each. */
-@container app (inline-size < 30rem) {
-  .picker__action::after {
-    content: none;
   }
 }

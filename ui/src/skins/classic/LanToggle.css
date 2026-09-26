@@ -32,16 +32,18 @@
   box-shadow: inset 0 0 0 1px var(--hover-line);
 }
 
-.lan-access__text {
-  margin-inline-end: auto;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  user-select: none;
-  transition: color var(--hover-ms) ease;
+/* The popover's host rises while it is open: whatever stacking context
+   the row gets (the off-state dim is an opacity) sits above the rows
+   below it. A grid item honours z-index unpositioned. */
+.lan-access--qr {
+  z-index: var(--z-popover);
 }
 
-.lan-access--on .lan-access__text {
+.lan-access__text {
+  margin-inline-end: auto;
   color: var(--color-text);
+  font-size: var(--text-sm);
+  user-select: none;
 }
 
 .lan-access__cluster {
@@ -52,8 +54,8 @@
 }
 
 /* The fold: `auto` inline size interpolates (scoped keyword
-   interpolation); the clip hides the tools mid-fold. The positioned
-   popover escapes the clip — this box is not its containing block. */
+   interpolation); the clip hides the tools mid-fold, with a margin so
+   a focus ring (1px + 1px offset) on an edge button is not cut. */
 .lan-access__tools {
   display: flex;
   align-items: center;
@@ -61,6 +63,7 @@
   min-width: 0;
   inline-size: auto;
   overflow: clip;
+  overflow-clip-margin: var(--space-1);
   interpolate-size: allow-keywords;
   transition:
     inline-size var(--fold-ms) var(--fold-ease),
@@ -104,7 +107,8 @@
   outline: none;
 }
 
-/* Icon buttons: copy, QR. */
+/* Icon buttons: copy, QR — square ghosts, muted at rest, lifted and lit
+   on hover (under focus weight). */
 .lan-access__copy,
 .lan-access__qr-toggle {
   display: grid;
@@ -137,6 +141,17 @@
   mask-repeat: no-repeat;
 }
 
+:where(.lan-access__copy:hover, .lan-access__qr-toggle:hover):enabled {
+  background: var(--hover-bg);
+  color: var(--color-text);
+}
+
+.lan-access__copy:focus-visible,
+.lan-access__qr-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .lan-access--copied .lan-access__copy {
   color: var(--color-accent);
 }
@@ -153,31 +168,27 @@
   mask-image: var(--icon-qr-code);
 }
 
+/* Pressed (the popover is open): tinted, accent-lined, whatever hovers. */
 .lan-access__qr-toggle[aria-pressed='true'] {
   border-color: var(--color-accent);
+  background: var(--tint);
   color: var(--color-accent);
 }
 
-:where(.lan-access__copy:hover, .lan-access__qr-toggle:hover) {
-  background: var(--hover-bg);
-  color: var(--color-text);
-}
-
-.lan-access__copy:focus-visible,
-.lan-access__qr-toggle:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 1px;
-}
-
 /* The popover: anchored under the QR button, right-aligned to it;
-   flips when it would leave the page. Shown by state (`--qr`): opacity,
-   then visibility once faded. Focus-scoped by the component; the ring
-   marks it while it holds focus. */
+   flips when it would leave the page. Shown by state (`--qr`) as a
+   discrete display transition — `none` while closed, so a closed
+   popover anchored to a folded (clipped, off-screen) button adds no
+   scrollable overflow; opacity fades in from `@starting-style` and out
+   before `none` lands. Above every row (`--z-popover`). Focus-scoped
+   by the component; the ring marks it while it holds focus. */
 .lan-access__qr {
   position: absolute;
+  z-index: var(--z-popover);
   position-anchor: --lan-qr;
   position-area: block-end span-inline-start;
   position-try-fallbacks: flip-block, flip-inline;
+  display: none;
   margin: var(--space-1) 0;
   padding: var(--space-2);
   border: 1px solid var(--hover-line);
@@ -186,16 +197,20 @@
   box-shadow: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
   cursor: default;
   opacity: 0;
-  visibility: hidden;
   transition:
     opacity var(--fold-ms) var(--fold-ease),
-    visibility 0s linear var(--fold-ms);
+    display var(--fold-ms) allow-discrete;
 }
 
 .lan-access--qr .lan-access__qr {
+  display: block;
   opacity: 1;
-  visibility: visible;
-  transition-delay: 0s;
+}
+
+@starting-style {
+  .lan-access--qr .lan-access__qr {
+    opacity: 0;
+  }
 }
 
 .lan-access__qr:focus-visible {

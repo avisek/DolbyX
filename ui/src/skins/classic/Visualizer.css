@@ -146,13 +146,6 @@
   );
 }
 
-/* Power off (`app--off`, the whole-UI marker): bricks off; the greying
-   is the skin's whole-screen off rule. Chrome and background stay. */
-.app--off .vis-column__fill,
-.app--off .vis-column__pip {
-  visibility: hidden;
-}
-
 /* `ven` off (`visualizer--off`): fills + pips dark — the DSP has
    stopped filling, frames carry frozen values — chrome and background
    stay. */

@@ -30,10 +30,10 @@
 }
 
 /* — Header: wordmark · badge … Power · switch. No surface of its own;
-   the whole row is the power switch's hit area (PowerToggle.css
-   stretches the label's `::before` over it), so it hovers like a card.
-   The fill bleeds into the gutter by --space-3 while the content stays
-   flush with the column edge. — */
+   the power label's `::before` (PowerToggle.css) stretches over the
+   row — hover and click are both the label's — bleeding into the
+   gutter by --space-3 while the content stays flush with the column
+   edge. The header only positions it. — */
 
 .app__header {
   position: relative;
@@ -41,20 +41,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
-  margin-inline: calc(-1 * var(--space-3));
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-2);
-  cursor: pointer;
-  transition: background var(--hover-ms) ease;
-}
-
-/* Hover under focus weight: a header holding focus always wins. */
-:where(.app__header:hover) {
-  background: var(--hover-bg);
-}
-
-.app__header:has(:focus-visible) {
-  background: var(--focus-tint);
 }
 
 .app__title {

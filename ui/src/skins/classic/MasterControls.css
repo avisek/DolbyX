@@ -77,9 +77,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* No subgrid to inherit the tracks' gutter from: the row's own. */
   .master-control {
     grid-template-columns: minmax(0, 1fr) var(--reset-w) auto;
-    row-gap: var(--space-1);
+    gap: var(--space-1) var(--space-2);
   }
 
   .master-control__control {

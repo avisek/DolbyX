@@ -72,7 +72,8 @@ const LanQr: Component<{
  * ack-then-apply. The discovery URL (a readonly field: focusable,
  * partially selectable) + copy + QR sit in the DOM whenever the
  * snapshot carries `lan_url` (issue #71); the skin reveals them by
- * `--on`. State as modifiers: `--on`, `--qr` (QR open), `--copied`
+ * `--on`. The QR figure is the tools' sibling, not their child: the
+ * skin clips the tools to fold them, and a popover must escape. State as modifiers: `--on`, `--qr` (QR open), `--copied`
  * (1.5 s after a copy). The QR is a focus-scoped popover: open moves
  * focus to the figure; Escape / Enter or focus leaving it closes it.
  */
@@ -143,35 +144,37 @@ const LanToggle: Component = () => {
         />
         <Show when={state.lan_url}>
           {(url) => (
-            <span class="lan-access__tools">
-              <input
-                type="text"
-                class="lan-access__url"
-                aria-label="LAN URL"
-                readonly
-                value={url()}
-              />
-              <button
-                type="button"
-                class="lan-access__copy"
-                aria-label="Copy URL"
-                title="Copy URL"
-                onClick={() => {
-                  copy(url())
-                }}
-              />
-              <button
-                ref={qrButton}
-                type="button"
-                class="lan-access__qr-toggle"
-                aria-pressed={qr()}
-                aria-label="Show QR code"
-                title="Show QR code"
-                onClick={() => {
-                  if (qr()) closeQr(false)
-                  else openQr()
-                }}
-              />
+            <>
+              <span class="lan-access__tools">
+                <input
+                  type="text"
+                  class="lan-access__url"
+                  aria-label="LAN URL"
+                  readonly
+                  value={url()}
+                />
+                <button
+                  type="button"
+                  class="lan-access__copy"
+                  aria-label="Copy URL"
+                  title="Copy URL"
+                  onClick={() => {
+                    copy(url())
+                  }}
+                />
+                <button
+                  ref={qrButton}
+                  type="button"
+                  class="lan-access__qr-toggle"
+                  aria-pressed={qr()}
+                  aria-label="Show QR code"
+                  title="Show QR code"
+                  onClick={() => {
+                    if (qr()) closeQr(false)
+                    else openQr()
+                  }}
+                />
+              </span>
               <LanQr
                 url={url()}
                 ref={(element) => {
@@ -196,7 +199,7 @@ const LanToggle: Component = () => {
                   closeQr(false)
                 }}
               />
-            </span>
+            </>
           )}
         </Show>
       </span>

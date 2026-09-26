@@ -1,7 +1,9 @@
 /* The master power switch: `Power` · a larger switch at the header's
    end. The label's `::before` stretches over the header (its positioned
-   ancestor), so a click anywhere on the row forwards to the switch; the
-   switch itself, positioned and later in the tree, stays on top. */
+   ancestor) and bleeds past it — the row's whole hit surface, so a
+   hover anywhere on the row (the title included) tints it and a click
+   forwards to the switch; the switch itself, positioned and later in
+   the tree, stays on top. */
 
 .power {
   --control-h: var(--power-h);
@@ -16,7 +18,18 @@
 .power::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+  border-radius: var(--radius-2);
+  transition: background var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a row holding focus always wins. */
+:where(.power:hover)::before {
+  background: var(--hover-bg);
+}
+
+.power:has(:focus-visible)::before {
+  background: var(--focus-tint);
 }
 
 .power__text {
@@ -25,6 +38,6 @@
 }
 
 /* The switch's hover chrome follows the row, under focus weight. */
-:where(.app__header:hover) .adv-toggle {
+:where(.power:hover) .adv-toggle {
   box-shadow: inset 0 0 0 1px var(--hover-line);
 }
