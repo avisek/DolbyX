@@ -130,36 +130,32 @@ test('the Advanced header tints on hover and bleeds into the gutter', async ({
   await expect.poll(pseudoBackground).not.toBe('rgba(0, 0, 0, 0)')
 
   // Text flush with the column: the header's box is the column's
-  // content box; the pseudo reaches `--space-3` beyond it on each side.
+  // content box; hits land `--space-3` beyond it on each side, not past.
   const geometry = await header.evaluate((el) => {
     const app = el.closest('.app')
     if (!app) throw new Error('.app not rendered')
     const appStyle = getComputedStyle(app)
     const appBox = app.getBoundingClientRect()
     const { top, right, left, height } = el.getBoundingClientRect()
-    const bleed = -parseFloat(getComputedStyle(el, '::before').left)
-    const space3 = parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue('--space-3'),
-    )
-    const rootPx = parseFloat(
-      getComputedStyle(document.documentElement).fontSize,
-    )
+    const rootStyle = getComputedStyle(document.documentElement)
+    const bleed =
+      parseFloat(rootStyle.getPropertyValue('--space-3')) *
+      parseFloat(rootStyle.fontSize)
+    const columnLeft = appBox.left + parseFloat(appStyle.paddingLeft)
+    const columnRight = appBox.right - parseFloat(appStyle.paddingRight)
     const y = top + height / 2
     const hit = (x: number) => document.elementFromPoint(x, y) === el
     return {
-      bleed,
-      space3Px: space3 * rootPx,
-      columnLeft: appBox.left + parseFloat(appStyle.paddingLeft),
-      columnRight: appBox.right - parseFloat(appStyle.paddingRight),
+      columnLeft,
+      columnRight,
       left,
       right,
-      insideLeft: hit(left - bleed + 1),
-      outsideLeft: hit(left - bleed - 1),
-      insideRight: hit(right + bleed - 1),
-      outsideRight: hit(right + bleed + 1),
+      insideLeft: hit(columnLeft - bleed + 1),
+      outsideLeft: hit(columnLeft - bleed - 1),
+      insideRight: hit(columnRight + bleed - 1),
+      outsideRight: hit(columnRight + bleed + 1),
     }
   })
-  expect(geometry.bleed).toBe(geometry.space3Px)
   expect(geometry.left).toBeCloseTo(geometry.columnLeft, 1)
   expect(geometry.right).toBeCloseTo(geometry.columnRight, 1)
   expect(geometry).toMatchObject({

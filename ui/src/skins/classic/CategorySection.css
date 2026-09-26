@@ -10,7 +10,7 @@
 .adv-cat {
   --head-x: var(--space-4);
   --code-w: 3.3rem;
-  --label-w: 8.5rem;
+  --card-label-w: 8.5rem;
   --ctl-min: 11rem;
 
   display: grid;
@@ -20,7 +20,7 @@
        overflow: hidden     this box clips the spill */
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-columns:
-    var(--code-w) var(--label-w) var(--reset-w)
+    var(--code-w) var(--card-label-w) var(--reset-w)
     minmax(var(--ctl-min), 1fr);
   column-gap: var(--space-2);
   align-content: start;

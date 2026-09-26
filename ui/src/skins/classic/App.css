@@ -1,4 +1,4 @@
-/* The Shell (main screen): a centred page column on a two-track grid —
+/* The Shell (main screen): a centred column on a two-track grid —
    every region spans it except the visualizer and the master controls,
    which sit side by side when both fit (`--vis-min` each) and stack
    otherwise. Fluid at every width with no viewport unit: the column is

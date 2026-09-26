@@ -146,9 +146,6 @@
   );
 }
 
-/* Power off: the Shell's one Off-look rule (App.css) dims the whole
-   field by opacity — no per-component rule here. */
-
 /* `ven` off (`visualizer--off`): fills + pips dark — the DSP has
    stopped filling, frames carry frozen values — chrome and background
    stay. */
