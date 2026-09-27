@@ -52,8 +52,7 @@
 }
 
 /* The thumb grows with its label — an Advanced card, a Master control
-   Row — under focus weight: the whole hover selector inside `:where()`
-   (ADR-0011). Disabled sliders get no lift. */
+   Row — under focus weight (`:hover` inside `:where()`, ADR-0011). Disabled sliders get no lift. */
 :where(label:hover)
   .adv-slider:where(:not(.adv-slider--disabled))
   .adv-slider__thumb {

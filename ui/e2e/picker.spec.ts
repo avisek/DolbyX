@@ -68,6 +68,30 @@ test('the rename field starts at the pill width, grows as typed, and Esc restore
   await deleteScratchProfile(page)
 })
 
+const pillColor = (page: Page, id: string) =>
+  page
+    .locator(`${PROFILE} label[for="${id}"]`)
+    .evaluate((el) => getComputedStyle(el).color)
+
+// Behavior 9's pill half: an unchecked pill lifts its text on hover
+// (`.picker__option:where(:hover)` — the pseudo-class alone inside
+// `:where()`, or the base rule outranks it and nothing paints); the
+// checked pill keeps its accent fill.
+test('hovering an unchecked pill lifts its text; the checked pill stays filled', async ({
+  page,
+}) => {
+  await openAt(page, 1280)
+  const game = 'picker-profile-game'
+  const rest = await pillColor(page, game)
+  await page.locator(`${PROFILE} label[for="${game}"]`).hover()
+  await expect.poll(() => pillColor(page, game)).not.toBe(rest)
+
+  const checked = await pillColor(page, 'picker-profile-music')
+  await page.locator(`${PROFILE} label[for="picker-profile-music"]`).hover()
+  await page.waitForTimeout(200)
+  expect(await pillColor(page, 'picker-profile-music')).toBe(checked)
+})
+
 /** One Picker's boxes: label, options, actions. */
 const pickerBoxes = (page: Page, picker: string) =>
   Promise.all([

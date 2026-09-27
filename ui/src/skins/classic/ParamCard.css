@@ -16,7 +16,7 @@
 }
 
 /* Hover under focus weight: a card holding focus always wins. */
-:where(.adv-card:hover) {
+.adv-card:where(:hover) {
   background: rgb(255 255 255 / 3%);
 }
 

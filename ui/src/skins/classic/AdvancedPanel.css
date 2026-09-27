@@ -33,7 +33,7 @@
   transition: background var(--hover-ms) ease;
 }
 
-:where(.advanced__header:hover)::before {
+.advanced__header:where(:hover)::before {
   background: var(--hover-bg);
 }
 

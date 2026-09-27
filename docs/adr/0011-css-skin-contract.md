@@ -4,7 +4,7 @@ DolbyX will ship alternative looks (**Skins** — CSS-only visual
 variants of the whole UI) without touching component code. The
 contract: a component renders semantic structure — regions, data
 displays, and bare chrome surfaces for skins to paint — and publishes
-*data*: continuous CSS custom properties in real units (e.g. dB
+_data_: continuous CSS custom properties in real units (e.g. dB
 floats) plus state as BEM modifier classes (power is `app--off` on the
 app root, so every component skins its off-look from one marker;
 feature state sits on its owner — the visualizer mirrors resolved
@@ -39,9 +39,9 @@ always-visible editor without code changes. Contract consequence:
 skins hide such interactive chrome with `opacity`, never `visibility`
 or `display` — hidden elements must stay focusable, or keyboard users
 could never trigger the focus reveal (and screen readers keep working
-sliders regardless of visual state). Timed *state* (Vis idle's 250 ms)
-stays component-side — it changes what the data *is*; timed
-*appearance* (the linger, the descent) is the skin's.
+sliders regardless of visual state). Timed _state_ (Vis idle's 250 ms)
+stays component-side — it changes what the data _is_; timed
+_appearance_ (the linger, the descent) is the skin's.
 Consequence: jsdom tests see only the var/class seam;
 rendered-geometry truth needs a real browser (Playwright).
 
@@ -61,11 +61,13 @@ Chromium ships it), anchor positioning, `transform`, `z-index`, and
 
 **Collapsed content is state; revealed chrome is appearance.** A fold
 publishes `--collapsed`; the skin animates the body's track and may take
-the content out of the tab order with a *delayed* `visibility`
+the content out of the tab order with a _delayed_ `visibility`
 transition once the fold lands. Hover- or focus-revealed chrome (the
 first instance's rule) still hides with `opacity` only. Hover rules stay
-below focus weight — wrap the hover selector in `:where()` — so a
-focused control always wins the style contest.
+below focus weight — wrap the pseudo-class alone in `:where()`
+(`.row:where(:hover)`) — so a focused control always wins the style
+contest. Wrapping the whole compound (`:where(.row:hover)`) zeroes the
+rule below the base rule too, and the hover never paints.
 
 **The component publishes; the skin reads.** Kind, access, and state
 arrive as BEM modifiers (`--exp`, `--ro`, `--preset`, `--diverged`,

@@ -47,7 +47,7 @@
   border-color: var(--hover-line);
 }
 
-:where(.adv-tristate__seg:hover) {
+.adv-tristate__seg:where(:hover) {
   color: var(--color-text);
 }
 
