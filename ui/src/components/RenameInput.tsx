@@ -10,11 +10,11 @@ import { onMount, type Component } from 'solid-js'
  * second).
  */
 const RenameInput: Component<{
-  /** The accessible name: "Profile name" | "EQ preset name". */
+  /** The accessible name: "Profile name" | "EQ Preset name". */
   label: string
   /** The current display name — prefilled, selected whole. */
   name: string
-  /** The caller's layout hook (`profile-tabs__rename`, …). */
+  /** The caller's layout hook (`picker__field`, …). */
   class: string
   onCommit: (name: string) => void
   onCancel: () => void

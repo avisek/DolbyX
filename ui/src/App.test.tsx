@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from '@solidjs/testing-library'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MockWebSocket } from './test/mock-ws'
 import { FIXTURE_LAN_URL, fixtureBootstrap, fixtureState } from './test/fixture'
@@ -302,18 +308,23 @@ it('updates the toggle on a broadcast state event', () => {
   expect(powerToggle().checked).toBe(false)
 })
 
-const profileTab = (name: string) => screen.getByRole('tab', { name })
-const isSelected = (name: string) =>
-  profileTab(name).getAttribute('aria-selected')
+/** The profile Picker's radio group (#119). */
+const profiles = () =>
+  within(screen.getByRole('radiogroup', { name: 'Profile' }))
+const profileRadio = (name: string) =>
+  profiles().getByRole<HTMLInputElement>('radio', { name })
+const isSelected = (name: string) => profileRadio(name).checked
 
-// Behavior 10 (#18): the four factory tabs render from the snapshot,
-// the active profile marked.
-it('renders the four factory profile tabs with the active one marked', () => {
+// Behavior 10 (#18): the four factory profiles render from the
+// snapshot as the Picker's radios, the active profile checked.
+it('renders the four factory profile radios with the active one checked', () => {
   render(() => <App />)
-  const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent)
-  expect(tabs).toEqual(['Movie', 'Music', 'Game', 'Voice'])
-  expect(isSelected('Music')).toBe('true')
-  expect(isSelected('Movie')).toBe('false')
+  const names = profiles()
+    .getAllByRole<HTMLInputElement>('radio')
+    .map((radio) => radio.labels?.[0]?.textContent)
+  expect(names).toEqual(['Movie', 'Music', 'Game', 'Voice'])
+  expect(isSelected('Music')).toBe(true)
+  expect(isSelected('Movie')).toBe(false)
 })
 
 // Behavior 10 (#18): switching updates via the ack (the broadcast goes
@@ -321,7 +332,7 @@ it('renders the four factory profile tabs with the active one marked', () => {
 it('sends set_profile on click and applies the switch on the ack', async () => {
   const socket = renderConnected()
 
-  profileTab('Movie').click()
+  profileRadio('Movie').click()
   const sent = socket
     .sentCommands()
     .filter((frame) => frame.cmd === 'set_profile')
@@ -333,28 +344,28 @@ it('sends set_profile on click and applies the switch on the ack', async () => {
     },
   ])
 
-  // Not yet acked — the tabs still show daemon truth.
-  expect(isSelected('Music')).toBe('true')
+  // Not yet acked: the clicked radio never checked.
+  expect(isSelected('Movie')).toBe(false)
 
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
   })
   await waitFor(() => {
-    expect(isSelected('Movie')).toBe('true')
-    expect(isSelected('Music')).toBe('false')
+    expect(isSelected('Movie')).toBe(true)
+    expect(isSelected('Music')).toBe(false)
   })
 })
 
 // Behavior 10 (#18): another client switched — its broadcast `state`
 // event moves this tab's active profile.
-it('updates the selected tab on a broadcast state event', () => {
+it('updates the checked profile on a broadcast state event', () => {
   const socket = renderConnected()
 
   socket.serverMessage({
     type: 'state',
     snapshot: fixtureState({ selected_profile: 'game' }),
   })
-  expect(isSelected('Game')).toBe('true')
-  expect(isSelected('Music')).toBe('false')
+  expect(isSelected('Game')).toBe(true)
+  expect(isSelected('Music')).toBe(false)
 })
