@@ -7,10 +7,13 @@
  */
 import type { Page } from '@playwright/test'
 import {
+  background,
   box,
+  countStateFrames,
   expect,
   openAt,
   pageOverflow,
+  sameLine,
   test,
   TRANSPARENT,
 } from './fixtures'
@@ -65,17 +68,13 @@ test('the rename field starts at the pill width, grows as typed, and Esc restore
   await deleteScratchProfile(page)
 })
 
-/** Both Pickers' boxes: label, options, actions. */
+/** One Picker's boxes: label, options, actions. */
 const pickerBoxes = (page: Page, picker: string) =>
   Promise.all([
     box(page, `${picker} .picker__label`),
     box(page, `${picker} .picker__options`),
     box(page, `${picker} .picker__actions`),
   ])
-
-/** Whether two boxes share a line — their vertical extents overlap. */
-const sameLine = (a: { top: number; bottom: number }, b: typeof a) =>
-  a.top < b.bottom && b.top < a.bottom
 
 // Behavior 8, 390: label and actions share line 1, the pills sit
 // below; nothing overflows sideways.
@@ -116,30 +115,31 @@ const ACTIONS = ['Add', 'Rename', 'Delete', 'Reset'].flatMap((verb) => [
   `${verb} EQ preset`,
 ])
 
-const buttonBackground = (page: Page, name: string) =>
-  page
-    .getByRole('button', { name })
-    .evaluate((el) => getComputedStyle(el).backgroundColor)
+const action = (name: string) => `.picker__action[aria-label="${name}"]`
 
-// Behavior 9: every enabled action rings when tabbed to (the skin's
+// Behavior 9: every action rings when tabbed to (the skin's
 // `:focus-visible` rule) and lifts its background on hover. A custom
 // profile and a captured preset enable what a Factory item disables;
-// the fresh capture's Reset stays disabled — nothing to clear — and a
-// disabled button is never a tab stop.
+// one EQ slider nudge diverges the capture so its Reset is live too.
 test('tabbing to an action shows a focus ring; hovering an enabled one lifts its background', async ({
   page,
 }) => {
+  const stateFrames = countStateFrames(page)
   await openAt(page, 1280)
+  // Connect settles at two `state` frames; each add's `get_state`
+  // reconcile is one more — the nudge must land after it, or the
+  // reconcile's snapshot would overwrite the optimistic edit.
+  await expect.poll(stateFrames).toBe(2)
   await addScratchProfile(page)
+  await expect.poll(stateFrames).toBe(3)
   await page.getByRole('button', { name: 'Add EQ preset' }).click()
   await expect(page.getByRole('radio', { name: 'Preset 1' })).toBeChecked()
+  await expect.poll(stateFrames).toBe(4)
+  await page.locator('.eq-slider').first().focus()
+  await page.keyboard.press('ArrowUp')
 
   for (const name of ACTIONS) {
     const button = page.getByRole('button', { name })
-    if (name === 'Reset EQ preset') {
-      await expect(button).toBeDisabled()
-      continue
-    }
     await expect(button).toBeEnabled()
 
     // Keyboard focus: leave and come back with Tab so `:focus-visible`
@@ -152,31 +152,26 @@ test('tabbing to an action shows a focus ring; hovering an enabled one lifts its
       const style = getComputedStyle(el)
       return {
         visible: el.matches(':focus-visible'),
-        style: style.outlineStyle,
-        width: parseFloat(style.outlineWidth),
+        outlineStyle: style.outlineStyle,
+        outlineWidth: parseFloat(style.outlineWidth),
       }
     })
     expect(ring.visible).toBe(true)
-    expect(ring.style).not.toBe('none')
-    expect(ring.width).toBeGreaterThan(0)
+    expect(ring.outlineStyle).not.toBe('none')
+    expect(ring.outlineWidth).toBeGreaterThan(0)
 
     await page.mouse.move(0, 0)
-    await expect.poll(() => buttonBackground(page, name)).toBe(TRANSPARENT)
+    await expect.poll(() => background(page, action(name))).toBe(TRANSPARENT)
     await button.hover()
-    await expect.poll(() => buttonBackground(page, name)).not.toBe(TRANSPARENT)
+    await expect
+      .poll(() => background(page, action(name)))
+      .not.toBe(TRANSPARENT)
   }
 })
 
-/** Whether the focused element is one of the profile Picker's radios. */
-const focusInProfileGroup = (page: Page) =>
-  page.evaluate(() => {
-    const active = document.activeElement
-    return (
-      active instanceof HTMLInputElement &&
-      active.classList.contains('picker__radio') &&
-      active.closest('.picker--profile') !== null
-    )
-  })
+/** The profile Picker's radio holding focus — one while focus stays in the group. */
+const focusedProfileRadio = (page: Page) =>
+  page.locator(`${PROFILE} .picker__radio:focus`)
 
 // Behavior 6: Arrow keys move the check natively; the click Chromium
 // dispatches asks the daemon (`set_profile`), the ack flips the pill,
@@ -194,10 +189,10 @@ test('ArrowRight on the checked profile radio switches the profile and keeps foc
   await page.keyboard.press('ArrowRight')
   await expect(game).toBeChecked()
   await expect(music).not.toBeChecked()
-  expect(await focusInProfileGroup(page)).toBe(true)
+  await expect(focusedProfileRadio(page)).toHaveCount(1)
 
   await page.keyboard.press('ArrowLeft')
   await expect(music).toBeChecked()
   await expect(game).not.toBeChecked()
-  expect(await focusInProfileGroup(page)).toBe(true)
+  await expect(focusedProfileRadio(page)).toHaveCount(1)
 })

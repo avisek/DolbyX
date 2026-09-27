@@ -5,7 +5,15 @@
  * daemon, the Classic skin.
  */
 import type { Page } from '@playwright/test'
-import { box, expect, openAt, pageOverflow, test, tokenColor } from './fixtures'
+import {
+  background,
+  box,
+  expect,
+  openAt,
+  pageOverflow,
+  test,
+  tokenColor,
+} from './fixtures'
 
 /** A token's length in px as the root resolves it (rem tokens). */
 const tokenPx = (page: Page, token: string) =>
@@ -13,9 +21,6 @@ const tokenPx = (page: Page, token: string) =>
     const root = getComputedStyle(document.documentElement)
     return parseFloat(root.getPropertyValue(name)) * parseFloat(root.fontSize)
   }, token)
-
-const rowBackground = (page: Page, row: string) =>
-  page.locator(row).evaluate((el) => getComputedStyle(el).backgroundColor)
 
 const DIALOG = '.master-control:has(#master-deon)'
 
@@ -103,7 +108,7 @@ test('hovering a row tints it; focus in its box carries the focus tint and a rin
   const at = await box(page, `${DIALOG} .master-control__label`)
   await page.mouse.move(at.left + 4, at.top + at.height / 2)
   await expect
-    .poll(() => rowBackground(page, DIALOG))
+    .poll(() => background(page, DIALOG))
     .toBe(await tokenColor(page, '--hover-bg'))
   await expect(page.locator(`${DIALOG} .adv-slider__thumb`)).toHaveCSS(
     'scale',
@@ -117,7 +122,7 @@ test('hovering a row tints it; focus in its box carries the focus tint and a rin
   const field = page.getByRole('textbox', { name: 'Dialog Enhancer amount' })
   await expect(field).toBeFocused()
   await expect
-    .poll(() => rowBackground(page, DIALOG))
+    .poll(() => background(page, DIALOG))
     .toBe(await tokenColor(page, '--focus-tint'))
   await expect(field).toHaveCSS(
     'border-color',

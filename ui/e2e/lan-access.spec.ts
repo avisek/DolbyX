@@ -7,7 +7,7 @@
  * on binds the LAN listener for real (ADR-0012).
  */
 import type { Page } from '@playwright/test'
-import { box, expect, openAt, pageOverflow, test } from './fixtures'
+import { box, expect, openAt, pageOverflow, sameLine, test } from './fixtures'
 
 /** The page-side fold sampler's slot (armFoldSampler / foldSamples). */
 type FoldWindow = Window & { __fold?: Promise<number[]> }
@@ -120,9 +120,7 @@ test('at 390px the switch stays on the text line and the tools drop to a right-a
     return right - parseFloat(getComputedStyle(el).paddingRight)
   })
 
-  // Same line: the switch's box overlaps the text's vertically.
-  expect(toggle.top).toBeLessThan(text.bottom)
-  expect(toggle.bottom).toBeGreaterThan(text.top)
+  expect(sameLine(toggle, text)).toBe(true)
   expect(toggle.left).toBeGreaterThan(text.right)
   // Line 2, flush right.
   expect(tools.top).toBeGreaterThanOrEqual(toggle.bottom)

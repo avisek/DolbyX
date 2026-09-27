@@ -177,6 +177,16 @@ export const tokenColor = (page: Page, token: string) =>
     return color
   }, token)
 
+/** The computed background of `selector` — a hover / focus surface. */
+export const background = (page: Page, selector: string) =>
+  page.locator(selector).evaluate((el) => getComputedStyle(el).backgroundColor)
+
+/** Whether two boxes share a line — their vertical extents overlap. */
+export const sameLine = (
+  a: { top: number; bottom: number },
+  b: { top: number; bottom: number },
+) => a.top < b.bottom && b.top < a.bottom
+
 /** The computed background of `selector`'s `::before` — a hover / focus surface. */
 export const pseudoBackground = (page: Page, selector: string) =>
   page

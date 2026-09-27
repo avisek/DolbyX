@@ -1,11 +1,9 @@
-/* The Picker (#119): profiles and EQ presets on one skeleton — a
-   surface card in the Row language holding a label, radio pills and
-   the four Picker actions. Pills speak the Tristate segment language:
-   the radio hides with `opacity` (still focusable, ADR-0011) behind
-   its label, `:checked + label` fills accent, hover lifts the text
-   under focus weight, the ring lands on the label. Renaming swaps the
-   name for a field sized to its text — the field IS the pill, so it
-   starts at the pill's width and grows as typed. */
+/* The Picker (#119): profiles and EQ presets on one skeleton — a Row
+   surface holding a label, radio pills and the four Picker actions.
+   Pills speak the Tristate segment language: the radio hides with
+   `opacity` (still focusable, ADR-0011) behind its label, `:checked +
+   label` fills accent, hover lifts the text under focus weight, the
+   ring lands on the label. */
 
 /* Wide: [label] [pills …] … [actions]; the Row surface, hovering and
    focus-tinting like the LAN Access Row. */
@@ -91,22 +89,17 @@
   color: var(--color-text);
 }
 
-.picker__radio:checked + :where(.picker__option:hover) {
-  color: var(--color-bg);
-}
-
 /* The ring on the label — for its radio (a sibling) and for the rename
    field it holds. */
 .picker__radio:focus-visible + .picker__option,
 .picker__option:has(:focus-visible) {
   outline: var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-/* Renaming: the name leaves, the field takes its place with the pill's
-   type, padding and hairline — the pill's border moves onto the field
-   so the field's box is exactly the pill's — sized to its text
-   (`field-sizing: content`), so it starts at the name's width and
+/* Renaming: the name leaves and the field IS the pill — its type,
+   padding and hairline (the border moves onto the field, so the two
+   boxes are one), sized to its text: it starts at the name's width and
    grows as typed. The pill's ring already marks it; no inner ring. */
 .picker__option--renaming {
   padding: 0;
@@ -123,7 +116,6 @@
   padding: 0 var(--space-3);
   border: 1px solid var(--color-accent);
   border-radius: inherit;
-  font: inherit;
   text-align: inherit;
   outline: none;
   field-sizing: content;
@@ -134,7 +126,6 @@
 .picker__actions {
   display: flex;
   grid-area: actions;
-  justify-self: end;
   align-items: center;
   gap: var(--space-1);
 }
