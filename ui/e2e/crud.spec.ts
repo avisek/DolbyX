@@ -2,9 +2,17 @@
  * Slice 18 part C (#26), behavior 6: full CRUD journeys — real
  * browser, real daemon, real engine. Disabled states derive live from
  * divergence (resolved ≠ the snapshot's baseline) and the factory/None
- * matrix; affordances disable, never hide.
+ * matrix; affordances disable, never hide. Both rows are the shared
+ * Picker (#119): native radios, checked on the daemon's ack.
  */
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+
+/** An EQ pill by name — the radio hides behind its label; clicks land on the pill. */
+const eqPill = (page: Page, name: string) =>
+  page
+    .getByRole('radiogroup', { name: 'EQ Preset' })
+    .getByText(name, { exact: true })
 
 test('profile journey: clone Music → rename → edit → reset → revert-tracked Reset → delete', async ({
   page,
@@ -16,8 +24,8 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   const reset = page.getByRole('button', { name: 'Reset profile' })
 
   // Factory Music selected, nothing diverging: only Add is live.
-  const music = page.getByRole('tab', { name: 'Music' })
-  await expect(music).toHaveAttribute('aria-selected', 'true')
+  const music = page.getByRole('radio', { name: 'Music', exact: true })
+  await expect(music).toBeChecked()
   await expect(add).toBeEnabled()
   await expect(rename).toBeDisabled()
   await expect(remove).toBeDisabled()
@@ -26,8 +34,8 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   // The tracer bullet: Add clones Music's resolved content as
   // `Music 2`, and the ack's minted id auto-selects the clone.
   await add.click()
-  const clone = page.getByRole('tab', { name: 'Music 2' })
-  await expect(clone).toHaveAttribute('aria-selected', 'true')
+  const clone = page.getByRole('radio', { name: 'Music 2' })
+  await expect(clone).toBeChecked()
   await expect(rename).toBeEnabled()
   await expect(remove).toBeEnabled()
   // A Music clone diverges from the custom baseline (dvla 4 vs 7, …):
@@ -41,8 +49,8 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   await expect(field).toHaveValue('Music 2')
   await field.fill('Late Night')
   await field.press('Enter')
-  const renamed = page.getByRole('tab', { name: 'Late Night' })
-  await expect(renamed).toHaveAttribute('aria-selected', 'true')
+  const renamed = page.getByRole('radio', { name: 'Late Night' })
+  await expect(renamed).toBeChecked()
 
   // Edit: flip Dialog Enhancer off (Music ships it on).
   const dialog = page.getByRole('switch', { name: 'Dialog Enhancer enable' })
@@ -57,7 +65,7 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   await expect(leveller).toHaveValue('4')
   await reset.click()
   await expect(leveller).toHaveValue('7')
-  await expect(renamed).toHaveAttribute('aria-selected', 'true')
+  await expect(renamed).toBeChecked()
   await expect(reset).toBeDisabled()
 
   // Behavior 2, live both ways on the originating tab: an edit off
@@ -74,11 +82,11 @@ test('profile journey: clone Music → rename → edit → reset → revert-trac
   await expect(dialog).not.toBeChecked()
   await expect(reset).toBeDisabled()
 
-  // Delete: the tab goes; the active profile falls to the Fallback
+  // Delete: the pill goes; the active profile falls to the Fallback
   // profile.
   await remove.click()
   await expect(renamed).toHaveCount(0)
-  await expect(music).toHaveAttribute('aria-selected', 'true')
+  await expect(music).toBeChecked()
   await expect(rename).toBeDisabled()
 })
 
@@ -94,7 +102,7 @@ test('EQ preset journey: capture from None → rename → delete, matrix trackin
 
   // None selected out of the box: Rename/Delete disabled, and the
   // None row's scoped reset has nothing to clear.
-  await expect(none).toHaveAttribute('aria-checked', 'true')
+  await expect(none).toBeChecked()
   await expect(rename).toBeDisabled()
   await expect(remove).toBeDisabled()
   await expect(reset).toBeDisabled()
@@ -102,18 +110,18 @@ test('EQ preset journey: capture from None → rename → delete, matrix trackin
   // Picking a factory preset keeps Rename/Delete disabled — the
   // matrix follows the picked item live.
   const rich = page.getByRole('radio', { name: 'Rich' })
-  await rich.click()
-  await expect(rich).toHaveAttribute('aria-checked', 'true')
+  await eqPill(page, 'Rich').click()
+  await expect(rich).toBeChecked()
   await expect(rename).toBeDisabled()
   await expect(remove).toBeDisabled()
 
   // Back on None, Add captures Music's own resolved 9 as `Preset 1`;
   // the minted id auto-selects it for this profile.
-  await none.click()
-  await expect(none).toHaveAttribute('aria-checked', 'true')
+  await eqPill(page, 'None').click()
+  await expect(none).toBeChecked()
   await add.click()
   const captured = page.getByRole('radio', { name: 'Preset 1' })
-  await expect(captured).toHaveAttribute('aria-checked', 'true')
+  await expect(captured).toBeChecked()
   await expect(rename).toBeEnabled()
   await expect(remove).toBeEnabled()
   // Music's own 9 equal the preset custom baseline exactly, so the
@@ -127,10 +135,10 @@ test('EQ preset journey: capture from None → rename → delete, matrix trackin
   await field.fill('Warm')
   await field.press('Enter')
   const renamed = page.getByRole('radio', { name: 'Warm' })
-  await expect(renamed).toHaveAttribute('aria-checked', 'true')
+  await expect(renamed).toBeChecked()
 
   // Delete falls this profile to explicit None, never a peer preset.
   await remove.click()
   await expect(renamed).toHaveCount(0)
-  await expect(none).toHaveAttribute('aria-checked', 'true')
+  await expect(none).toBeChecked()
 })

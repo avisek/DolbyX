@@ -1,0 +1,214 @@
+/* The Picker (#119): profiles and EQ presets on one skeleton — a
+   surface card in the Row language holding a label, radio pills and
+   the four Picker actions. Pills speak the Tristate segment language:
+   the radio hides with `opacity` (still focusable, ADR-0011) behind
+   its label, `:checked + label` fills accent, hover lifts the text
+   under focus weight, the ring lands on the label. Renaming swaps the
+   name for a field sized to its text — the field IS the pill, so it
+   starts at the pill's width and grows as typed. */
+
+/* Wide: [label] [pills …] … [actions]; the Row surface, hovering and
+   focus-tinting like the LAN Access Row. */
+.picker {
+  display: grid;
+  grid-template-areas: 'label options actions';
+  grid-template-columns: var(--label-w) minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-2);
+  background-color: var(--color-surface);
+  /* The hover lift is a layer over the surface — a gradient, so the
+     card colour stays one token; the base is a gradient too, so the
+     two interpolate. */
+  background-image: linear-gradient(transparent, transparent);
+  transition: background-image var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a Row holding focus always wins. */
+:where(.picker:hover) {
+  background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
+}
+
+.picker:has(:focus-visible) {
+  background-image: linear-gradient(var(--focus-tint), var(--focus-tint));
+}
+
+.picker__label {
+  grid-area: label;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  user-select: none;
+}
+
+.picker__options {
+  grid-area: options;
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+/* The radio: present for the keyboard, painted through its pill. */
+.picker__radio {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.picker__option {
+  display: inline-flex;
+  align-items: center;
+  block-size: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-bg);
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    color var(--hover-ms) ease;
+}
+
+.picker__radio:checked + .picker__option {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* Hover under focus weight: a focused pill always wins. */
+:where(.picker__option:hover) {
+  border-color: var(--hover-line);
+  color: var(--color-text);
+}
+
+.picker__radio:checked + :where(.picker__option:hover) {
+  color: var(--color-bg);
+}
+
+/* The ring on the label — for its radio (a sibling) and for the rename
+   field it holds. */
+.picker__radio:focus-visible + .picker__option,
+.picker__option:has(:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Renaming: the name leaves, the field takes its place with the pill's
+   type, padding and hairline — the pill's border moves onto the field
+   so the field's box is exactly the pill's — sized to its text
+   (`field-sizing: content`), so it starts at the name's width and
+   grows as typed. The pill's ring already marks it; no inner ring. */
+.picker__option--renaming {
+  padding: 0;
+  border-width: 0;
+}
+
+.picker__option--renaming .picker__name {
+  display: none;
+}
+
+.picker__field {
+  align-self: stretch;
+  min-inline-size: 3ch;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: inherit;
+  font: inherit;
+  text-align: inherit;
+  outline: none;
+  field-sizing: content;
+}
+
+/* — Actions: the four square ghost buttons at the row's end — */
+
+.picker__actions {
+  display: flex;
+  grid-area: actions;
+  justify-self: end;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.picker__action {
+  display: grid;
+  place-items: center;
+  inline-size: var(--control-h);
+  block-size: var(--control-h);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--hover-ms) ease,
+    background var(--hover-ms) ease;
+}
+
+/* The glyph: an Icon token mask painted in the button's colour. */
+.picker__action::before {
+  content: '';
+  inline-size: var(--icon-size);
+  block-size: var(--icon-size);
+  background-color: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+}
+
+.picker__add::before {
+  mask-image: var(--icon-plus);
+}
+
+.picker__rename::before {
+  mask-image: var(--icon-pencil);
+}
+
+.picker__delete::before {
+  mask-image: var(--icon-trash);
+}
+
+.picker__reset::before {
+  mask-image: var(--icon-rotate-ccw);
+}
+
+/* Hover under focus weight; a disabled action never lifts. */
+:where(.picker__action:hover):enabled {
+  background: var(--hover-bg);
+  color: var(--color-text);
+}
+
+.picker__action:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.picker__action:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+/* — Narrow column: label and actions share line 1, the pills take
+   line 2; DOM order never moves (a literal: size queries take no
+   tokens). — */
+
+@container app (inline-size < 48rem) {
+  .picker {
+    grid-template-areas:
+      'label actions'
+      'options options';
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
