@@ -8,8 +8,8 @@ import type { Page } from '@playwright/test'
 import {
   bleedHits,
   expect,
+  expectNoOverflow,
   openAt,
-  pageOverflow,
   pseudoBackground,
   test,
   tokenColor,
@@ -93,7 +93,6 @@ for (const width of [390, 1280]) {
     const { x, y } = await titleCentre(page)
     await page.mouse.move(x, y)
     await expect.poll(() => rowPseudoBackground(page)).not.toBe(TRANSPARENT)
-    const overflow = await pageOverflow(page)
-    expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+    await expectNoOverflow(page)
   })
 }

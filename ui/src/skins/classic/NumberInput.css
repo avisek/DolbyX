@@ -1,9 +1,10 @@
-/* The shared numeric box (#87): the field fills the wrapper edge to
-   edge; the unit is an inert overlay the field pads for. Every box is
-   the same width, unit or not — 5ch of digits + the unit slot + padding
-   — so columns line up. The two lengths are registered so `ch` / `em`
-   resolve on the wrapper once and inherit as absolute lengths (the unit
-   uses a smaller font). Control-height, hover under focus weight. The
+/* The shared numeric box (#87): the field — the shared inline field
+   (Field.css) — fills the wrapper edge to edge; the unit is an inert
+   overlay the field pads for. Every box is the same width, unit or not
+   — 5ch of digits + the unit slot + padding — so columns line up. The
+   two lengths are registered so `ch` / `em` resolve on the wrapper once
+   and inherit as absolute lengths (the unit uses a smaller font). Hover
+   under focus weight. The
    Scrub (#88): `--scrub` (capability) gets the ns-resize cursor while
    idle — "you can drag this" — and the text cursor once focused —
    "you're typing now"; the gesture itself works in either state.
@@ -48,31 +49,22 @@
 .adv-input__field {
   display: block;
   width: 100%;
-  height: var(--control-h);
-  margin: 0;
   padding: 0 calc(var(--adv-unit-w) + var(--adv-pad-x)) 0 var(--adv-pad-x);
-  border: 1px solid var(--color-bg);
-  border-radius: var(--radius-1);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font: inherit;
   text-align: right;
-  transition: border-color 0.12s ease;
 }
 
 /* The box lifts with its label — an Advanced card, a Master control
    Row — under focus weight (`:hover` inside `:where()`, ADR-0011), so
-   the focus rule outranks it by specificity, not source order. The
-   focus line is the border itself: the same property hover paints, so
-   the contest is real. Readonly fields get no lift. */
+   the focus rule (Field.css) outranks it by specificity, not source
+   order. The focus line is the border itself: the same property hover
+   paints, so the contest is real. Readonly fields get no lift. */
 :where(label:hover) .adv-input__field:where(:read-write) {
   border-color: var(--hover-line);
 }
 
-.adv-input__field:focus,
+/* A Scrub holds the accent line whether or not the field has focus. */
 .adv-input--scrubbing .adv-input__field {
   border-color: var(--color-accent);
-  outline: none;
 }
 
 .adv-input__field:read-only {

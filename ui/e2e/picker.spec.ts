@@ -12,7 +12,7 @@ import {
   countStateFrames,
   expect,
   openAt,
-  pageOverflow,
+  expectNoOverflow,
   sameLine,
   test,
   TRANSPARENT,
@@ -114,8 +114,7 @@ test('at 390px each Picker puts label + actions on line 1 and the pills below', 
       Math.max(label.bottom, actions.bottom),
     )
   }
-  const overflow = await pageOverflow(page)
-  expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+  await expectNoOverflow(page)
 })
 
 // Behavior 8, 1280: label, pills and actions on one line, in DOM order.
@@ -130,8 +129,7 @@ test('at 1280px each Picker is one line: label, pills, actions', async ({
     expect(options.left).toBeGreaterThan(label.right)
     expect(actions.left).toBeGreaterThanOrEqual(options.right)
   }
-  const overflow = await pageOverflow(page)
-  expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+  await expectNoOverflow(page)
 })
 
 const ACTIONS = ['Add', 'Rename', 'Delete', 'Reset'].flatMap((verb) => [

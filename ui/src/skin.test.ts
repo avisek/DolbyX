@@ -64,6 +64,42 @@ describe('the tree', () => {
   })
 })
 
+// #94: the entry point imports exactly the live sheets — every
+// stylesheet in the skin tree once, nothing missing, nothing orphaned —
+// and each component sheet names a component that still exists.
+describe('the Classic skin entry point', () => {
+  const skin = import.meta.glob<string>('./skins/classic/*.css', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  })
+  const components = import.meta.glob('./components/*.tsx')
+  /** `./a/b/Name.ext` → `Name`. */
+  const stem = (path: string) => path.split('/').pop()?.split('.')[0] ?? ''
+  /** Sheets that are the skin's own, not a component's. */
+  const SKIN_OWN = ['theme', 'base', 'App', 'Field', 'ResetMarker']
+
+  it('imports every sheet in the tree exactly once', () => {
+    const index = skin['./skins/classic/index.css'] ?? ''
+    const imports = [...index.matchAll(/@import\s+'\.\/([^']+)\.css'/g)].map(
+      ([, name]) => name ?? '',
+    )
+    const sheets = Object.keys(skin)
+      .map(stem)
+      .filter((name) => name !== 'index')
+    expect([...imports].sort()).toEqual([...sheets].sort())
+  })
+
+  it('has a live component behind every component sheet', () => {
+    const live = new Set(Object.keys(components).map(stem))
+    const dead = Object.keys(skin)
+      .map(stem)
+      .filter((name) => name !== 'index' && !SKIN_OWN.includes(name))
+      .filter((name) => !live.has(name))
+    expect(dead).toEqual([])
+  })
+})
+
 // Behavior 6: a skin author has one screen to read — the UI README's
 // authoring section — and the token file names the contract it serves.
 describe('the authoring guide', () => {

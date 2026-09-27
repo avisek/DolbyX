@@ -3,22 +3,14 @@
  * Real browser, real daemon, the shipped parameter table.
  */
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expandAdvanced, expect, test } from './fixtures'
 
-/**
- * Opens the panel; the category sections are the subject. The open pref
- * is per origin, so a second page of the same context starts open —
- * only a collapsed panel gets the click.
- */
+/** Opens the app and the panel; the category sections are the subject. */
 async function openAdvanced(page: Page): Promise<void> {
   await page.goto('/')
   // By class: an open panel's readouts are `status` roles too.
   await expect(page.locator('.connection-badge')).toHaveText('Connected')
-  const header = page.getByRole('button', { name: 'Advanced' })
-  if ((await header.getAttribute('aria-expanded')) === 'false') {
-    await header.click()
-  }
-  await expect(header).toHaveAttribute('aria-expanded', 'true')
+  await expandAdvanced(page)
 }
 
 // Behavior 5: the fold toggle IS the header's box — on every category,

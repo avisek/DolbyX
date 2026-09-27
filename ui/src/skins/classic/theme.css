@@ -25,6 +25,12 @@
   --power-h: 2.1rem;
   /* The Reset marker's square (cards, headers, pickers, master rows) */
   --reset-w: 1.4rem;
+  /* Control geometry: the Slider's track thickness, the switch thumb's
+     inset, the Slider thumb's surface-coloured border, band spacing */
+  --track-h: 0.25rem;
+  --thumb-inset: 0.1875rem;
+  --thumb-border: 0.125rem;
+  --band-gap: 0.125rem;
 
   /* Type scale */
   --text-xs: 0.68rem;
@@ -41,14 +47,17 @@
   --qr-w: 8rem;
   --label-w: 5.5rem; /* picker row label */
 
-  /* Radii: controls / cards */
+  /* Radii: bars + tracks / controls / cards / pills (switch, badge) */
+  --radius-0: 0.125rem;
   --radius-1: 0.35rem;
   --radius-2: 0.6rem;
+  --radius-pill: 999px;
 
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
-  /* The lift of a Popover off the page */
+  /* The lift of a Popover off the page; the Band editor's, smaller */
   --shadow-popover: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
+  --shadow-editor: 0 var(--radius-0) var(--space-2) rgb(0 0 0 / 45%);
 
   /* Access hues: the skin color-codes the 4-CC by settability bucket */
   --hue-settable: var(--color-accent);
@@ -74,9 +83,71 @@
   --tint: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --focus-tint: color-mix(in srgb, var(--color-accent) 7%, transparent);
 
-  /* Focus ring: always outranks hover chrome; hover line sits under it */
+  /* Focus ring: always outranks hover chrome; hover line sits under it;
+     the ring's gap where it sits outside a round control */
   --focus-ring: 1px solid var(--color-accent);
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  --ring-offset: 0.125rem;
+
+  /* Band strip: row lines, the hovered column, the Live arrays' bars */
+  --bands-lines: rgb(255 255 255 / 4%);
+  --bands-hover: rgb(255 255 255 / 7%);
+  --bands-live: color-mix(in srgb, var(--color-accent) 75%, #fff);
+
+  /* Visualizer paints (ADR-0008) — the DsUI drawables: each bitmap
+     asset is one image token, like the icon masks; flat colours are
+     colour tokens. The rendering rules (rows, quantization, zones)
+     stay in Visualizer.css */
+  --vis-bg: radial-gradient(
+    58% 130% at 50% 108%,
+    #2a82cc 0%,
+    #0e5490 42%,
+    #022f56 68%,
+    #001322 88%,
+    #000 100%
+  ); /* eq_background.png: blue glow at bottom centre, black-edged */
+  --vis-lattice: #000; /* the brick insets */
+  /* mock_gv_brick_{blue,yellow,red}: the fill's zones, all 60% alpha */
+  --vis-brick-blue: rgb(102 197 220 / 60%);
+  --vis-brick-yellow: rgb(202 181 145 / 60%);
+  --vis-brick-red: rgb(184 145 147 / 60%);
+  --vis-pip: radial-gradient(
+    ellipse closest-side,
+    #2bc9fd 0%,
+    rgb(105 236 255 / 45%) 55%,
+    transparent 100%
+  ); /* brick_blue_light: a soft glow */
+  --vis-off: rgb(2 10 18 / 55%); /* `ven` off: fills + pips dark */
+
+  /* EQ editor paints — GraphicEqualizerPainter (ADR-0008), HITL-eyeballed
+     in px, the painter's own unit: the thumb drawables as image tokens,
+     the track's two passes as colours + widths (its geometry is a rule,
+     EqCurve.css) */
+  --eq-track-w: 12px; /* eq_bar: the soft glow's width… */
+  --eq-track-glow: rgb(110 190 255 / 16%);
+  --eq-track-core-w: 1.5px; /* …and the sharp core's */
+  --eq-track-core: rgb(158 216 255 / 55%);
+  --eq-thumb-size: 28px;
+  --eq-thumb: radial-gradient(
+    circle,
+    rgb(170 225 255 / 45%) 0 12%,
+    rgb(117 210 255 / 12%) 26% 34%,
+    #8fd2ff 44% 60%,
+    rgb(90 180 255 / 28%) 72%,
+    transparent 80%
+  ); /* eq_thumb: a hollow cyan ring with a soft bloom */
+  --eq-thumb-active: radial-gradient(
+    circle,
+    rgb(225 245 255 / 85%) 0 14%,
+    rgb(150 225 255 / 25%) 26% 32%,
+    #c2e9ff 42% 62%,
+    rgb(120 200 255 / 45%) 76%,
+    transparent 88%
+  ); /* eq_thumb_touch_state: hotter core, solid ring, wider bloom */
+  --eq-curve: #75d2ff;
+  --eq-glow-w: 10px;
+  --eq-glow-blur: 2.8px; /* BlurMaskFilter radius 4 as Skia σ = 0.577 · r + 0.5 */
+  --eq-stroke-w: 1.5px; /* the painter's 3 px, canvas-scale, HITL-halved */
 
   /* Icons: 24-grid outline glyphs (stroke 2, round caps / joins), used
      as masks painted in currentColor on a --icon-size square; the
