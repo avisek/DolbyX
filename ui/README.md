@@ -68,7 +68,9 @@ paints it. v2.0 ships one skin, **Classic**, and no switcher.
 - `index.css` — the skin entry point; `main.tsx` imports only this
 - `theme.css` — tokens; `base.css` — resets + typography
 - `<Component>.css` — one BEM file per component; `index.css` orders them
-- `ResetMarker.css` — the Reset marker's morph, shared by card + header
+- `Field.css` — the inline field's geometry, shared by the numeric box,
+  the URL field and the rename field; `ResetMarker.css` — the Reset
+  marker's morph, shared by card + header + Row
 
 **Add a component's stylesheet**: create `src/skins/classic/<Name>.css`,
 `@import` it from `index.css`. Never import CSS from `.tsx` — ESLint
@@ -78,25 +80,26 @@ rejects it everywhere but `main.tsx` (`src/skin.test.ts` pins the rule).
 components never read them. Every colour and every `px` length but the
 `1px` hairline lives here (`src/skins/audit.test.ts` pins it):
 
-| Token                                                                                                           | Meaning                                           |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` `--font-mono` | palette + type                                    |
-| `--space-1…6`                                                                                                   | spacing scale, 0.25–2 rem                         |
-| `--control-h`                                                                                                   | one height for input / toggle / tristate / slider |
-| `--radius-1` `--radius-2` `--radius-pill`                                                                       | controls / cards / pills                          |
-| `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                  |
-| `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                          |
-| `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it    |
-| `--power-h` `--reset-w`                                                                                         | the header power switch; the Reset marker square  |
-| `--text-xs/sm/md/lg/title` `--tracking` `--tracking-wide`                                                       | type scale; letter-spacing                        |
-| `--page-w` `--vis-min` `--qr-w` `--label-w`                                                                     | Shell column; visualizer cell; QR; picker label   |
-| `--z-popover` `--shadow-popover`                                                                                | the one layer above the flow; its lift            |
-| `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions            |
-| `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)  |
-| `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks            |
-| `--bands-grid` `--bands-hover` `--hue-live`                                                                     | Band strip lines; hovered column; Live bars       |
-| `--vis-bg` `--vis-lattice` `--vis-brick-*` `--vis-pip` `--vis-off`                                              | visualizer paints (rendering rules stay in CSS)   |
-| `--eq-track(-w)` `--eq-thumb(-size/-active)` `--eq-curve` `--eq-glow-w/-blur` `--eq-stroke-w`                   | EQ editor paints + stroke widths                  |
+| Token                                                                                                           | Meaning                                                              |
+| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` `--font-mono` | palette + type                                                       |
+| `--space-1…6`                                                                                                   | spacing scale, 0.25–2 rem                                            |
+| `--control-h`                                                                                                   | one height for input / toggle / tristate / slider                    |
+| `--radius-0` `--radius-1` `--radius-2` `--radius-pill`                                                          | bars + tracks / controls / cards / pills                             |
+| `--track-h` `--thumb-inset` `--thumb-border` `--band-gap` `--ring-offset`                                       | Slider track; switch thumb; Slider thumb; bands; ring gap            |
+| `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                                     |
+| `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                                             |
+| `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it                       |
+| `--power-h` `--reset-w`                                                                                         | the header power switch; the Reset marker square                     |
+| `--text-xs/sm/md/lg/title` `--tracking` `--tracking-wide`                                                       | type scale; letter-spacing                                           |
+| `--page-w` `--vis-min` `--qr-w` `--label-w`                                                                     | Shell column; visualizer cell; QR; picker label                      |
+| `--z-popover` `--shadow-popover` `--shadow-editor`                                                              | the one layer above the flow; its lift; the Band editor's            |
+| `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions                               |
+| `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)                     |
+| `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks                               |
+| `--bands-lines` `--bands-hover` `--bands-live`                                                                  | Band strip lines; hovered column; Live bars                          |
+| `--vis-bg` `--vis-pip` `--vis-lattice` `--vis-brick-*` `--vis-off`                                              | visualizer: drawables as image tokens; flat paints                   |
+| `--eq-thumb(-active)` `--eq-track-core/-glow` `--eq-curve` `--eq-*-w` `--eq-glow-blur` `--eq-thumb-size`        | EQ editor: thumb drawables; colours; widths (px, the painter's unit) |
 
 **Rules** (ADR-0011 + addendum):
 
@@ -128,8 +131,8 @@ components never read them. Every colour and every `px` length but the
 - **Screen-level checks** (`e2e/main-screen.spec.ts`): no sideways
   overflow at 390 / 700 / 1280 with every region open, a skin-painted
   focus ring on every tab stop, the badge's `--connected` following
-  the socket; `e2e/baselines/*.png` are rewritten every run for
-  eyeballing, never compared.
+  the socket. `e2e/baselines/*.png` are for eyeballing, never compared;
+  refresh them with `REFRESH_BASELINES=1 pnpm e2e -g screenshot`.
 - **Icons**: buttons render empty, named by `aria-label`; paint an
   Icon token as a mask in `currentColor`:
 

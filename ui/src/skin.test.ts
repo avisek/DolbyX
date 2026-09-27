@@ -77,7 +77,7 @@ describe('the Classic skin entry point', () => {
   /** `./a/b/Name.ext` → `Name`. */
   const stem = (path: string) => path.split('/').pop()?.split('.')[0] ?? ''
   /** Sheets that are the skin's own, not a component's. */
-  const SKIN_OWN = ['theme', 'base', 'App', 'ResetMarker']
+  const SKIN_OWN = ['theme', 'base', 'App', 'Field', 'ResetMarker']
 
   it('imports every sheet in the tree exactly once', () => {
     const index = skin['./skins/classic/index.css'] ?? ''
@@ -88,7 +88,6 @@ describe('the Classic skin entry point', () => {
       .map(stem)
       .filter((name) => name !== 'index')
     expect([...imports].sort()).toEqual([...sheets].sort())
-    expect(new Set(imports).size).toBe(imports.length)
   })
 
   it('has a live component behind every component sheet', () => {

@@ -3,8 +3,6 @@
    (ADR-0011 addendum). Control-height, hover under focus weight. */
 
 .adv-toggle {
-  --thumb-inset: 0.2rem;
-
   position: relative;
   flex: none;
   width: calc(var(--control-h) * 1.75);
@@ -52,5 +50,5 @@
 
 .adv-toggle:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: 0.125rem;
+  outline-offset: var(--ring-offset);
 }

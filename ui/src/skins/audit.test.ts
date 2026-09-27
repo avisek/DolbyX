@@ -80,8 +80,8 @@ describe('the skin tree', () => {
     ).toEqual([])
   })
 
-  // #94 behavior 1: lengths are tokens or `rem` — no `px` outside the
-  // theme file but the hairline (`1px`, `-1px`) and a unit-bearing zero.
+  // #94 behavior 1: lengths are tokens — no `px` outside the theme file
+  // but the hairline (`1px`, `-1px`) and a registered property's `0px`.
   it('uses no px length but the hairline outside the theme', () => {
     expect(offenders(/(?<![\w.])(?!-?[01]px\b)-?\d*\.?\d+px\b/, true)).toEqual(
       [],

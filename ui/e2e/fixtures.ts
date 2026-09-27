@@ -193,12 +193,45 @@ export const pseudoBackground = (page: Page, selector: string) =>
     .locator(selector)
     .evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
 
-/** `scrollWidth` vs `innerWidth` — equal when nothing overflows sideways. */
-export const pageOverflow = (page: Page) =>
-  page.evaluate(() => ({
+/** Nothing overflows sideways: `scrollWidth` equals `innerWidth`. */
+export async function expectNoOverflow(page: Page): Promise<void> {
+  const { scrollWidth, innerWidth } = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     innerWidth: window.innerWidth,
   }))
+  expect(scrollWidth).toBe(innerWidth)
+}
+
+/** Flips LAN via the Row's text — the label forwards to the switch. */
+export async function flipLan(page: Page, on: boolean): Promise<void> {
+  await page.getByText('LAN Access').click()
+  await expect(page.getByRole('switch', { name: 'LAN access' })).toBeChecked({
+    checked: on,
+  })
+}
+
+/** Waits until the LAN tools' fold has landed — no transition still running. */
+export const foldSettled = (page: Page) =>
+  expect
+    .poll(() =>
+      page
+        .locator('.lan-access__tools')
+        .evaluate((el) => el.getAnimations().length),
+    )
+    .toBe(0)
+
+/**
+ * Expands the Advanced panel. The open pref is per origin, so a second
+ * page of the same context starts open — only a collapsed panel gets
+ * the click.
+ */
+export async function expandAdvanced(page: Page): Promise<void> {
+  const header = page.getByRole('button', { name: 'Advanced' })
+  if ((await header.getAttribute('aria-expanded')) === 'false') {
+    await header.click()
+  }
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
+}
 
 /**
  * Whether `target` is what `elementFromPoint` finds 1 px inside and

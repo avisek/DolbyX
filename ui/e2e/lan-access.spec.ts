@@ -7,19 +7,22 @@
  * on binds the LAN listener for real (ADR-0012).
  */
 import type { Page } from '@playwright/test'
-import { box, expect, openAt, pageOverflow, sameLine, test } from './fixtures'
+import {
+  box,
+  expect,
+  expectNoOverflow,
+  flipLan,
+  foldSettled,
+  openAt,
+  sameLine,
+  test,
+} from './fixtures'
 
 /** The page-side fold sampler's slot (armFoldSampler / foldSamples). */
 type FoldWindow = Window & { __fold?: Promise<number[]> }
 
 const lanSwitch = (page: Page) =>
   page.getByRole('switch', { name: 'LAN access' })
-
-/** Flips LAN via the Row's text — the label forwards to the switch. */
-async function flipLan(page: Page, on: boolean): Promise<void> {
-  await page.getByText('LAN Access').click()
-  await expect(lanSwitch(page)).toBeChecked({ checked: on })
-}
 
 /**
  * Arms a page-side sampler: once `--on` flips, it records the tools'
@@ -59,16 +62,6 @@ async function armFoldSampler(page: Page): Promise<void> {
 
 const foldSamples = (page: Page) =>
   page.evaluate(() => (window as FoldWindow).__fold)
-
-/** Waits until the tools' fold has landed — no transition still running. */
-const foldSettled = (page: Page) =>
-  expect
-    .poll(() =>
-      page
-        .locator('.lan-access__tools')
-        .evaluate((el) => el.getAnimations().length),
-    )
-    .toBe(0)
 
 const toolsVisibility = (page: Page) =>
   page
@@ -134,13 +127,11 @@ for (const width of [390, 1280]) {
     page,
   }) => {
     await openAt(page, width)
-    let overflow = await pageOverflow(page)
-    expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+    await expectNoOverflow(page)
 
     await flipLan(page, true)
     await foldSettled(page)
-    overflow = await pageOverflow(page)
-    expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+    await expectNoOverflow(page)
   })
 }
 

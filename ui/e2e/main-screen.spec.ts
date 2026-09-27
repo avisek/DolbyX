@@ -7,35 +7,16 @@
  */
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
-import { expect, openAt, pageOverflow, test, tokenColor } from './fixtures'
-
-/** Flips LAN on via the Row's text — the label forwards to the switch. */
-async function flipLanOn(page: Page): Promise<void> {
-  await page.getByText('LAN Access').click()
-  await expect(page.getByRole('switch', { name: 'LAN access' })).toBeChecked()
-  // The tools fold in; geometry is read once the fold has landed.
-  await expect
-    .poll(() =>
-      page
-        .locator('.lan-access__tools')
-        .evaluate((el) => el.getAnimations().length),
-    )
-    .toBe(0)
-}
-
-/** Expands the Advanced panel (a per-origin pref: only a collapsed one gets the click). */
-async function expandAdvanced(page: Page): Promise<void> {
-  const header = page.getByRole('button', { name: 'Advanced' })
-  if ((await header.getAttribute('aria-expanded')) === 'false') {
-    await header.click()
-  }
-  await expect(header).toHaveAttribute('aria-expanded', 'true')
-}
-
-const expectNoOverflow = async (page: Page) => {
-  const { scrollWidth, innerWidth } = await pageOverflow(page)
-  expect(scrollWidth).toBe(innerWidth)
-}
+import {
+  expandAdvanced,
+  expect,
+  expectNoOverflow,
+  flipLan,
+  foldSettled,
+  openAt,
+  test,
+  tokenColor,
+} from './fixtures'
 
 // Behavior 2: with the panel open and LAN on, nothing widens the page at
 // any width — QR Popover closed, open, and closed again.
@@ -45,7 +26,8 @@ for (const width of [390, 700, 1280]) {
   }) => {
     await openAt(page, width)
     await expandAdvanced(page)
-    await flipLanOn(page)
+    await flipLan(page, true)
+    await foldSettled(page)
     await expectNoOverflow(page)
 
     const figure = page.locator('.lan-access__qr')
@@ -67,12 +49,12 @@ interface Stop {
 }
 
 /**
- * The focused element, named by its accessible name / text / class;
- * `indicated` when a ring the skin painted (an outline, never the
- * browser's `auto` fallback) sits on it, its `::before`, a descendant
- * (a thumb), or its next sibling (a hidden radio's pill), or its border
- * is the accent line — the skin's focus mark on fields. `last` on the
- * Advanced header, the main screen's end.
+ * The focused element, named by its accessible name / text; `indicated`
+ * when a ring the skin painted (an outline, never the browser's `auto`
+ * fallback) sits on it, its `::before`, a descendant (a thumb), or its
+ * next sibling (a hidden radio's pill), or its border is the accent
+ * line — the skin's focus mark on fields. `last` on the Advanced
+ * header, the main screen's end.
  */
 const describeFocus = (page: Page, accent: string) =>
   page.evaluate(async (accentColor): Promise<Stop> => {
@@ -106,17 +88,38 @@ const describeFocus = (page: Page, accent: string) =>
     }
   }, accent)
 
-// Behavior 3: Tab through the whole main screen — power, LAN row, both
-// Pickers, the EQ sliders, the Master control Rows, the Advanced
-// header — and every stop shows a focus indicator.
+/**
+ * The Master control Rows' stops in DOM order: the Reset marker only
+ * while the pair diverges (`disabled` when clean — the walk diverges
+ * Dialog Enhancer first), then the switch, the box and the Slider,
+ * which share a name.
+ */
+const masterStops = (control: string, diverged = false) => [
+  ...(diverged ? [`Reset ${control}`] : []),
+  `${control} enable`,
+  `${control} amount`,
+  `${control} amount`,
+]
+
+// Behavior 3: Tab through the whole main screen — power, the LAN Access
+// Row, both Pickers with an enabled Reset, the EQ sliders, the Master
+// control Rows with an enabled Reset marker, the Advanced header — and
+// every stop shows a focus indicator.
 test('every tab stop on the main screen shows a focus indicator', async ({
   page,
 }) => {
   await openAt(page, 1280)
-  await flipLanOn(page)
-  // A fresh document over the same daemon: LAN stays on (its tools in
-  // the tab order), and focus starts from the top, nothing hovered — the
-  // indicator seen is focus's alone.
+  await flipLan(page, true)
+  // One step up on Dialog Enhancer's box: its Row's marker and the
+  // profile's Reset come alive, so the walk reaches both.
+  await page.getByRole('textbox', { name: 'Dialog Enhancer amount' }).focus()
+  await page.keyboard.press('ArrowUp')
+  await expect(
+    page.getByRole('button', { name: 'Reset Dialog Enhancer' }),
+  ).toBeEnabled()
+  // A fresh document over the same daemon: LAN and the edit persist,
+  // focus starts from the top, nothing hovered — the indicator seen is
+  // focus's alone.
   await openAt(page, 1280)
   const accent = await tokenColor(page, '--color-accent')
   await page.mouse.move(0, 0)
@@ -125,32 +128,32 @@ test('every tab stop on the main screen shows a focus indicator', async ({
     await page.keyboard.press('Tab')
     stops.push(await describeFocus(page, accent))
   }
-  expect(stops.at(-1)?.last).toBe(true)
 
-  // The walk covered the screen: each region's stops are there, in
-  // order — a stale selector would drop a whole region silently.
-  const names = stops.map((stop) => stop.name)
-  expect(names).toEqual([
+  // The walk covered the screen in DOM order — a stale selector would
+  // drop a whole region silently. The EQ sliders are the five default
+  // ones over the shipped `gebf` (defaults.toml); the Pickers' other
+  // actions are disabled on a Factory item and never stop the walk.
+  expect(stops.map((stop) => stop.name)).toEqual([
     'Power',
     'LAN access',
     'LAN URL',
     'Copy URL',
     'Show QR code',
-    'Music', // the checked profile pill: one tab stop for the group
-    'Add profile', // Rename / Delete / Reset: disabled on a clean Factory item
+    'Music', // the checked pill: one tab stop for the group
+    'Add profile',
+    'Reset profile',
     'None',
     'Add EQ preset',
-    ...names.filter((name) => name.endsWith(' Hz')), // the EQ sliders, N of them
-    ...['Surround Virtualizer', 'Dialog Enhancer', 'Volume Leveller'].flatMap(
-      (control) => [
-        `${control} enable`,
-        `${control} amount`, // the box
-        `${control} amount`, // the Slider
-      ],
-    ),
+    '43 Hz',
+    '603 Hz',
+    '2067 Hz',
+    '5685 Hz',
+    '18777 Hz',
+    ...masterStops('Surround Virtualizer'),
+    ...masterStops('Dialog Enhancer', true),
+    ...masterStops('Volume Leveller'),
     'Advanced',
   ])
-  expect(names.filter((name) => name.endsWith(' Hz')).length).toBeGreaterThan(1)
   expect(
     stops.filter((stop) => !stop.indicated).map((stop) => stop.name),
   ).toEqual([])
@@ -171,27 +174,30 @@ test('the connection badge drops --connected when the daemon closes the socket',
   await expect(badge).not.toHaveClass(/connection-badge--connected/)
 })
 
-// Screenshot baselines for eyeballing — written on every run, checked
-// in, never compared: a visual drift shows up as a binary diff in
-// review, not as a red test. LAN on so the tools are in frame — the URL
-// masked, its host and port being this machine's and this run's; the
-// Advanced panel stays collapsed (the main screen ends above it).
+// Screenshot baselines for eyeballing — never compared: a visual drift
+// shows up as a binary diff in review, not as a red test. Every run
+// writes them beside its results; `REFRESH_BASELINES=1` writes the
+// checked-in ones (`e2e/baselines/`). LAN on so the tools are in frame —
+// the URL masked, its host and port being this machine's and this
+// run's; the Advanced panel stays collapsed (the main screen ends above
+// it).
 for (const width of [390, 1280]) {
-  test(`screenshot baseline at ${String(width)}px`, async ({ page }) => {
+  test(`screenshot baseline at ${String(width)}px`, async ({ page }, info) => {
     await openAt(page, width)
-    await flipLanOn(page)
+    await flipLan(page, true)
+    await foldSettled(page)
     await page.mouse.move(0, 0)
-    await page.screenshot({
+    const file = `main-screen-${String(width)}.png`
+    const shot = await page.screenshot({
+      path: process.env.REFRESH_BASELINES
+        ? join(import.meta.dirname, 'baselines', file)
+        : info.outputPath(file),
       mask: [page.getByRole('textbox', { name: 'LAN URL' })],
       maskColor: await tokenColor(page, '--color-bg'),
-      path: join(
-        import.meta.dirname,
-        'baselines',
-        `main-screen-${String(width)}.png`,
-      ),
       fullPage: true,
       animations: 'disabled',
       caret: 'hide',
     })
+    expect(shot.length).toBeGreaterThan(0)
   })
 }

@@ -8,8 +8,8 @@ import {
   bleedHits,
   box,
   expect,
+  expectNoOverflow,
   openAt,
-  pageOverflow,
   pseudoBackground,
   test,
   TRANSPARENT,
@@ -29,9 +29,7 @@ for (const { width, sideBySide } of LAYOUTS) {
     page,
   }) => {
     await openAt(page, width)
-
-    const overflow = await pageOverflow(page)
-    expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+    await expectNoOverflow(page)
 
     // The grid's resolved first track is the cell the visualizer sits in.
     const cellWidth = await page.locator('.app').evaluate((el) => {
@@ -53,9 +51,9 @@ for (const { width, sideBySide } of LAYOUTS) {
 }
 
 // Behavior 4 (+ #94 behavior 4): power off dims every region but the
-// header — the LAN row, both Pickers, the visualizer, the Master card,
-// the Advanced panel — to `--off-opacity`, and the dimmed controls
-// still operate: a switch flips, a Picker pick lands.
+// header — the LAN Access Row, both Pickers, the visualizer, the Master
+// control Rows, the Advanced panel — to `--off-opacity`, and the dimmed
+// controls still operate: a switch flips, a Picker pick lands.
 test('power off dims everything but the header, controls still flip', async ({
   page,
 }) => {

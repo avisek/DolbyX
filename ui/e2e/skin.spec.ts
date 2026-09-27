@@ -13,7 +13,8 @@ import { expect, test } from './fixtures'
  * re-pinned by the Shell (#116): `place-content` / `gap` gone; the power
  * toggle by the header (#117): the shared switch scoped to `--power-h`;
  * the master controls by their redesign (#93): one card of Rows on the
- * shared Slider.
+ * shared Slider. Re-checked after the token move (#94): every selector
+ * live, every value unchanged (`999px` is now `--radius-pill`).
  */
 const BASELINE = {
   '.app': {

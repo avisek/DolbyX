@@ -10,7 +10,7 @@ import {
   box,
   expect,
   openAt,
-  pageOverflow,
+  expectNoOverflow,
   test,
   tokenColor,
 } from './fixtures'
@@ -93,8 +93,7 @@ test('at 390px the amount line drops under the title and the Slider reaches the 
     1,
   )
 
-  const overflow = await pageOverflow(page)
-  expect(overflow.scrollWidth).toBe(overflow.innerWidth)
+  await expectNoOverflow(page)
 })
 
 // Behavior 10: hovering a Row paints the hover fill and lifts its

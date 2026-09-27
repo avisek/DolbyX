@@ -1,0 +1,23 @@
+/* The inline field (#94), shared by the numeric box (NumberInput.css),
+   the URL field (LanToggle.css) and the rename field (RenameInput.css):
+   one geometry — control-height, a hairline on the surface colour, the
+   accent line as the focus mark — so every field reads as one control.
+   Each sheet adds only its own: padding, type, alignment, hover. */
+
+.adv-input__field,
+.lan-access__url,
+.rename-input {
+  block-size: var(--control-h);
+  margin: 0;
+  border: 1px solid var(--color-bg);
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  transition: border-color var(--hover-ms) ease;
+}
+
+:is(.adv-input__field, .lan-access__url, .rename-input):focus {
+  border-color: var(--color-accent);
+  outline: none;
+}

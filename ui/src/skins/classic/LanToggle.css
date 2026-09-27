@@ -78,31 +78,20 @@
   transition-delay: 0s, 0s, 0s, var(--fold-ms);
 }
 
-/* The URL: a readonly field sized to its text — focusable, partially
-   selectable — in the numeric box's hairline look. */
+/* The URL: the shared inline field (Field.css) as a readonly, mono,
+   muted field sized to its text — focusable, partially selectable. */
 .lan-access__url {
   min-inline-size: 0;
-  block-size: var(--control-h);
-  margin: 0;
   padding: 0 var(--space-2);
-  border: 1px solid var(--color-bg);
-  border-radius: var(--radius-1);
-  background: var(--color-bg);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   field-sizing: content;
   cursor: text;
-  transition: border-color var(--hover-ms) ease;
 }
 
 .lan-access__url:where(:hover) {
   border-color: var(--hover-line);
-}
-
-.lan-access__url:focus {
-  border-color: var(--color-accent);
-  outline: none;
 }
 
 /* Icon buttons: Copy, QR — square ghosts on Icon tokens, muted at

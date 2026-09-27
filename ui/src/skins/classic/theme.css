@@ -25,6 +25,12 @@
   --power-h: 2.1rem;
   /* The Reset marker's square (cards, headers, pickers, master rows) */
   --reset-w: 1.4rem;
+  /* Control geometry: the Slider's track thickness, the switch thumb's
+     inset, the Slider thumb's surface-coloured border, band spacing */
+  --track-h: 0.25rem;
+  --thumb-inset: 0.1875rem;
+  --thumb-border: 0.125rem;
+  --band-gap: 0.125rem;
 
   /* Type scale */
   --text-xs: 0.68rem;
@@ -41,15 +47,17 @@
   --qr-w: 8rem;
   --label-w: 5.5rem; /* picker row label */
 
-  /* Radii: controls / cards / pills (switch track, badge) */
+  /* Radii: bars + tracks / controls / cards / pills (switch, badge) */
+  --radius-0: 0.125rem;
   --radius-1: 0.35rem;
   --radius-2: 0.6rem;
   --radius-pill: 999px;
 
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
-  /* The lift of a Popover off the page */
+  /* The lift of a Popover off the page; the Band editor's, smaller */
   --shadow-popover: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
+  --shadow-editor: 0 var(--radius-0) var(--space-2) rgb(0 0 0 / 45%);
 
   /* Access hues: the skin color-codes the 4-CC by settability bucket */
   --hue-settable: var(--color-accent);
@@ -75,17 +83,21 @@
   --tint: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --focus-tint: color-mix(in srgb, var(--color-accent) 7%, transparent);
 
-  /* Focus ring: always outranks hover chrome; hover line sits under it */
+  /* Focus ring: always outranks hover chrome; hover line sits under it;
+     the ring's gap where it sits outside a round control */
   --focus-ring: 1px solid var(--color-accent);
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  --ring-offset: 0.125rem;
 
   /* Band strip: row lines, the hovered column, the Live arrays' bars */
-  --bands-grid: rgb(255 255 255 / 4%);
+  --bands-lines: rgb(255 255 255 / 4%);
   --bands-hover: rgb(255 255 255 / 7%);
-  --hue-live: color-mix(in srgb, var(--color-accent) 75%, #fff);
+  --bands-live: color-mix(in srgb, var(--color-accent) 75%, #fff);
 
-  /* Visualizer paints — the DsUI drawables (ADR-0008); the rendering
-     rules (rows, quantization, zones) stay in Visualizer.css */
+  /* Visualizer paints (ADR-0008) — the DsUI drawables: each bitmap
+     asset is one image token, like the icon masks; flat colours are
+     colour tokens. The rendering rules (rows, quantization, zones)
+     stay in Visualizer.css */
   --vis-bg: radial-gradient(
     58% 130% at 50% 108%,
     #2a82cc 0%,
@@ -103,25 +115,18 @@
     ellipse closest-side,
     #2bc9fd 0%,
     rgb(105 236 255 / 45%) 55%,
-    rgb(105 236 255 / 0%) 100%
+    transparent 100%
   ); /* brick_blue_light: a soft glow */
   --vis-off: rgb(2 10 18 / 55%); /* `ven` off: fills + pips dark */
 
-  /* EQ editor paints — GraphicEqualizerPainter (ADR-0008), HITL-eyeballed */
-  --eq-track-w: 12px;
-  --eq-track:
-    linear-gradient(
-      to right,
-      transparent calc(50% - 1px),
-      rgb(158 216 255 / 55%) calc(50% - 0.75px) calc(50% + 0.75px),
-      transparent calc(50% + 1px)
-    ),
-    linear-gradient(
-      to right,
-      transparent,
-      rgb(110 190 255 / 16%) 30% 70%,
-      transparent
-    ); /* eq_bar: sharp core over a soft glow */
+  /* EQ editor paints — GraphicEqualizerPainter (ADR-0008), HITL-eyeballed
+     in px, the painter's own unit: the thumb drawables as image tokens,
+     the track's two passes as colours + widths (its geometry is a rule,
+     EqCurve.css) */
+  --eq-track-w: 12px; /* eq_bar: the soft glow's width… */
+  --eq-track-glow: rgb(110 190 255 / 16%);
+  --eq-track-core-w: 1.5px; /* …and the sharp core's */
+  --eq-track-core: rgb(158 216 255 / 55%);
   --eq-thumb-size: 28px;
   --eq-thumb: radial-gradient(
     circle,

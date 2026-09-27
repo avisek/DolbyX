@@ -79,12 +79,26 @@
 }
 
 /* The track (their `eq_bar`): a full-height light-blue line, two
-   passes like the curve — a soft wide glow under a sharp core. */
+   passes like the curve — a soft wide glow under a sharp core, the
+   core's edges softened by a hairline. */
 .eq-slider__track {
   left: 50%;
   inline-size: var(--eq-track-w);
   translate: -50%;
-  background: var(--eq-track);
+  background:
+    linear-gradient(
+      to right,
+      transparent calc(50% - var(--eq-track-core-w) / 2 - 1px),
+      var(--eq-track-core) calc(50% - var(--eq-track-core-w) / 2)
+        calc(50% + var(--eq-track-core-w) / 2),
+      transparent calc(50% + var(--eq-track-core-w) / 2 + 1px)
+    ),
+    linear-gradient(
+      to right,
+      transparent,
+      var(--eq-track-glow) 30% 70%,
+      transparent
+    );
 }
 
 /* The thumb (`eq_thumb`): a hollow cyan ring with a soft bloom,
@@ -108,7 +122,7 @@
 
 .eq-slider:focus-visible .eq-slider__thumb {
   outline: var(--focus-ring);
-  outline-offset: 0.125rem;
+  outline-offset: var(--ring-offset);
 }
 
 /* The snapped Slider under a drag (`eq-slider--active` →
