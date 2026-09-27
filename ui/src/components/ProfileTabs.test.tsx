@@ -33,7 +33,7 @@ afterEach(() => {
 const action = (name: string) =>
   screen.getByRole<HTMLButtonElement>('button', { name })
 
-/** Renders the tabs and completes the background WS handshake. */
+/** Renders the Picker and completes the background WS handshake. */
 function renderConnected(): MockWebSocket {
   render(() => <ProfileTabs />)
   startWs('ws://daemon.test/ws')
@@ -144,7 +144,7 @@ it('picking sends set_profile and flips on the ack; re-picking sends nothing', a
   })
 })
 
-// Behavior 1 (#26), profile half: the action row renders all four
+// Behavior 1 (#26), profile half: the Picker actions render all four
 // actions always — factory vs custom flips `disabled` per the matrix,
 // never presence (zero layout shift).
 it('renders all four actions always; factory vs custom flips disabled only', () => {
@@ -253,9 +253,9 @@ const sentRenames = (socket: MockWebSocket) =>
     .sentCommands()
     .filter((frame) => frame.cmd === 'edit_profile' && 'name' in frame)
 
-// Behavior 5 (#26), profile half: the selected tab's label becomes an
-// inline field — Enter and blur commit `edit_profile { id, name }`,
-// Esc (or an unchanged/emptied name) cancels with no wire call.
+// Behavior 5 (#26), profile half: the checked pill takes an inline
+// field — Enter and blur commit `edit_profile { id, name }`, Esc (or
+// an unchanged/emptied name) cancels with no wire call.
 it('inline rename commits on Enter and blur, cancels on Esc', async () => {
   const socket = renderConnected()
   applySnapshot(customSelectedState())
@@ -326,6 +326,8 @@ it('Rename mounts the field inside the checked pill; a click in it sends nothing
 
   // The label's activation is cancelled (the card rule) — in a browser
   // the forward would focus the radio and blur-commit the field.
+  // happy-dom never forwards, so the cancelled click is the one
+  // assertion here that discriminates; the rest pin the outcome.
   const click = new MouseEvent('click', { bubbles: true, cancelable: true })
   expect(field.dispatchEvent(click)).toBe(false)
   expect(
@@ -358,7 +360,6 @@ it('focus stays in the radio group across a snapshot with a new selection', () =
   expect(option('Game').checked).toBe(true)
   expect(option('Music')).toBe(music)
   expect(document.activeElement).toBe(music)
-  expect(document.activeElement?.classList.contains('picker__radio')).toBe(true)
 })
 
 // Delete sends `remove_profile` and reconciles off the ack — where

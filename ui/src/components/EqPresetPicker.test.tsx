@@ -98,9 +98,10 @@ function customPresetState(
 }
 
 // Behaviors 1 + 7 (#23), client half — behavior 2 (#119): the EQ row
-// is a Picker — None first (a Factory item, `checked` while the profile
-// has no EQ selection), then the snapshot's global presets; out of the
-// box no factory profile selects one.
+// is a Picker — None first (`factory`: never renamed or deleted;
+// `checked` while the profile has no EQ selection), then the
+// snapshot's global presets; out of the box no factory profile
+// selects one.
 it('renders None first, then the factory presets, None checked', () => {
   render(() => <EqPresetPicker />)
   const options = screen.getAllByRole<HTMLInputElement>('radio')
@@ -198,7 +199,7 @@ it("shows each profile's own EQ selection", () => {
   expect(option('None').checked).toBe(false)
 })
 
-// Behavior 1 (#26), preset half: the action row renders all four
+// Behavior 1 (#26), preset half: the Picker actions render all four
 // actions always, acting on the picked item — None included;
 // None and factory picks disable Rename/Delete, a custom enables
 // them, presence never changes (zero layout shift).
