@@ -1,8 +1,24 @@
+/* The inline rename field (#26, #94): the shared field geometry — the
+   numeric box's (NumberInput.css) and the URL field's (LanToggle.css) —
+   so any inline field reads as one control: control-height, hairline
+   border on the surface colour, the accent line as its focus mark,
+   sized to its text. Its host (the Picker's pill) restyles only what
+   makes it the host's: padding, rounding, alignment. */
+
 .rename-input {
-  border: 0;
-  border-radius: 0.375rem;
+  min-inline-size: 3ch;
+  block-size: var(--control-h);
+  margin: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-bg);
+  border-radius: var(--radius-1);
   background: var(--color-bg);
   color: var(--color-text);
   font: inherit;
-  outline: 1px solid var(--color-accent);
+  field-sizing: content;
+}
+
+.rename-input:focus {
+  border-color: var(--color-accent);
+  outline: none;
 }

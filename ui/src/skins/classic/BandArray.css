@@ -31,7 +31,7 @@
   display: grid;
   flex: 1;
   grid-template-columns: repeat(var(--count, 1), 1fr);
-  gap: 2px;
+  gap: 0.125rem;
   min-width: 0;
   height: 3.4rem;
   padding: var(--space-1) var(--space-1) 0;
@@ -40,7 +40,7 @@
   background:
     repeating-linear-gradient(
       to top,
-      rgb(255 255 255 / 4%) 0 1px,
+      var(--bands-grid) 0 1px,
       transparent 1px 25%
     ),
     var(--color-bg);
@@ -74,15 +74,15 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  min-width: 2px;
-  border-radius: 3px 3px 0 0;
+  min-width: 0.125rem;
+  border-radius: 0.2rem 0.2rem 0 0;
   anchor-name: --adv-band;
   anchor-scope: --adv-band;
   transition: background 0.1s ease;
 }
 
 .adv-bands__band--hover {
-  background: rgb(255 255 255 / 7%);
+  background: var(--bands-hover);
 }
 
 .adv-bands__strip:focus-visible .adv-bands__band--active,
@@ -101,7 +101,7 @@
 
   height: calc(clamp(0.03, var(--norm, 0), 1) * 100%);
   margin: 0 28%;
-  border-radius: 2px 2px 0 0;
+  border-radius: 0.125rem 0.125rem 0 0;
   background: var(--bar-color);
 }
 
@@ -117,7 +117,7 @@
 
 /* The Live arrays: a lighter accent, the moving data's own hue. */
 .adv-bands--live .adv-bands__bar {
-  --bar-color: color-mix(in srgb, var(--color-accent) 75%, #fff);
+  --bar-color: var(--hue-live);
 }
 
 /* The Band editor (#91): a popover anchored above its band — bottom on
@@ -159,11 +159,11 @@
   height: 1.35rem;
   field-sizing: content;
   border-color: var(--color-accent);
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   background: color-mix(in srgb, var(--color-bg) 96%, transparent);
   color: var(--color-text);
   text-align: center;
-  box-shadow: 0 2px 8px color-mix(in srgb, #000 45%, transparent);
+  box-shadow: var(--shadow-popover);
 }
 
 .adv-bands--ro .adv-bands__editor .adv-input__field {
@@ -188,7 +188,7 @@
 
 .adv-bands--opaque .adv-bands__strip:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: 3px;
+  outline-offset: 0.2rem;
 }
 
 .adv-bands--opaque .adv-bands__band {

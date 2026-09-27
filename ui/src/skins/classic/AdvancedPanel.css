@@ -21,7 +21,7 @@
   background: none;
   color: var(--color-text);
   font: inherit;
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
   cursor: pointer;
 }
 

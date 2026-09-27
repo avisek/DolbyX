@@ -97,10 +97,11 @@
   outline-offset: 1px;
 }
 
-/* Renaming: the name leaves and the field IS the pill — its type,
-   padding and hairline (the border moves onto the field, so the two
-   boxes are one), sized to its text: it starts at the name's width and
-   grows as typed. The pill's ring already marks it; no inner ring. */
+/* Renaming: the name leaves and the field IS the pill — the shared
+   inline field (RenameInput.css) in the pill's padding and rounding
+   (the pill's border moves onto the field, so the two boxes are one),
+   starting at the name's width and growing as typed. The pill's ring
+   already marks it; the field's own focus line is its border. */
 .picker__option--renaming {
   padding: 0;
   border-width: 0;
@@ -111,14 +112,9 @@
 }
 
 .picker__field {
-  align-self: stretch;
-  min-inline-size: 3ch;
   padding: 0 var(--space-3);
-  border: 1px solid var(--color-accent);
   border-radius: inherit;
   text-align: inherit;
-  outline: none;
-  field-sizing: content;
 }
 
 /* — Actions: the four square ghost buttons at the row's end — */

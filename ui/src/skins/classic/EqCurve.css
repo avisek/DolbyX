@@ -39,7 +39,8 @@
 
 /* — Classic: the faithful DDP editor look. Constants from
    GraphicEqualizerPainter (ADR-0008); HITL-eyeballed against
-   docs/ui-reference/original-ui-visualizer-eq-overlay.png. — */
+   docs/ui-reference/original-ui-visualizer-eq-overlay.png; the paints
+   and stroke widths are the `--eq-*` tokens (theme.css). — */
 
 /* z — the painter's own order: tracks < thumbs < curve, above all vis
    layers. One shared stacking context (`contain: layout` does *not*
@@ -81,21 +82,9 @@
    passes like the curve — a soft wide glow under a sharp core. */
 .eq-slider__track {
   left: 50%;
-  inline-size: 12px;
+  inline-size: var(--eq-track-w);
   translate: -50%;
-  background:
-    linear-gradient(
-      to right,
-      transparent calc(50% - 1px),
-      rgb(158 216 255 / 55%) calc(50% - 0.75px) calc(50% + 0.75px),
-      transparent calc(50% + 1px)
-    ),
-    linear-gradient(
-      to right,
-      transparent,
-      rgb(110 190 255 / 16%) 30% 70%,
-      transparent
-    );
+  background: var(--eq-track);
 }
 
 /* The thumb (`eq_thumb`): a hollow cyan ring with a soft bloom,
@@ -103,18 +92,23 @@
    `thumbHeight/4` track padding rides its rendered size. */
 .eq-slider__thumb {
   left: 50%;
-  inline-size: 28px;
-  block-size: 28px;
+  inline-size: var(--eq-thumb-size);
+  block-size: var(--eq-thumb-size);
   translate: -50% -50%;
   border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgb(170 225 255 / 45%) 0 12%,
-    rgb(117 210 255 / 12%) 26% 34%,
-    #8fd2ff 44% 60%,
-    rgb(90 180 255 / 28%) 72%,
-    transparent 80%
-  );
+  background: var(--eq-thumb);
+}
+
+/* Keyboard focus: the ring rides the thumb, as the Slider's does
+   (Slider.css); the slider box itself is a zero-width strip, where the
+   browser's fallback ring would draw a hairline down the field. */
+.eq-slider:focus-visible {
+  outline: none;
+}
+
+.eq-slider:focus-visible .eq-slider__thumb {
+  outline: var(--focus-ring);
+  outline-offset: 0.125rem;
 }
 
 /* The snapped Slider under a drag (`eq-slider--active` →
@@ -122,35 +116,26 @@
    collapses — only distance 0 is distinct. A hotter core, a solid
    ring, a wider bloom; HITL-eyeballed like the rest of the pass. */
 .eq-slider--active .eq-slider__thumb {
-  background: radial-gradient(
-    circle,
-    rgb(225 245 255 / 85%) 0 14%,
-    rgb(150 225 255 / 25%) 26% 32%,
-    #c2e9ff 42% 62%,
-    rgb(120 200 255 / 45%) 76%,
-    transparent 88%
-  );
+  background: var(--eq-thumb-active);
 }
 
-/* The curve — two passes over shared points, cyan #75D2FF. Glow:
-   10 px, α 0x80, the original's BlurMaskFilter radius 4 as Skia
-   σ = 0.577 · r + 0.5 ⇒ blur(2.8px), round caps. Sharp: 3 px, α 0xD0,
-   round joins (CornerPathEffect(10) at these widths — not a spline),
-   butt caps (the glow's round ends swallow them). */
+/* The curve — two passes over shared points, one cyan. Glow: wide,
+   α 0x80, blurred, round caps. Sharp: thin, α 0xD0, round joins
+   (CornerPathEffect(10) at these widths — not a spline), butt caps
+   (the glow's round ends swallow them). */
 .eq-curve__glow {
-  stroke: #75d2ff;
+  stroke: var(--eq-curve);
   stroke-opacity: 0.45; /* painter α 0x80, eased in the HITL pass */
-  stroke-width: 10px;
+  stroke-width: var(--eq-glow-w);
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: blur(2.8px);
+  filter: blur(var(--eq-glow-blur));
 }
 
 .eq-curve__stroke {
-  stroke: #75d2ff;
+  stroke: var(--eq-curve);
   stroke-opacity: 0.816;
-  /* The painter's 3 px is canvas-scale; HITL-halved for this field. */
-  stroke-width: 1.5px;
+  stroke-width: var(--eq-stroke-w);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }

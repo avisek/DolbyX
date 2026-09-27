@@ -52,8 +52,10 @@ for (const { width, sideBySide } of LAYOUTS) {
   })
 }
 
-// Behavior 4: power off dims every region but the header to
-// `--off-opacity`, and the dimmed controls still operate.
+// Behavior 4 (+ #94 behavior 4): power off dims every region but the
+// header — the LAN row, both Pickers, the visualizer, the Master card,
+// the Advanced panel — to `--off-opacity`, and the dimmed controls
+// still operate: a switch flips, a Picker pick lands.
 test('power off dims everything but the header, controls still flip', async ({
   page,
 }) => {
@@ -82,6 +84,7 @@ test('power off dims everything but the header, controls still flip', async ({
       presets: of('.picker--eq'),
       visualizer: of('.visualizer'),
       master: of('.master-controls'),
+      advanced: of('.advanced'),
     }
   })
   expect(opacities.off).toBeGreaterThan(0)
@@ -93,6 +96,7 @@ test('power off dims everything but the header, controls still flip', async ({
     'presets',
     'visualizer',
     'master',
+    'advanced',
   ] as const) {
     expect(opacities[key]).toBe(opacities.off)
   }
@@ -102,6 +106,13 @@ test('power off dims everything but the header, controls still flip', async ({
   const before = await dialog.isChecked()
   await dialog.click()
   await expect(dialog).toBeChecked({ checked: !before })
+  // …and a Picker pick lands on its ack (the pill is the radio's
+  // click surface; the radio itself is hidden behind it).
+  await page
+    .getByRole('radiogroup', { name: 'EQ Preset' })
+    .getByText('Rich', { exact: true })
+    .click()
+  await expect(page.getByRole('radio', { name: 'Rich' })).toBeChecked()
 })
 
 // Behavior 5: hovering the Advanced disclosure header tints its pseudo,

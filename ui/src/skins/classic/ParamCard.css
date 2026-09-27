@@ -17,7 +17,7 @@
 
 /* Hover under focus weight: a card holding focus always wins. */
 .adv-card:where(:hover) {
-  background: rgb(255 255 255 / 3%);
+  background: var(--hover-bg);
 }
 
 .adv-card:has(:focus-visible) {

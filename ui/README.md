@@ -75,15 +75,15 @@ paints it. v2.0 ships one skin, **Classic**, and no switcher.
 rejects it everywhere but `main.tsx` (`src/skin.test.ts` pins the rule).
 
 **Tokens** (`theme.css`) — names are the contract, values are Classic's;
-components never read them. Existing components still carry literals
-until the Classic sweep (#94); new stylesheets use tokens:
+components never read them. Every colour and every `px` length but the
+`1px` hairline lives here (`src/skins/audit.test.ts` pins it):
 
 | Token                                                                                                           | Meaning                                           |
 | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` `--font-mono` | palette + type                                    |
 | `--space-1…6`                                                                                                   | spacing scale, 0.25–2 rem                         |
 | `--control-h`                                                                                                   | one height for input / toggle / tristate / slider |
-| `--radius-1` `--radius-2`                                                                                       | controls / cards                                  |
+| `--radius-1` `--radius-2` `--radius-pill`                                                                       | controls / cards / pills                          |
 | `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                  |
 | `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                          |
 | `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it    |
@@ -94,6 +94,9 @@ until the Classic sweep (#94); new stylesheets use tokens:
 | `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions            |
 | `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)  |
 | `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks            |
+| `--bands-grid` `--bands-hover` `--hue-live`                                                                     | Band strip lines; hovered column; Live bars       |
+| `--vis-bg` `--vis-lattice` `--vis-brick-*` `--vis-pip` `--vis-off`                                              | visualizer paints (rendering rules stay in CSS)   |
+| `--eq-track(-w)` `--eq-thumb(-size/-active)` `--eq-curve` `--eq-glow-w/-blur` `--eq-stroke-w`                   | EQ editor paints + stroke widths                  |
 
 **Rules** (ADR-0011 + addendum):
 
@@ -115,11 +118,18 @@ until the Classic sweep (#94); new stylesheets use tokens:
 - Chromium is the target: subgrid, `:has`, anchor positioning,
   `@property`, `overflow: clip` are fair game.
 - **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`,
-  no width `@media`, no `!important` (`src/skins/audit.test.ts` pins
-  all three). `100%` height chains; wrapping and container queries
-  reflow regions (thresholds are rem literals — size queries can't
-  read tokens). The **Off-look** is one Shell rule dimming everything
-  but the header by `opacity`, never `filter`.
+  no width `@media`, no `!important`, and outside `theme.css` no
+  literal colour and no `px` but the `1px` hairline
+  (`src/skins/audit.test.ts` pins all five). `100%` height chains;
+  wrapping and container queries reflow regions (thresholds are rem
+  literals — size queries can't read tokens). The **Off-look** is one
+  Shell rule dimming everything but the header by `opacity`, never
+  `filter`.
+- **Screen-level checks** (`e2e/main-screen.spec.ts`): no sideways
+  overflow at 390 / 700 / 1280 with every region open, a skin-painted
+  focus ring on every tab stop, the badge's `--connected` following
+  the socket; `e2e/baselines/*.png` are rewritten every run for
+  eyeballing, never compared.
 - **Icons**: buttons render empty, named by `aria-label`; paint an
   Icon token as a mask in `currentColor`:
 

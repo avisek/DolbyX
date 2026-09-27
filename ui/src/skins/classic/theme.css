@@ -41,9 +41,10 @@
   --qr-w: 8rem;
   --label-w: 5.5rem; /* picker row label */
 
-  /* Radii: controls / cards */
+  /* Radii: controls / cards / pills (switch track, badge) */
   --radius-1: 0.35rem;
   --radius-2: 0.6rem;
+  --radius-pill: 999px;
 
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
@@ -77,6 +78,71 @@
   /* Focus ring: always outranks hover chrome; hover line sits under it */
   --focus-ring: 1px solid var(--color-accent);
   --hover-line: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+
+  /* Band strip: row lines, the hovered column, the Live arrays' bars */
+  --bands-grid: rgb(255 255 255 / 4%);
+  --bands-hover: rgb(255 255 255 / 7%);
+  --hue-live: color-mix(in srgb, var(--color-accent) 75%, #fff);
+
+  /* Visualizer paints — the DsUI drawables (ADR-0008); the rendering
+     rules (rows, quantization, zones) stay in Visualizer.css */
+  --vis-bg: radial-gradient(
+    58% 130% at 50% 108%,
+    #2a82cc 0%,
+    #0e5490 42%,
+    #022f56 68%,
+    #001322 88%,
+    #000 100%
+  ); /* eq_background.png: blue glow at bottom centre, black-edged */
+  --vis-lattice: #000; /* the brick insets */
+  /* mock_gv_brick_{blue,yellow,red}: the fill's zones, all 60% alpha */
+  --vis-brick-blue: rgb(102 197 220 / 60%);
+  --vis-brick-yellow: rgb(202 181 145 / 60%);
+  --vis-brick-red: rgb(184 145 147 / 60%);
+  --vis-pip: radial-gradient(
+    ellipse closest-side,
+    #2bc9fd 0%,
+    rgb(105 236 255 / 45%) 55%,
+    rgb(105 236 255 / 0%) 100%
+  ); /* brick_blue_light: a soft glow */
+  --vis-off: rgb(2 10 18 / 55%); /* `ven` off: fills + pips dark */
+
+  /* EQ editor paints — GraphicEqualizerPainter (ADR-0008), HITL-eyeballed */
+  --eq-track-w: 12px;
+  --eq-track:
+    linear-gradient(
+      to right,
+      transparent calc(50% - 1px),
+      rgb(158 216 255 / 55%) calc(50% - 0.75px) calc(50% + 0.75px),
+      transparent calc(50% + 1px)
+    ),
+    linear-gradient(
+      to right,
+      transparent,
+      rgb(110 190 255 / 16%) 30% 70%,
+      transparent
+    ); /* eq_bar: sharp core over a soft glow */
+  --eq-thumb-size: 28px;
+  --eq-thumb: radial-gradient(
+    circle,
+    rgb(170 225 255 / 45%) 0 12%,
+    rgb(117 210 255 / 12%) 26% 34%,
+    #8fd2ff 44% 60%,
+    rgb(90 180 255 / 28%) 72%,
+    transparent 80%
+  ); /* eq_thumb: a hollow cyan ring with a soft bloom */
+  --eq-thumb-active: radial-gradient(
+    circle,
+    rgb(225 245 255 / 85%) 0 14%,
+    rgb(150 225 255 / 25%) 26% 32%,
+    #c2e9ff 42% 62%,
+    rgb(120 200 255 / 45%) 76%,
+    transparent 88%
+  ); /* eq_thumb_touch_state: hotter core, solid ring, wider bloom */
+  --eq-curve: #75d2ff;
+  --eq-glow-w: 10px;
+  --eq-glow-blur: 2.8px; /* BlurMaskFilter radius 4 as Skia σ = 0.577 · r + 0.5 */
+  --eq-stroke-w: 1.5px; /* the painter's 3 px, canvas-scale, HITL-halved */
 
   /* Icons: 24-grid outline glyphs (stroke 2, round caps / joins), used
      as masks painted in currentColor on a --icon-size square; the
