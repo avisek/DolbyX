@@ -1,4 +1,5 @@
 import { For, type Component } from 'solid-js'
+import { cardRule } from '../lib/card_rule'
 import {
   onValue,
   paramDef,
@@ -82,23 +83,11 @@ const MasterControl: Component<{
       class="master-control"
       classList={{ 'master-control--diverged': diverged() }}
       for={controlId(enable)}
-      // A native listener (not Solid's delegated one): the guard must
-      // have run by the time the label's activation behavior asks
-      // whether the click was cancelled.
-      on:click={(event) => {
-        // Only the title and empty space forward to the switch: the box
-        // and Slider keep the focus they set; the Reset marker is
-        // interactive content — browsers skip the forward natively;
-        // listed so the rule holds everywhere.
-        if (
-          event.target instanceof Element &&
-          event.target.closest(
-            '.adv-input, .adv-slider, .master-control__reset',
-          )
-        ) {
-          event.preventDefault()
-        }
-      }}
+      // Only the title and empty space forward to the switch: the box
+      // and Slider keep the focus they set; the Reset marker is
+      // interactive content — browsers skip the forward natively;
+      // listed so the rule holds everywhere.
+      on:click={cardRule('.adv-input, .adv-slider, .master-control__reset')}
     >
       <span class="master-control__label">{props.label}</span>
       {/* The Reset marker: IS the divergence indicator — `disabled`

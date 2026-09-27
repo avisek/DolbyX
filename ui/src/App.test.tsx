@@ -108,16 +108,30 @@ it('a click on the power label forwards to the switch and sends set_power', () =
   expect(powerToggle().checked).toBe(true)
 })
 
-const lanToggle = () => screen.getByRole('switch', { name: 'LAN access' })
+const lanToggle = () =>
+  screen.getByRole<HTMLInputElement>('switch', { name: 'LAN access' })
+
+/** The LAN Access Row — the `label` for its switch. */
+const lanRow = () => {
+  const row = lanToggle().closest('label')
+  if (!row) throw new Error('LAN switch has no label')
+  return row
+}
 
 // Issue #70: click → `set_lan_access` on the wire; the flip lands
 // local-first on the daemon's `ack` — by then the listener is already
-// rebound (ADR-0012). The broadcast goes to *other* clients.
-it('sends set_lan_access on click and applies the flip on the ack', async () => {
+// rebound (ADR-0012). The broadcast goes to *other* clients. Behavior 1
+// (#118): the switch is the shared Toggle (`input[role=switch]#lan`)
+// inside `label.lan-access[for=lan]`; clicking the text forwards to it.
+it('sends set_lan_access on a Row click and applies the flip on the ack', async () => {
   const socket = renderConnected()
 
-  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
-  lanToggle().click()
+  expect(lanToggle().tagName).toBe('INPUT')
+  expect(lanToggle().id).toBe('lan')
+  expect(lanRow().classList.contains('lan-access')).toBe(true)
+  expect(lanRow().getAttribute('for')).toBe('lan')
+  expect(lanToggle().checked).toBe(false)
+  screen.getByText('LAN Access').click()
   const sent = socket
     .sentCommands()
     .filter((frame) => frame.cmd === 'set_lan_access')
@@ -130,14 +144,14 @@ it('sends set_lan_access on click and applies the flip on the ack', async () => 
   ])
 
   // Not yet acked — the toggle still shows daemon truth.
-  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
+  expect(lanToggle().checked).toBe(false)
 
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
   })
   await waitFor(() => {
-    expect(lanToggle().getAttribute('aria-checked')).toBe('true')
+    expect(lanToggle().checked).toBe(true)
   })
 })
 
@@ -164,7 +178,7 @@ it('leaves the LAN toggle where it was when the flip is refused', async () => {
     ).toHaveLength(2)
   })
   // …and the switch is exactly where it was.
-  expect(lanToggle().getAttribute('aria-checked')).toBe('false')
+  expect(lanToggle().checked).toBe(false)
 })
 
 // Issue #70: another tab flipped LAN access — its broadcast `state`
@@ -176,24 +190,33 @@ it('updates the LAN toggle on a broadcast state event', () => {
     type: 'state',
     snapshot: fixtureState({ lan_access: true }),
   })
-  expect(lanToggle().getAttribute('aria-checked')).toBe('true')
+  expect(lanToggle().checked).toBe(true)
 })
 
-const discoveryQr = () =>
-  screen.queryByRole('img', { name: 'Scan to open DolbyX on your phone' })
+const lanUrlField = () =>
+  screen.queryByRole<HTMLInputElement>('textbox', { name: 'LAN URL' })
+const copyButton = () => screen.queryByRole('button', { name: 'Copy URL' })
+const qrButton = () => screen.queryByRole('button', { name: 'Show QR code' })
+/** Whether the Row publishes `--on` — the skin folds the tools by it. */
+const lanOn = () => lanRow().classList.contains('lan-access--on')
 
-// Issue #71: the snapshot carries `lan_url` even while off — showing
-// the URL + QR only while on is this UI's policy.
-it('hides the discovery URL and QR while LAN access is off', () => {
+// Behavior 2 (#118): the snapshot carries `lan_url` even while off, so
+// the tools are mounted off too — the field holds the URL, `--on` is
+// absent; the skin folds them (issue #71's "only while on" is now the
+// skin's, ADR-0011).
+it('mounts the URL field, Copy and QR button while LAN access is off, without --on', () => {
   render(() => <App />)
-  expect(discoveryQr()).toBeNull()
-  expect(screen.queryByText(FIXTURE_LAN_URL)).toBeNull()
+  expect(lanUrlField()?.value).toBe(FIXTURE_LAN_URL)
+  expect(lanUrlField()?.readOnly).toBe(true)
+  expect(copyButton()).toBeTruthy()
+  expect(qrButton()).toBeTruthy()
+  expect(lanOn()).toBe(false)
 })
 
-// Issue #71: the flipping tab renders the QR from the `lan_url` it
-// already holds — the ack alone reveals it; originator suppression
+// Issue #71: the flipping tab renders the tools from the `lan_url` it
+// already holds — the ack alone raises `--on`; originator suppression
 // means no snapshot follows for this tab (ADR-0005).
-it('shows the URL and QR beside the toggle on the on-flip ack', async () => {
+it('raises --on with the URL still in the field on the on-flip ack', async () => {
   const socket = renderConnected()
 
   lanToggle().click()
@@ -202,38 +225,42 @@ it('shows the URL and QR beside the toggle on the on-flip ack', async () => {
     .filter((frame) => frame.cmd === 'set_lan_access')
   socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
   await waitFor(() => {
-    expect(discoveryQr()).toBeTruthy()
-    expect(screen.getByText(FIXTURE_LAN_URL)).toBeTruthy()
+    expect(lanOn()).toBe(true)
   })
+  expect(lanUrlField()?.value).toBe(FIXTURE_LAN_URL)
 })
 
-// Issue #71: another tab flipped on — the broadcast reveals the
-// discovery block here too; a later off-flip hides it again.
-it('walks the discovery block through broadcast on and off', () => {
+// Issue #71: another tab flipped on — the broadcast raises `--on` here
+// too; a later off-flip drops it, the tools staying mounted.
+it('walks --on through broadcast on and off with the tools mounted throughout', () => {
   const socket = renderConnected()
 
   socket.serverMessage({
     type: 'state',
     snapshot: fixtureState({ lan_access: true }),
   })
-  expect(discoveryQr()).toBeTruthy()
-  expect(screen.getByText(FIXTURE_LAN_URL)).toBeTruthy()
+  expect(lanOn()).toBe(true)
+  expect(lanUrlField()?.value).toBe(FIXTURE_LAN_URL)
 
   socket.serverMessage({ type: 'state', snapshot: fixtureState() })
-  expect(discoveryQr()).toBeNull()
+  expect(lanOn()).toBe(false)
+  expect(lanUrlField()?.value).toBe(FIXTURE_LAN_URL)
 })
 
-// Issue #71: a routeless host snapshots `lan_url: null` — the toggle
+// Issue #71: a routeless host snapshots `lan_url: null` — the switch
 // stands alone; there is nothing to render.
-it('shows no discovery block when lan_url is null', () => {
+it('renders no tools when lan_url is null', () => {
   const socket = renderConnected()
 
   socket.serverMessage({
     type: 'state',
     snapshot: fixtureState({ lan_access: true, lan_url: null }),
   })
-  expect(lanToggle().getAttribute('aria-checked')).toBe('true')
-  expect(discoveryQr()).toBeNull()
+  expect(lanToggle().checked).toBe(true)
+  expect(lanOn()).toBe(true)
+  expect(lanUrlField()).toBeNull()
+  expect(copyButton()).toBeNull()
+  expect(qrButton()).toBeNull()
 })
 
 // Behavior 5 (#13): drop → badge reconnecting; reconnect → `get_state`

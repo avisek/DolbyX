@@ -47,6 +47,8 @@
 
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
+  /* The lift of a Popover off the page */
+  --shadow-popover: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
 
   /* Access hues: the skin color-codes the 4-CC by settability bucket */
   --hue-settable: var(--color-accent);
