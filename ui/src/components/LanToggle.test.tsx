@@ -108,6 +108,48 @@ it('Copy writes the URL to the clipboard and raises --copied for 1500 ms', async
   }
 })
 
+// Behavior 4 (#118), the insecure-context path: a LAN client over
+// plain http has no `navigator.clipboard`. Copy then selects the URL
+// field and issues the legacy copy command inside the click gesture,
+// confirms on success, and hands focus back to the button.
+it('without navigator.clipboard, Copy selects the field, runs execCommand and confirms', () => {
+  vi.useFakeTimers()
+  vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue(
+    undefined as unknown as Clipboard,
+  )
+  // happy-dom ships no execCommand: define one that records the
+  // selection the command would copy.
+  let selected = ''
+  const execCommand = vi.fn((command: string) => {
+    const field = urlField()
+    selected = field.value.slice(
+      field.selectionStart ?? 0,
+      field.selectionEnd ?? 0,
+    )
+    return command === 'copy'
+  })
+  Object.defineProperty(document, 'execCommand', {
+    value: execCommand,
+    configurable: true,
+  })
+  try {
+    renderConnected()
+    copyButton().focus()
+    copyButton().click()
+
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(selected).toBe(FIXTURE_LAN_URL)
+    expect(document.activeElement).toBe(copyButton())
+    expect(copied()).toBe(true)
+    vi.advanceTimersByTime(1500)
+    expect(copied()).toBe(false)
+  } finally {
+    delete (document as { execCommand?: unknown }).execCommand
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  }
+})
+
 const qrOpen = () => row().classList.contains('lan-access--qr')
 const figure = () => {
   const el = row().querySelector<HTMLElement>('figure.lan-access__qr')

@@ -57,9 +57,11 @@ const LanQr: Component<{ url: string }> = (props) => {
  * their child: the skin clips the tools to fold them, and a popover
  * must escape. State as modifiers: `--on`, `--qr` (the QR Popover is
  * open), `--copied` (1.5 s after a copy — timed state stays
- * component-side, ADR-0011 addendum 2). The Popover owns its focus
- * (CONTEXT.md): opening focuses the figure; Escape / Enter or focus
- * leaving it closes it; LAN going off closes it too.
+ * component-side, ADR-0011 addendum 2). Copy uses the async clipboard
+ * where the context is secure, the legacy copy command elsewhere. The
+ * Popover owns its focus (CONTEXT.md): opening focuses the figure;
+ * Escape / Enter or focus leaving it closes it; LAN going off closes
+ * it too.
  */
 const LanToggle: Component = () => {
   const [qr, setQr] = createSignal(false)
@@ -85,20 +87,41 @@ const LanToggle: Component = () => {
   }
 
   const [copied, setCopied] = createSignal(false)
+  let urlField!: HTMLInputElement
+  let copyButton!: HTMLButtonElement
   let copiedTimer: ReturnType<typeof setTimeout> | undefined
   let mounted = true
   onCleanup(() => {
     mounted = false
     clearTimeout(copiedTimer)
   })
+  const confirmCopy = () => {
+    // The async write may resolve after the Row is gone: no timer then.
+    if (!mounted) return
+    setCopied(true)
+    clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => setCopied(false), COPIED_MS)
+  }
   const copy = (url: string) => {
-    void navigator.clipboard.writeText(url).then(() => {
-      // The write may resolve after the Row is gone: no timer then.
-      if (!mounted) return
-      setCopied(true)
-      clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => setCopied(false), COPIED_MS)
-    })
+    // `navigator.clipboard` exists only in a secure context — localhost
+    // on the host, never a LAN client over plain http (ADR-0012). There
+    // the legacy command copies the selection, synchronously inside the
+    // click gesture: select the URL field, copy, hand focus back.
+    // The lib types promise `clipboard` unconditionally; the platform
+    // does not.
+    const clipboard = (navigator as { clipboard?: Clipboard }).clipboard
+    if (clipboard) {
+      void clipboard.writeText(url).then(confirmCopy)
+      return
+    }
+    urlField.select()
+    // Deprecated, never removed: the only copy path an insecure context
+    // has, and every browser keeps it for exactly that reason.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const ok = document.execCommand('copy')
+    urlField.setSelectionRange(0, 0)
+    copyButton.focus()
+    if (ok) confirmCopy()
   }
   return (
     <label
@@ -127,6 +150,7 @@ const LanToggle: Component = () => {
           <>
             <span class="lan-access__tools">
               <input
+                ref={urlField}
                 type="text"
                 class="lan-access__url"
                 aria-label="LAN URL"
@@ -134,6 +158,7 @@ const LanToggle: Component = () => {
                 value={url()}
               />
               <button
+                ref={copyButton}
                 type="button"
                 class="lan-access__copy"
                 aria-label="Copy URL"
