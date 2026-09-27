@@ -26,7 +26,7 @@
 }
 
 /* Hover under focus weight: a Row holding focus always wins. */
-:where(.lan-access:hover) {
+.lan-access:where(:hover) {
   background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
 }
 
@@ -96,7 +96,7 @@
   transition: border-color var(--hover-ms) ease;
 }
 
-:where(.lan-access__url:hover) {
+.lan-access__url:where(:hover) {
   border-color: var(--hover-line);
 }
 
@@ -142,7 +142,8 @@
   mask-image: var(--icon-copy);
 }
 
-:where(.lan-access__copy:hover, .lan-access__qr-toggle:hover) {
+.lan-access__copy:where(:hover),
+.lan-access__qr-toggle:where(:hover) {
   background: var(--hover-bg);
   color: var(--color-text);
 }

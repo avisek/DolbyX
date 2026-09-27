@@ -144,6 +144,19 @@ for (const width of [390, 1280]) {
   })
 }
 
+// The Row lifts on hover (`.lan-access:where(:hover)` — the pseudo-class
+// alone inside `:where()`, or the base rule's own layer outranks it).
+test('hovering the Row tints its surface', async ({ page }) => {
+  await openAt(page, 1280)
+  const layer = () =>
+    page
+      .locator('.lan-access')
+      .evaluate((el) => getComputedStyle(el).backgroundImage)
+  const rest = await layer()
+  await page.getByText('LAN Access').hover()
+  await expect.poll(layer).not.toBe(rest)
+})
+
 // Behavior 6: the open Popover escapes the tools' clip and stacks
 // above the rows below — a hit at its centre lands inside the figure.
 test('the open QR popover is hit-testable at its centre', async ({ page }) => {

@@ -24,7 +24,7 @@
 }
 
 /* Hover under focus weight: a row holding focus always wins. */
-:where(.power:hover)::before {
+.power:where(:hover)::before {
   background: var(--hover-bg);
 }
 

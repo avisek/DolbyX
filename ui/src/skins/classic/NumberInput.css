@@ -61,8 +61,8 @@
 }
 
 /* The box lifts with its label — an Advanced card, a Master control
-   Row — under focus weight: the whole hover selector inside `:where()`
-   so the focus rule outranks it by specificity, not source order. The
+   Row — under focus weight (`:hover` inside `:where()`, ADR-0011), so
+   the focus rule outranks it by specificity, not source order. The
    focus line is the border itself: the same property hover paints, so
    the contest is real. Readonly fields get no lift. */
 :where(label:hover) .adv-input__field:where(:read-write) {

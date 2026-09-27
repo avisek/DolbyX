@@ -28,7 +28,7 @@
 }
 
 /* Hover under focus weight: a Row holding focus always wins. */
-:where(.master-control:hover) {
+.master-control:where(:hover) {
   background: var(--hover-bg);
 }
 

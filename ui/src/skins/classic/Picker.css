@@ -24,7 +24,7 @@
 }
 
 /* Hover under focus weight: a Row holding focus always wins. */
-:where(.picker:hover) {
+.picker:where(:hover) {
   background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
 }
 
@@ -84,7 +84,7 @@
 }
 
 /* Hover under focus weight: a focused pill always wins. */
-:where(.picker__option:hover) {
+.picker__option:where(:hover) {
   border-color: var(--hover-line);
   color: var(--color-text);
 }
@@ -176,7 +176,7 @@
 }
 
 /* Hover under focus weight; a disabled action never lifts. */
-:where(.picker__action:hover):enabled {
+.picker__action:where(:hover):enabled {
   background: var(--hover-bg);
   color: var(--color-text);
 }
