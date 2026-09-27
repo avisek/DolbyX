@@ -39,7 +39,8 @@ function renderConnected(): MockWebSocket {
   return socket
 }
 
-const option = (name: string) => screen.getByRole('radio', { name })
+const option = (name: string) =>
+  screen.getByRole<HTMLInputElement>('radio', { name })
 
 const action = (name: string) =>
   screen.getByRole<HTMLButtonElement>('button', { name })
@@ -96,24 +97,30 @@ function customPresetState(
   }
 }
 
-// Behaviors 1 + 7 (#23), client half: the picker renders the None
-// affordance plus the snapshot's global presets — and out of the box no
-// factory profile selects one, so None is checked.
-it('renders None + the factory presets with None selected', () => {
+// Behaviors 1 + 7 (#23), client half — behavior 2 (#119): the EQ row
+// is a Picker — None first (a Factory item, `checked` while the profile
+// has no EQ selection), then the snapshot's global presets; out of the
+// box no factory profile selects one.
+it('renders None first, then the factory presets, None checked', () => {
   render(() => <EqPresetPicker />)
-  const options = screen.getAllByRole('radio')
-  expect(options.map((radio) => radio.textContent)).toEqual([
+  const options = screen.getAllByRole<HTMLInputElement>('radio')
+  expect(options.map((radio) => radio.labels?.[0]?.textContent)).toEqual([
     'None',
     'Open',
     'Rich',
     'Focused',
   ])
-  expect(options.map((radio) => radio.getAttribute('aria-checked'))).toEqual([
-    'true',
-    'false',
-    'false',
-    'false',
+  expect(options.map((radio) => radio.checked)).toEqual([
+    true,
+    false,
+    false,
+    false,
   ])
+  expect(screen.getByRole('radiogroup', { name: 'EQ Preset' })).toBeTruthy()
+  expect(option('None').closest('.picker--eq')).toBeTruthy()
+  expect(
+    option('None').labels?.[0]?.classList.contains('picker__option--factory'),
+  ).toBe(true)
 })
 
 // Behavior 1 (#57) / behavior 2 (#23), client half: picking Rich sends
@@ -134,15 +141,15 @@ it('picking Rich sends an edit_profile EQ selection patch', async () => {
     },
   ])
 
-  // Not yet acked — the picker still shows daemon truth.
-  expect(option('Rich').getAttribute('aria-checked')).toBe('false')
+  // Not yet acked: the clicked radio never checked.
+  expect(option('Rich').checked).toBe(false)
   socket.serverMessage({
     type: 'ack',
     request_id: sent[0]?.request_id,
   })
   await waitFor(() => {
-    expect(option('Rich').getAttribute('aria-checked')).toBe('true')
-    expect(option('None').getAttribute('aria-checked')).toBe('false')
+    expect(option('Rich').checked).toBe(true)
+    expect(option('None').checked).toBe(false)
   })
 })
 
@@ -152,7 +159,7 @@ it('picking Rich sends an edit_profile EQ selection patch', async () => {
 it('picking None detaches with a null EQ selection patch', () => {
   applySnapshot(selectingState('music', 'rich'))
   const socket = renderConnected()
-  expect(option('Rich').getAttribute('aria-checked')).toBe('true')
+  expect(option('Rich').checked).toBe(true)
 
   option('None').click()
   expect(sentEqSelections(socket)).toEqual([
@@ -184,11 +191,11 @@ it('re-picking the checked option sends nothing', () => {
 it("shows each profile's own EQ selection", () => {
   render(() => <EqPresetPicker />)
   applySnapshot(selectingState('game', 'open'))
-  expect(option('None').getAttribute('aria-checked')).toBe('true') // music
+  expect(option('None').checked).toBe(true) // music
 
   applySnapshot({ ...selectingState('game', 'open'), selected_profile: 'game' })
-  expect(option('Open').getAttribute('aria-checked')).toBe('true')
-  expect(option('None').getAttribute('aria-checked')).toBe('false')
+  expect(option('Open').checked).toBe(true)
+  expect(option('None').checked).toBe(false)
 })
 
 // Behavior 1 (#26), preset half: the action row renders all four
@@ -334,7 +341,7 @@ it('Add clones the selected preset and the acked minted id selects it', async ()
 
   socket.serverMessage({ type: 'ack', request_id: follow?.request_id })
   await waitFor(() => {
-    expect(option('Rich 2').getAttribute('aria-checked')).toBe('true')
+    expect(option('Rich 2').checked).toBe(true)
   })
 })
 
@@ -401,7 +408,7 @@ it('inline EQ preset rename commits on Enter, cancels on Esc', async () => {
   ])
   socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
   await waitFor(() => {
-    expect(option('Warm').getAttribute('aria-checked')).toBe('true')
+    expect(option('Warm').checked).toBe(true)
   })
 })
 
@@ -431,7 +438,7 @@ it('Delete sends remove_eq_preset and the reconcile falls to None', async () => 
   })
   await waitFor(() => {
     expect(screen.queryByRole('radio', { name: 'Rich 2' })).toBeNull()
-    expect(option('None').getAttribute('aria-checked')).toBe('true')
+    expect(option('None').checked).toBe(true)
   })
 })
 
@@ -443,5 +450,5 @@ it('updates the picked option on a broadcast state event', () => {
     type: 'state',
     snapshot: selectingState('music', 'focused'),
   })
-  expect(option('Focused').getAttribute('aria-checked')).toBe('true')
+  expect(option('Focused').checked).toBe(true)
 })

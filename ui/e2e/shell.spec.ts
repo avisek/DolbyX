@@ -78,8 +78,8 @@ test('power off dims everything but the header, controls still flip', async ({
       off,
       header: of('.app__header'),
       lan: of('.lan-access'),
-      profiles: of('.profile-tabs'),
-      presets: of('.eq-preset-picker'),
+      profiles: of('.picker--profile'),
+      presets: of('.picker--eq'),
       visualizer: of('.visualizer'),
       master: of('.master-controls'),
     }

@@ -88,6 +88,62 @@ function customSelectedState(
   }
 }
 
+const option = (name: string) =>
+  screen.getByRole<HTMLInputElement>('radio', { name })
+
+// Behavior 1 (#119), the tracer bullet: the profile row is a Picker —
+// one native radio per profile, named by the profile, `checked` on the
+// selected one (the store's truth, never a local mirror).
+it('renders one radio per profile, checked on the selected one', () => {
+  render(() => <ProfileTabs />)
+  const radios = screen.getAllByRole<HTMLInputElement>('radio')
+  expect(radios.map((radio) => radio.labels?.[0]?.textContent)).toEqual([
+    'Movie',
+    'Music',
+    'Game',
+    'Voice',
+  ])
+  expect(radios.map((radio) => radio.checked)).toEqual([
+    false,
+    true,
+    false,
+    false,
+  ])
+  expect(screen.getByRole('radiogroup', { name: 'Profile' })).toBeTruthy()
+  expect(option('Music').closest('.picker--profile')).toBeTruthy()
+})
+
+// Behavior 1 (#119): a pick is ack-then-apply — the click cancels the
+// native check and sends `set_profile`; the radio flips on the ack
+// alone. Re-picking the checked one is a no-op gesture: no frame.
+it('picking sends set_profile and flips on the ack; re-picking sends nothing', async () => {
+  const socket = renderConnected()
+  const sentPicks = () =>
+    socket.sentCommands().filter((frame) => frame.cmd === 'set_profile')
+
+  option('Music').click()
+  expect(sentPicks()).toEqual([])
+
+  option('Movie').click()
+  expect(sentPicks()).toEqual([
+    {
+      cmd: 'set_profile',
+      request_id: expect.any(String) as string,
+      id: 'movie',
+    },
+  ])
+  // Not yet acked: the clicked radio never checked. (happy-dom leaves
+  // the group's previous radio unchecked on a cancelled click — real
+  // browsers restore it — so only the clicked one is asserted here.)
+  expect(option('Movie').checked).toBe(false)
+
+  socket.serverMessage({ type: 'ack', request_id: sentPicks()[0]?.request_id })
+  await waitFor(() => {
+    expect(option('Movie').checked).toBe(true)
+    expect(option('Music').checked).toBe(false)
+  })
+})
+
 // Behavior 1 (#26), profile half: the action row renders all four
 // actions always — factory vs custom flips `disabled` per the matrix,
 // never presence (zero layout shift).
@@ -183,15 +239,11 @@ it('Add clones the selected profile and the acked minted id selects it', async (
     expect(frame?.id).toBe('user_9f3a')
     return frame
   })
-  expect(screen.getByRole('tab', { name: 'Music 2' })).toBeTruthy()
+  expect(option('Music 2').checked).toBe(false)
 
   socket.serverMessage({ type: 'ack', request_id: follow?.request_id })
   await waitFor(() => {
-    expect(
-      screen
-        .getByRole('tab', { name: 'Music 2' })
-        .getAttribute('aria-selected'),
-    ).toBe('true')
+    expect(option('Music 2').checked).toBe(true)
   })
 })
 
@@ -216,7 +268,7 @@ it('inline rename commits on Enter and blur, cancels on Esc', async () => {
   fireEvent.keyDown(field(), { key: 'Escape' })
   expect(screen.queryByRole('textbox')).toBeNull()
   expect(sentRenames(socket)).toEqual([])
-  expect(screen.getByRole('tab', { name: 'Music 2' })).toBeTruthy()
+  expect(option('Music 2').checked).toBe(true)
 
   // Enter commits; the label updates local-first on the ack.
   action('Rename profile').click()
@@ -233,7 +285,7 @@ it('inline rename commits on Enter and blur, cancels on Esc', async () => {
   ])
   socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
   await waitFor(() => {
-    expect(screen.getByRole('tab', { name: 'Late Night' })).toBeTruthy()
+    expect(option('Late Night').checked).toBe(true)
   })
 
   // Blur commits too…
@@ -247,6 +299,66 @@ it('inline rename commits on Enter and blur, cancels on Esc', async () => {
   action('Rename profile').click()
   fireEvent.blur(field())
   expect(sentRenames(socket)).toHaveLength(2)
+})
+
+// Behavior 4 (#119): Rename keeps the checked pill in place — it gains
+// `--renaming` and holds the field, prefilled and selected whole. A
+// click landing in the field stays there (the card rule): no forward
+// to the radio, no blur-commit, no frame. Enter commits and the field
+// is gone.
+it('Rename mounts the field inside the checked pill; a click in it sends nothing', () => {
+  const socket = renderConnected()
+  applySnapshot(customSelectedState())
+  const pill = option('Music 2').labels?.[0]
+  if (!pill) throw new Error('Music 2 has no pill')
+  expect(pill.classList.contains('picker__option--renaming')).toBe(false)
+
+  action('Rename profile').click()
+  expect(pill.classList.contains('picker__option--renaming')).toBe(true)
+  const field = screen.getByRole<HTMLInputElement>('textbox', {
+    name: 'Profile name',
+  })
+  expect(field.closest('.picker__option')).toBe(pill)
+  expect(field.classList.contains('picker__field')).toBe(true)
+  expect(field.value).toBe('Music 2')
+  expect(document.activeElement).toBe(field)
+  expect([field.selectionStart, field.selectionEnd]).toEqual([0, 7])
+
+  // The label's activation is cancelled (the card rule) — in a browser
+  // the forward would focus the radio and blur-commit the field.
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+  expect(field.dispatchEvent(click)).toBe(false)
+  expect(
+    socket.sentCommands().filter((frame) => frame.cmd !== 'get_state'),
+  ).toEqual([])
+  expect(document.activeElement).toBe(field)
+  expect(screen.getByRole('textbox')).toBe(field)
+
+  fireEvent.input(field, { target: { value: 'Late Night' } })
+  fireEvent.keyDown(field, { key: 'Enter' })
+  expect(sentRenames(socket).at(-1)?.name).toBe('Late Night')
+  expect(screen.queryByRole('textbox')).toBeNull()
+  expect(pill.classList.contains('picker__option--renaming')).toBe(false)
+})
+
+// Behavior 5 (#119): identity-stable rendering is keyboard
+// accessibility (ADR-0011 addendum 2) — a broadcast snapshot rebuilds
+// the options array with a different selection; the radios render by
+// position, so the one holding focus is the same node afterwards.
+it('focus stays in the radio group across a snapshot with a new selection', () => {
+  const socket = renderConnected()
+  const music = option('Music')
+  music.focus()
+  expect(document.activeElement).toBe(music)
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ selected_profile: 'game' }),
+  })
+  expect(option('Game').checked).toBe(true)
+  expect(option('Music')).toBe(music)
+  expect(document.activeElement).toBe(music)
+  expect(document.activeElement?.classList.contains('picker__radio')).toBe(true)
 })
 
 // Delete sends `remove_profile` and reconciles off the ack — where
@@ -265,9 +377,7 @@ it('Delete sends remove_profile and the reconcile lands the fallback', async () 
 
   await ackThenReconcile(socket, fixtureState())
   await waitFor(() => {
-    expect(screen.queryByRole('tab', { name: 'Music 2' })).toBeNull()
-    expect(
-      screen.getByRole('tab', { name: 'Music' }).getAttribute('aria-selected'),
-    ).toBe('true')
+    expect(screen.queryByRole('radio', { name: 'Music 2' })).toBeNull()
+    expect(option('Music').checked).toBe(true)
   })
 })
