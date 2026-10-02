@@ -7,9 +7,10 @@ Throwaway branch `prototype/remastered`. Run `just dev`, open
 
 | variant | visualizer | switcher | LAN + Skin region |
 | --- | --- | --- | --- |
-| a | Capsule: continuous rounded bars, glow, dark field in both schemes | pills | stacked full-width rows |
+| a | Capsule: continuous rounded bars, glow, scheme-following field, guides at 0/12/24 dB, remastered EQ editor (hairline track, dot thumb, clean curve, no linger) | pills | stacked full-width rows |
 | b | Matrix: 2-dB LED segments, ghost unlit, scheme-following field | checked pill, rest unfold inline on hover / focus | one line (two Shell tracks) |
-| c | Needle: hairlines + dot pip, dotted guide, scheme-following field | select box, menu drops down on hover / focus | ghost strip, hairline above |
+| c | Needle: hairlines + dot pip, dotted guide, scheme-following field | select box; click opens, a pick closes, click-away closes (two CSS clocks, no JS) | ghost strip, hairline above |
 
-Files: `<variant>-<scheme>-<width>.png` (full page), `-eq` (editor
-revealed), `-switcher` (menu revealed), `advanced-<scheme>.png`.
+Files: `<variant>-<scheme>-<width>.png` (full page), `-idle` (no feed:
+pips / thumbs / curve aligned at 0 dB), `-eq` (editor over a feed),
+`-switcher` (opened) / `-switcher-picked` (after a pick), `advanced-<scheme>.png`.

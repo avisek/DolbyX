@@ -1,4 +1,4 @@
-import { Show, type Component } from 'solid-js'
+import type { Component } from 'solid-js'
 import AdvancedPanel from './components/AdvancedPanel'
 import ConnectionBadge from './components/ConnectionBadge'
 import EqPresetPicker from './components/EqPresetPicker'
@@ -34,9 +34,9 @@ const App: Component = () => (
     <LanToggle />
     <SkinPicker />
     <AdvancedPanel />
-    <Show when={import.meta.env.DEV}>
-      <PrototypeBar />
-    </Show>
+    {/* Always on, prod builds included — the variants have to be
+        judged on live audio through EqualizerAPO. */}
+    <PrototypeBar />
   </main>
 )
 

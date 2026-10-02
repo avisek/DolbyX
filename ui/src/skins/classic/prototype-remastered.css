@@ -34,20 +34,18 @@
   box-shadow: none;
 }
 
-/* — A · Capsule: continuous bars, rounded tops, a soft glow; 12-dB
-   guide lines behind. — */
+/* — A · Capsule: continuous bars, rounded tops, a soft glow. Guide
+   lines at 0 / 12 / 24 dB on the editor's own padded mapping (the
+   component pads the track by thumb/4, EqCurve.tsx) — so pips, thumbs,
+   curve and guides share one y; nothing at the floor or ceiling. — */
 [data-variant='a'] .visualizer {
-  background:
-    repeating-linear-gradient(
-      to top,
-      var(--vis-guide) 0 1px,
-      transparent 1px calc(100% / 4)
-    ),
-    var(--vis-bg);
+  background: var(--vis-bg);
 }
 
 [data-variant='a'] .vis-column {
   --exc-step: 0.0625; /* the wire quantum: continuous */
+  /* dB → distance from the floor, the editor's padded mapping. */
+  --usable: calc(100cqh - 2 * var(--eq-pad));
 }
 
 [data-variant='a'] .vis-column__fill {
@@ -63,17 +61,67 @@
   box-shadow: 0 0 0.6rem var(--vis-glow);
 }
 
+/* The lattice carries the guides, under the fill; per column, edge to
+   edge, so they tile into one line across the field. */
 [data-variant='a'] .vis-column__lattice {
-  display: none;
+  --guide: linear-gradient(var(--vis-guide), var(--vis-guide));
+
+  z-index: 0;
+  border: none;
+  background-image: var(--guide), var(--guide), var(--guide);
+  background-position:
+    0 calc(100cqh - var(--eq-pad) - var(--usable) * 1 / 4),
+    0 calc(100cqh - var(--eq-pad) - var(--usable) * 2 / 4),
+    0 calc(100cqh - var(--eq-pad) - var(--usable) * 3 / 4);
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
 }
 
 [data-variant='a'] .vis-column__pip {
   inset-inline: 24%;
-  bottom: calc((var(--gain) + 12) / 48 * (100cqh - 2px));
+  bottom: calc(var(--eq-pad) + (var(--gain) + 12) / 48 * var(--usable) - 1px);
   height: 2px;
   border-radius: 1px;
   background: var(--vis-pip);
   box-shadow: 0 0 6px var(--vis-pip-glow);
+}
+
+/* The EQ editor, remastered: a hairline track, a solid dot thumb cut
+   out of the field (the Slider's own idiom), a clean 2-px curve with a
+   faint wide halo, no blur. No linger: the editor fades the moment the
+   pointer leaves. */
+[data-variant='a'] :is(.eq-sliders, .eq-curve) {
+  transition: opacity 200ms linear 0s;
+}
+
+[data-variant='a'] .eq-slider__track {
+  inline-size: 2px;
+  border-radius: 1px;
+  background: var(--eq-track);
+}
+
+[data-variant='a'] .eq-slider__thumb {
+  border: 2px solid var(--vis-field);
+  background: var(--eq-ink);
+  box-shadow: 0 0 6px var(--vis-glow);
+  transition: scale var(--hover-ms) ease;
+}
+
+[data-variant='a'] .eq-slider--active .eq-slider__thumb {
+  scale: 1.35;
+  background: color-mix(in srgb, var(--eq-ink) 60%, #fff);
+}
+
+[data-variant='a'] .eq-curve__glow {
+  stroke-opacity: 0.18;
+  stroke-width: 8px;
+  filter: none;
+}
+
+[data-variant='a'] .eq-curve__stroke {
+  stroke-opacity: 1;
+  stroke-width: 2px;
+  stroke-linecap: round;
 }
 
 /* — B · Matrix: 24 LED segments of 2 dB, a gap between, ghost
@@ -207,8 +255,120 @@
   font-size: var(--text-xs);
 }
 
-/* — C: a select-looking box; the list drops down over the page on
-   hover or keyboard focus. — */
+/* — C: a real dropdown, CSS-only on the fixed skeleton. Two clocks on
+   the list, registered numbers each animated linearly "forever":
+   `--since-focus` restarts when the list gains focus (:focus-within);
+   `--since-pick` restarts when the checked radio changes (the
+   animation-name follows the checked index via :has()). Open iff the
+   focus is newer than the pick: click the box → open; click an
+   option → the pick is newer → closed; click away → focus gone → the
+   focus clock snaps to "long ago" → closed. Tab in → open; Arrows
+   pick without opening, like a native select. `forwards`: a clock
+   fast-forwarded to its end (Playwright's animations: disabled) holds
+   there instead of snapping back. Cost: two running animations on one
+   element. — */
+@property --since-focus {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1e9;
+}
+
+@property --since-pick {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes since-focus {
+  from {
+    --since-focus: 0;
+  }
+
+  to {
+    --since-focus: 1e6;
+  }
+}
+
+@keyframes since-pick-1 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-2 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-3 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-4 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-5 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-6 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-7 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
+@keyframes since-pick-8 {
+  from {
+    --since-pick: 0;
+  }
+
+  to {
+    --since-pick: 1e6;
+  }
+}
+
 [data-variant='c'] .picker--skin {
   position: relative;
   min-block-size: calc(var(--control-h) + 2 * var(--space-2));
@@ -216,13 +376,17 @@
 
 /* The open menu must clear the rows below (the Off-look's opacity
    makes the Row a stacking context). */
-[data-variant='c'] .picker--skin:where(:hover, :has(:focus-visible)) {
+[data-variant='c'] .picker--skin:focus-within {
   z-index: var(--z-popover);
 }
 
-/* Absolutely positioned inside its grid area: 0 0 is the options
-   column's own corner. */
+/* The list: absolutely positioned inside its grid area (0 0 is the
+   options column's corner); `--open` 0/1 from the clocks; its panel
+   chrome scales with it. */
 [data-variant='c'] .picker--skin .picker__options {
+  --open: clamp(0, (var(--since-pick) - var(--since-focus)) * 1000, 1);
+  --shadow-ink: light-dark(rgb(18 36 56 / 18%), rgb(0 0 0 / 45%));
+
   position: absolute;
   top: 0;
   left: 0;
@@ -230,23 +394,129 @@
   display: grid;
   gap: var(--space-1);
   min-inline-size: 11rem;
-  border: 1px solid transparent;
+  padding: calc(var(--open) * var(--space-1));
+  border: 1px solid
+    color-mix(in srgb, var(--hover-line) calc(var(--open) * 100%), transparent);
   border-radius: var(--radius-1);
+  background: color-mix(
+    in srgb,
+    var(--color-surface) calc(var(--open) * 100%),
+    transparent
+  );
+  box-shadow: 0 var(--space-2) var(--space-5)
+    color-mix(in srgb, var(--shadow-ink) calc(var(--open) * 100%), transparent);
+  animation: since-pick-1 1000000s linear forwards;
   transition:
-    background var(--hover-ms) ease,
+    padding var(--hover-ms) ease,
     border-color var(--hover-ms) ease,
-    box-shadow var(--hover-ms) ease,
-    padding var(--hover-ms) ease;
+    background var(--hover-ms) ease,
+    box-shadow var(--hover-ms) ease;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(1):checked) {
+  animation-name: since-pick-1;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(2):checked) {
+  animation-name: since-pick-2;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(3):checked) {
+  animation-name: since-pick-3;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(4):checked) {
+  animation-name: since-pick-4;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(5):checked) {
+  animation-name: since-pick-5;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(6):checked) {
+  animation-name: since-pick-6;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(7):checked) {
+  animation-name: since-pick-7;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(8):checked) {
+  animation-name: since-pick-8;
+}
+
+/* Focused: the focus clock joins the list (the pick clock keeps
+   running — same name, never restarted). */
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(1):checked) {
+  animation-name: since-focus, since-pick-1;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(2):checked) {
+  animation-name: since-focus, since-pick-2;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(3):checked) {
+  animation-name: since-focus, since-pick-3;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(4):checked) {
+  animation-name: since-focus, since-pick-4;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(5):checked) {
+  animation-name: since-focus, since-pick-5;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(6):checked) {
+  animation-name: since-focus, since-pick-6;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(7):checked) {
+  animation-name: since-focus, since-pick-7;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:focus-within:has(.picker__radio:nth-of-type(8):checked) {
+  animation-name: since-focus, since-pick-8;
 }
 
 [data-variant='c'] .picker--skin .picker__option {
   justify-content: space-between;
-  min-block-size: 0;
   overflow: clip;
   white-space: nowrap;
-  interpolate-size: allow-keywords;
   transition:
-    block-size var(--hover-ms) ease,
+    max-block-size var(--hover-ms) ease,
     margin var(--hover-ms) ease,
     opacity var(--hover-ms) ease,
     background var(--hover-ms) ease,
@@ -254,12 +524,17 @@
     color var(--hover-ms) ease;
 }
 
-/* The checked one is the box: first, surface-coloured, a chevron. */
+/* The checked one is the box: first, field-coloured, a chevron; lit
+   while the menu is open. */
 [data-variant='c'] .picker--skin .picker__radio:checked + .picker__option {
   order: -1;
   border-color: var(--hover-line);
   background: var(--color-bg);
-  color: var(--color-text);
+  color: color-mix(
+    in srgb,
+    var(--color-accent) calc(var(--open) * 100%),
+    var(--color-text)
+  );
 }
 
 [data-variant='c']
@@ -272,32 +547,15 @@
   font-size: var(--text-xs);
 }
 
-/* Closed: the rest have no height. */
+/* The rest: zero height (border-box, so the border folds too) and the
+   gap swallowed while closed; full height while open. */
 [data-variant='c']
-  .picker--skin:not(:hover, :has(:focus-visible))
+  .picker--skin
   .picker__radio:not(:checked)
   + .picker__option {
-  margin-block-start: calc(-1 * var(--space-1));
-  block-size: 0;
-  border-width: 0;
-  opacity: 0;
-}
-
-/* Open: the list becomes a floating panel. */
-[data-variant='c']
-  .picker--skin:where(:hover, :has(:focus-visible))
-  .picker__options {
-  padding: var(--space-1);
-  border-color: var(--hover-line);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-popover);
-}
-
-[data-variant='c']
-  .picker--skin:where(:hover, :has(:focus-visible))
-  .picker__radio:checked
-  + .picker__option {
-  color: var(--color-accent);
+  max-block-size: calc(var(--open) * var(--control-h));
+  margin-block-start: calc((var(--open) - 1) * var(--space-1));
+  opacity: var(--open);
 }
 
 /* ===================== LAN Access + Skin region ===================== */

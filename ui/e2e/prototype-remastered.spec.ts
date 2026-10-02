@@ -21,14 +21,19 @@ const SCHEMES = ['dark', 'light'] as const
 
 type Clip = { x: number; y: number; width: number; height: number }
 
-const shoot = async (page: Page, name: string, clip?: Clip) => {
+const shoot = async (
+  page: Page,
+  name: string,
+  clip?: Clip,
+  animations: 'disabled' | 'allow' = 'disabled',
+) => {
   await page.screenshot({
     path: join(OUT, `${name}.png`),
     mask: [page.getByRole('textbox', { name: 'LAN URL' })],
     maskColor: await tokenColor(page, '--color-bg'),
     fullPage: !clip,
     ...(clip ? { clip } : {}),
-    animations: 'disabled',
+    animations,
     caret: 'hide',
   })
 }
@@ -43,6 +48,22 @@ const maxFill = (page: Page) =>
 for (const variant of VARIANTS) {
   test(`shoot variant ${variant}`, async ({ page, daemon }) => {
     test.setTimeout(240_000)
+
+    // Idle first: no feed, so pips / thumbs / curve all sit at 0 dB —
+    // the alignment shot.
+    for (const scheme of SCHEMES) {
+      await page.emulateMedia({ colorScheme: scheme })
+      await page.setViewportSize({ width: 1280, height: 900 })
+      await page.goto(`/?variant=${variant}`)
+      await expect(page.getByRole('status')).toHaveText('Connected')
+      const vis = await page.locator('.visualizer').boundingBox()
+      if (vis) {
+        await page.mouse.move(vis.x + vis.width / 2, vis.y + vis.height / 2)
+        await page.waitForTimeout(400)
+        await shoot(page, `${variant}-${scheme}-idle`, vis)
+      }
+    }
+
     const plugin = await SyntheticPlugin.connect(daemon.socketPath)
     await plugin.hello(48_000, 512)
     const FRAMES = 256
@@ -89,18 +110,25 @@ for (const variant of VARIANTS) {
         await page.mouse.move(vis.x + vis.width / 2, vis.y + vis.height / 2)
       await page.waitForTimeout(400)
       await shoot(page, `${variant}-${scheme}-eq`, vis ?? undefined)
+      // The switcher: hover (b) or click the box (c) opens it; then a
+      // pick, which closes c.
       const picker = page.locator('.picker--skin')
-      await picker.hover()
+      const checked = picker.locator('.picker__radio:checked + .picker__option')
+      await checked.click()
       await page.waitForTimeout(300)
       const box = await picker.boundingBox()
-      if (box) {
-        await shoot(page, `${variant}-${scheme}-switcher`, {
-          x: box.x - 8,
-          y: box.y - 8,
-          width: box.width + 16,
-          height: box.height + 120,
-        })
-      }
+      const clip = box
+        ? {
+            x: box.x - 8,
+            y: box.y - 8,
+            width: box.width + 16,
+            height: box.height + 260,
+          }
+        : undefined
+      await shoot(page, `${variant}-${scheme}-switcher`, clip, 'allow')
+      await picker.getByText('Paper').click()
+      await page.waitForTimeout(300)
+      await shoot(page, `${variant}-${scheme}-switcher-picked`, clip, 'allow')
       if (variant === 'a') {
         await expandAdvanced(page)
         await page.waitForTimeout(400)

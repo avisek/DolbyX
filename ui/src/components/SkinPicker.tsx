@@ -8,6 +8,11 @@ import { Index, createSignal, type Component } from 'solid-js'
 const SKINS = [
   { id: 'remastered', label: 'Remastered' },
   { id: 'classic', label: 'Classic' },
+  // Dummies: how a longer list behaves.
+  { id: 'midnight', label: 'Midnight' },
+  { id: 'paper', label: 'Paper' },
+  { id: 'neon', label: 'Neon' },
+  { id: 'terminal', label: 'Terminal' },
 ] as const
 
 const SkinPicker: Component = () => {

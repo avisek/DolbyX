@@ -122,27 +122,32 @@
 
 /* ===== Variant paints (PROTOTYPE) — one block per `?variant=` ===== */
 
-/* A — "Capsule": a dark instrument field in both schemes; smooth
-   rounded bars on a blue→cyan→amber→red ramp, a thin bright pip. */
+/* A — "Capsule": the field follows the scheme (a deep blue well in
+   dark, a cool paper in light); smooth rounded bars on a blue→cyan→
+   amber→red ramp, a thin bright pip; the EQ editor on the same ink. */
 :root[data-variant='a'] {
   --vis-bg: radial-gradient(
     90% 120% at 50% 110%,
-    #0f2d4a 0%,
-    #0a1a2c 55%,
-    #060c14 100%
+    light-dark(#cfe0f3, #0f2d4a) 0%,
+    light-dark(#e4edf7, #0a1a2c) 55%,
+    light-dark(#f3f7fb, #060c14) 100%
   );
-  --vis-guide: rgb(255 255 255 / 6%); /* 12-dB guide lines */
+  --vis-field: light-dark(#e9f0f8, #0a1a2c); /* the thumb's cut-out */
+  --vis-guide: light-dark(rgb(16 32 48 / 9%), rgb(255 255 255 / 6%));
   /* The ramp's colours: floor → 26 rows → 33 → 42 (gradient in
      prototype-remastered.css — var(--row) only resolves in a column) */
-  --vis-ramp-0: #0a6ec4;
-  --vis-ramp-1: #19c1ff;
-  --vis-ramp-2: #ffd166;
-  --vis-ramp-3: #ff5d5d;
-  --vis-glow: rgb(0 180 255 / 35%);
-  --vis-pip: #e6fbff;
-  --vis-pip-glow: rgb(120 230 255 / 80%);
-  --vis-off: rgb(120 140 160 / 30%);
-  --eq-ink: #8fd2ff; /* the field is always dark: one value */
+  --vis-ramp-0: light-dark(#0b5fb8, #0a6ec4);
+  --vis-ramp-1: light-dark(#1a9de6, #19c1ff);
+  --vis-ramp-2: light-dark(#e0a020, #ffd166);
+  --vis-ramp-3: light-dark(#e04a40, #ff5d5d);
+  --vis-glow: light-dark(rgb(0 130 216 / 22%), rgb(0 180 255 / 35%));
+  --vis-pip: light-dark(#0b3a5c, #e6fbff);
+  --vis-pip-glow: light-dark(rgb(11 58 92 / 35%), rgb(120 230 255 / 80%));
+  --vis-off: light-dark(rgb(16 32 48 / 18%), rgb(120 140 160 / 30%));
+  --eq-ink: light-dark(#0b5fb8, #8fd2ff);
+  --eq-thumb-size: 14px; /* the component's track pad = ¼ of this */
+  --eq-pad: calc(var(--eq-thumb-size) / 4);
+  --eq-track: light-dark(rgb(16 32 48 / 14%), rgb(255 255 255 / 14%));
 }
 
 /* B — "Matrix": LED segments (2 dB each) with ghost unlit segments;
