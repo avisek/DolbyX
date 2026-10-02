@@ -1,0 +1,320 @@
+/* PROTOTYPE (#129, map #127): the three Remastered variants, keyed on
+   `html[data-variant]` (set pre-paint from `?variant=`, main.tsx).
+   Each variant answers the ticket's axes differently:
+     a  Capsule visualizer · pill switcher · stacked rows
+     b  Matrix visualizer  · inline-collapse switcher · one line
+     c  Needle visualizer  · menu-dropdown switcher · ghost strip
+   Throwaway: the winner folds back into the real sheets. */
+
+/* Scheme override for the dev bar only (`?scheme=`); the product has
+   no manual override (map: out of scope). */
+:root[data-scheme='light'] {
+  color-scheme: light;
+}
+
+:root[data-scheme='dark'] {
+  color-scheme: dark;
+}
+
+/* ===================== Visualizer ===================== */
+
+/* Shared: the field rounds like every other card; the columns clip to
+   it, the editor (a sibling) does not. */
+.vis-columns {
+  border-radius: var(--radius-2);
+  overflow: clip;
+}
+
+.visualizer {
+  border-radius: var(--radius-2);
+}
+
+/* Off: no glow survives the dimming. */
+.visualizer--off :is(.vis-column__fill, .vis-column__pip) {
+  box-shadow: none;
+}
+
+/* — A · Capsule: continuous bars, rounded tops, a soft glow; 12-dB
+   guide lines behind. — */
+[data-variant='a'] .visualizer {
+  background:
+    repeating-linear-gradient(
+      to top,
+      var(--vis-guide) 0 1px,
+      transparent 1px calc(100% / 4)
+    ),
+    var(--vis-bg);
+}
+
+[data-variant='a'] .vis-column {
+  --exc-step: 0.0625; /* the wire quantum: continuous */
+}
+
+[data-variant='a'] .vis-column__fill {
+  inset-inline: 24%;
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
+  background: linear-gradient(
+    to top,
+    var(--vis-ramp-0) 0,
+    var(--vis-ramp-1) calc(26 * var(--row)),
+    var(--vis-ramp-2) calc(33 * var(--row)),
+    var(--vis-ramp-3) calc(42 * var(--row)) calc(48 * var(--row))
+  );
+  box-shadow: 0 0 0.6rem var(--vis-glow);
+}
+
+[data-variant='a'] .vis-column__lattice {
+  display: none;
+}
+
+[data-variant='a'] .vis-column__pip {
+  inset-inline: 24%;
+  bottom: calc((var(--gain) + 12) / 48 * (100cqh - 2px));
+  height: 2px;
+  border-radius: 1px;
+  background: var(--vis-pip);
+  box-shadow: 0 0 6px var(--vis-pip-glow);
+}
+
+/* — B · Matrix: 24 LED segments of 2 dB, a gap between, ghost
+   segments where unlit; the pip is one white-hot segment. — */
+[data-variant='b'] .visualizer {
+  background: var(--vis-bg);
+}
+
+[data-variant='b'] .vis-column {
+  --exc-step: 2;
+  --gain-step: 2;
+  --seg: calc(2 * var(--row));
+  --seg-gap: 2px;
+}
+
+[data-variant='b'] .vis-column__fill,
+[data-variant='b'] .vis-column__lattice {
+  inset-inline: 16%;
+  mask-image: repeating-linear-gradient(
+    to top,
+    #000 0 calc(var(--seg) - var(--seg-gap)),
+    transparent calc(var(--seg) - var(--seg-gap)) var(--seg)
+  );
+}
+
+[data-variant='b'] .vis-column__lattice {
+  z-index: 0; /* under the fill: the unlit segments */
+  border: none;
+  background: var(--vis-ghost);
+}
+
+[data-variant='b'] .vis-column__pip {
+  inset-inline: 16%;
+  bottom: calc(clamp(0, round(down, var(--gain) + 12, 2), 46) * var(--row));
+  height: calc(var(--seg) - var(--seg-gap));
+  background: var(--vis-pip);
+}
+
+/* — C · Needle: 3-px hairlines fading in from the floor, a dotted
+   6-dB guide per column, a glowing dot as the pip. — */
+[data-variant='c'] .visualizer {
+  background: var(--vis-bg);
+}
+
+[data-variant='c'] .vis-column {
+  --exc-step: 0.0625;
+}
+
+[data-variant='c'] .vis-column__fill {
+  inset-inline: calc(50% - 1.5px);
+  border-radius: 2px;
+  background: linear-gradient(
+    to top,
+    var(--vis-ramp-0) 0,
+    var(--vis-ramp-1) calc(26 * var(--row)),
+    var(--vis-ramp-2) calc(33 * var(--row)),
+    var(--vis-ramp-3) calc(42 * var(--row)) calc(48 * var(--row))
+  );
+}
+
+[data-variant='c'] .vis-column__lattice {
+  z-index: 0;
+  border: none;
+  background: radial-gradient(circle, var(--vis-dot) 1px, transparent 1.5px) 50%
+    100% / 100% calc(6 * var(--row)) repeat-y;
+}
+
+[data-variant='c'] .vis-column__pip {
+  right: auto;
+  bottom: calc((var(--gain) + 12) / 48 * 100cqh);
+  left: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--vis-pip);
+  box-shadow:
+    0 0 0 3px var(--vis-pip-halo),
+    0 0 10px var(--vis-pip);
+  translate: -50% 50%;
+}
+
+/* ===================== Skin switcher ===================== */
+
+/* The Picker skeleton minus actions: the grid's actions track is empty;
+   the picker reads as a Row like its siblings. */
+.picker--skin {
+  grid-template-areas: 'label options';
+  grid-template-columns: var(--label-w) minmax(0, 1fr);
+}
+
+/* — A: plain pills (nothing to add). — */
+
+/* — B: inline collapse — the checked pill alone, the rest unfold
+   beside it on hover or keyboard focus. — */
+[data-variant='b'] .picker--skin .picker__options {
+  flex-wrap: nowrap;
+}
+
+[data-variant='b'] .picker--skin .picker__option {
+  min-inline-size: 0;
+  overflow: clip;
+  white-space: nowrap;
+  interpolate-size: allow-keywords;
+  transition:
+    inline-size var(--hover-ms) ease,
+    padding var(--hover-ms) ease,
+    margin var(--hover-ms) ease,
+    opacity var(--hover-ms) ease,
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    color var(--hover-ms) ease;
+}
+
+[data-variant='b']
+  .picker--skin:not(:hover, :has(:focus-visible))
+  .picker__radio:not(:checked)
+  + .picker__option {
+  margin-inline-start: calc(-1 * var(--space-1));
+  padding-inline: 0;
+  inline-size: 0;
+  border-width: 0;
+  opacity: 0;
+}
+
+[data-variant='b']
+  .picker--skin
+  .picker__radio:checked
+  + .picker__option::after {
+  content: '▾';
+  margin-inline-start: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+/* — C: a select-looking box; the list drops down over the page on
+   hover or keyboard focus. — */
+[data-variant='c'] .picker--skin {
+  position: relative;
+  min-block-size: calc(var(--control-h) + 2 * var(--space-2));
+}
+
+/* The open menu must clear the rows below (the Off-look's opacity
+   makes the Row a stacking context). */
+[data-variant='c'] .picker--skin:where(:hover, :has(:focus-visible)) {
+  z-index: var(--z-popover);
+}
+
+/* Absolutely positioned inside its grid area: 0 0 is the options
+   column's own corner. */
+[data-variant='c'] .picker--skin .picker__options {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 11rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  transition:
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    box-shadow var(--hover-ms) ease,
+    padding var(--hover-ms) ease;
+}
+
+[data-variant='c'] .picker--skin .picker__option {
+  justify-content: space-between;
+  min-block-size: 0;
+  overflow: clip;
+  white-space: nowrap;
+  interpolate-size: allow-keywords;
+  transition:
+    block-size var(--hover-ms) ease,
+    margin var(--hover-ms) ease,
+    opacity var(--hover-ms) ease,
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    color var(--hover-ms) ease;
+}
+
+/* The checked one is the box: first, surface-coloured, a chevron. */
+[data-variant='c'] .picker--skin .picker__radio:checked + .picker__option {
+  order: -1;
+  border-color: var(--hover-line);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__radio:checked
+  + .picker__option::after {
+  content: '▾';
+  margin-inline-start: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Closed: the rest have no height. */
+[data-variant='c']
+  .picker--skin:not(:hover, :has(:focus-visible))
+  .picker__radio:not(:checked)
+  + .picker__option {
+  margin-block-start: calc(-1 * var(--space-1));
+  block-size: 0;
+  border-width: 0;
+  opacity: 0;
+}
+
+/* Open: the list becomes a floating panel. */
+[data-variant='c']
+  .picker--skin:where(:hover, :has(:focus-visible))
+  .picker__options {
+  padding: var(--space-1);
+  border-color: var(--hover-line);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-popover);
+}
+
+[data-variant='c']
+  .picker--skin:where(:hover, :has(:focus-visible))
+  .picker__radio:checked
+  + .picker__option {
+  color: var(--color-accent);
+}
+
+/* ===================== LAN Access + Skin region ===================== */
+
+/* — A: stacked, each a full-width Row (the Shell's default). — */
+
+/* — B: one line — the two Rows take the Shell's two tracks, stacking
+   where only one fits. — */
+[data-variant='b'] .app > :is(.lan-access, .picker--skin) {
+  grid-column: auto;
+}
+
+/* — C: a ghost strip — no surface, a hairline above, side by side. — */
+[data-variant='c'] .app > :is(.lan-access, .picker--skin) {
+  grid-column: auto;
+  padding-inline: 0;
+  border-top: 1px solid var(--hover-line);
+  border-radius: 0;
+  background-color: transparent;
+}

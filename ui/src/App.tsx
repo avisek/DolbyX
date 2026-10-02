@@ -1,4 +1,4 @@
-import type { Component } from 'solid-js'
+import { Show, type Component } from 'solid-js'
 import AdvancedPanel from './components/AdvancedPanel'
 import ConnectionBadge from './components/ConnectionBadge'
 import EqPresetPicker from './components/EqPresetPicker'
@@ -6,6 +6,8 @@ import LanToggle from './components/LanToggle'
 import MasterControls from './components/MasterControls'
 import PowerToggle from './components/PowerToggle'
 import ProfileTabs from './components/ProfileTabs'
+import PrototypeBar from './components/PrototypeBar'
+import SkinPicker from './components/SkinPicker'
 import Visualizer from './components/Visualizer'
 import { state } from './store/state'
 
@@ -23,12 +25,18 @@ const App: Component = () => (
       <ConnectionBadge />
       <PowerToggle />
     </header>
-    <LanToggle />
     <ProfileTabs />
     <EqPresetPicker />
     <Visualizer />
     <MasterControls />
+    {/* PROTOTYPE (#129): LAN Access moves beside the Skin picker —
+        Master controls → LAN Access → Skin → Advanced. */}
+    <LanToggle />
+    <SkinPicker />
     <AdvancedPanel />
+    <Show when={import.meta.env.DEV}>
+      <PrototypeBar />
+    </Show>
   </main>
 )
 

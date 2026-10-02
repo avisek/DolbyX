@@ -13,6 +13,14 @@ if (!window.__BOOTSTRAP__) {
   throw new Error('Bootstrap missing — redirecting to daemon')
 }
 
+// PROTOTYPE (#129): variant + scheme from the URL, before first paint.
+{
+  const params = new URLSearchParams(location.search)
+  document.documentElement.dataset.variant = params.get('variant') ?? 'a'
+  const scheme = params.get('scheme')
+  if (scheme) document.documentElement.dataset.scheme = scheme
+}
+
 const root = document.getElementById('root')
 if (!root) throw new Error('#root element missing')
 
