@@ -114,14 +114,23 @@
   transition: background var(--hover-ms) ease;
 }
 
-/* Hover, per EQ slider: a wider hit pad around the dot (the strip
-   itself is zero-width), the dot grows with a soft ring, the track
-   lights. Hover under focus weight; the drag state outranks both. */
-[data-variant='a'] .eq-slider__thumb::before {
-  content: '';
-  position: absolute;
-  inset: -0.5rem;
-  border-radius: 50%;
+/* Hover follows the hand: the pointer logic snaps to the nearest
+   visible slider anywhere in the field (EqCurve.tsx), so each slider's
+   box is its share of the field — one slider spacing wide, centred on
+   its x (the component's `left`) — and `:hover` lands on the nearest
+   one. Spacing = (bands − 1) / (sliders − 1) columns; 20 bands is the
+   shipped grid (`vcnb = genb = 20`), the slider count is
+   sibling-count() (Chrome 138+; a `--n` hop keeps the minifier off
+   it). The dot grows with a soft ring, the track lights. Hover under
+   focus weight; the drag state outranks both. */
+[data-variant='a'] .eq-slider {
+  --eq-bands: 20;
+  --n: sibling-count();
+
+  inline-size: calc(
+    100% * (var(--eq-bands) - 1) / var(--eq-bands) / (var(--n) - 1)
+  );
+  translate: -50% 0;
 }
 
 [data-variant='a'] .eq-slider:where(:hover) .eq-slider__thumb,

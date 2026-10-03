@@ -110,13 +110,26 @@ for (const variant of VARIANTS) {
         await page.mouse.move(vis.x + vis.width / 2, vis.y + vis.height / 2)
       await page.waitForTimeout(400)
       await shoot(page, `${variant}-${scheme}-eq`, vis ?? undefined)
-      // Hover one EQ thumb (the third slider) for the hover look.
-      const thumb = page
-        .locator('.eq-slider')
-        .nth(2)
-        .locator('.eq-slider__thumb')
-      await thumb.hover()
+      // Hover between thumbs, off any thumb — x at 35 % of the field is
+      // nearest the second of five sliders (at 26 %): the hover must
+      // land there, as the pointer logic would.
+      if (vis) {
+        await page.mouse.move(
+          vis.x + vis.width * 0.35,
+          vis.y + vis.height * 0.3,
+        )
+      }
       await page.waitForTimeout(300)
+      const thumbScale = (i: number) =>
+        page
+          .locator('.eq-slider')
+          .nth(i)
+          .locator('.eq-slider__thumb')
+          .evaluate((el) => getComputedStyle(el).scale)
+      if (variant === 'a') {
+        expect(await thumbScale(1)).toBe('1.3')
+        expect(await thumbScale(2)).toBe('1')
+      }
       await shoot(
         page,
         `${variant}-${scheme}-eq-hover`,
