@@ -148,13 +148,13 @@ subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
 - Contract (`e2e/contract.spec.ts`), looped over every registered skin
   at 390 / 700 / 1280 and again under the light scheme where the skin
   declares `light dark`: no sideways overflow with every region open,
-  every control hit-testable at its centre (or its label's).
+  every control hit-testable at its centre (or its label's); at 1280, a
+  focus walk — every tab stop of the main screen and the open panel
+  paints a mark, judged by pixel diff (the stop's clip focused vs
+  blurred), so any mark a skin chooses counts and no property is read.
 - Switching (`e2e/skin.spec.ts`): a pick reaches a peer page, an unknown
   `config.toml` id paints the default with no pill checked, a reload
   paints from Bootstrap with no extra request.
-- `e2e/main-screen.spec.ts`: a visible focus indicator on every tab stop
-  (interim, until #138 Part 2), the badge's `--connected` following the
-  socket.
 
 Never checked: a skin's custom properties, literal colours or lengths,
 timings, screenshots, hover tints, thumb scale, reveal timing, popover
