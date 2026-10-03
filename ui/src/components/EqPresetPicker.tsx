@@ -57,47 +57,51 @@ const EqPresetPicker: Component = () => {
       onPick={(id) => {
         setEqPreset(state.selected_profile, id)
       }}
-      onAdd={() => {
-        const names = state.eq_presets.map((p) => p.name)
-        const source = preset()
-        if (source) {
-          addEqPreset(
-            state.selected_profile,
-            cloneName(source.name, names),
-            source.params,
-          )
-        } else {
-          // None capture: birth the profile's own resolved 9 as a
-          // preset — same content grammar, no wire special case.
-          const own = selectedProfile()?.params ?? {}
-          const captured: Record<string, readonly number[]> = {}
-          for (const name of presetCarried()) {
-            const values = own[name]
-            if (values) captured[name] = values
+      actions={{
+        onAdd: () => {
+          const names = state.eq_presets.map((p) => p.name)
+          const source = preset()
+          if (source) {
+            addEqPreset(
+              state.selected_profile,
+              cloneName(source.name, names),
+              source.params,
+            )
+          } else {
+            // None capture: birth the profile's own resolved 9 as a
+            // preset — same content grammar, no wire special case.
+            const own = selectedProfile()?.params ?? {}
+            const captured: Record<string, readonly number[]> = {}
+            for (const name of presetCarried()) {
+              const values = own[name]
+              if (values) captured[name] = values
+            }
+            addEqPreset(state.selected_profile, captureName(names), captured)
           }
-          addEqPreset(state.selected_profile, captureName(names), captured)
-        }
+        },
+        renameDisabled: preset()?.is_factory ?? true,
+        onRename: () => setRenaming(true),
+        deleteDisabled: preset()?.is_factory ?? true,
+        onDelete: () => {
+          const target = preset()
+          if (target) removeEqPreset(target.id)
+        },
+        resetDisabled: resetDisabled(),
+        onReset: () => {
+          const target = preset()
+          if (target) resetEqPreset(target.id)
+          else resetProfile(state.selected_profile, presetCarried())
+        },
       }}
-      renameDisabled={preset()?.is_factory ?? true}
-      onRename={() => setRenaming(true)}
-      deleteDisabled={preset()?.is_factory ?? true}
-      onDelete={() => {
-        const target = preset()
-        if (target) removeEqPreset(target.id)
+      rename={{
+        renaming: renaming(),
+        onRenameCommit: (name) => {
+          setRenaming(false)
+          const target = preset()
+          if (target) renameEqPreset(target.id, name)
+        },
+        onRenameCancel: () => setRenaming(false),
       }}
-      resetDisabled={resetDisabled()}
-      onReset={() => {
-        const target = preset()
-        if (target) resetEqPreset(target.id)
-        else resetProfile(state.selected_profile, presetCarried())
-      }}
-      renaming={renaming()}
-      onRenameCommit={(name) => {
-        setRenaming(false)
-        const target = preset()
-        if (target) renameEqPreset(target.id, name)
-      }}
-      onRenameCancel={() => setRenaming(false)}
     />
   )
 }

@@ -6,16 +6,19 @@ import LanToggle from './components/LanToggle'
 import MasterControls from './components/MasterControls'
 import PowerToggle from './components/PowerToggle'
 import ProfileTabs from './components/ProfileTabs'
+import SkinPicker from './components/SkinPicker'
 import Visualizer from './components/Visualizer'
 import { applySkin } from './store/skin'
 import { state } from './store/state'
 
 /**
- * Root Shell — header (wordmark, connection badge, power), LAN access,
- * profiles, EQ presets, visualizer, master controls, the Advanced panel
- * (Slices 05 #13, 10 #18, 14 #22, 15 #23, 16 #24; LAN access #70;
- * Advanced #85; header #117). Fixed DOM order; the skin lays it out.
- * `app--off` is the whole-UI power marker every skin reads (ADR-0011).
+ * Root Shell — header (wordmark, connection badge, power), profiles, EQ
+ * presets, visualizer, master controls, LAN access, the Skin picker,
+ * the Advanced panel (Slices 05 #13, 10 #18, 14 #22, 15 #23, 16 #24;
+ * LAN access #70; Advanced #85; header #117; Skin picker #137). Fixed
+ * DOM order, every region a direct child — no wrapper (ADR-0011
+ * skin-switching addendum); the skin lays it out. `app--off` is the
+ * whole-UI power marker every skin reads (ADR-0011).
  * The Shell also keeps the painted skin on `state.skin` (ADR-0013):
  * `main.tsx` paints the Bootstrap skin before render; from then on an
  * ack or a broadcast moving the id swaps the `<style>` text live.
@@ -31,11 +34,12 @@ const App: Component = () => {
         <ConnectionBadge />
         <PowerToggle />
       </header>
-      <LanToggle />
       <ProfileTabs />
       <EqPresetPicker />
       <Visualizer />
       <MasterControls />
+      <LanToggle />
+      <SkinPicker />
       <AdvancedPanel />
     </main>
   )
