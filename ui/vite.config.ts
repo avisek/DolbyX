@@ -73,6 +73,7 @@ export function inlineDevAssets() {
     },
     transform: (code: string, id: string): string | undefined => {
       if (!/\.css(?:$|\?)/.test(id)) return undefined
+      // The sheet arrives JSON-stringified: a double quote is `\"`.
       return code.replace(
         /url\((\\?["']?)(\/[^"'()\\]+)\1\)/g,
         (match, quote: string, path: string) => {

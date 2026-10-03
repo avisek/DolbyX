@@ -96,11 +96,10 @@ modifiers, and the published data vars (`--value`, `--norm`, `--count`,
 
 **Assets** live in the skin's directory, referenced by relative `url()`
 (`url('./icons/plus.svg')`, `url('./Inter.woff2')`); the build inlines
-them as data URIs, so a skin never adds a route. Dev matches: a
-serve-only plugin in `vite.config.ts` inlines them the same way (Vite's
-dev server would otherwise point them at the daemon origin). Budget: ≤ 2
-font weights per skin (~30 KB each inlined, Latin subset — subset
-manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
+them as data URIs, so a skin never adds a route; in dev a serve-only
+plugin (`vite.config.ts`, tested by `vite.config.test.ts`) does the same.
+Budget: ≤ 2 font weights per skin (~30 KB each inlined, Latin subset —
+subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
 
 **Rules** (ADR-0011 + addenda):
 

@@ -32,6 +32,7 @@ beforeEach(() => {
 afterEach(() => {
   stopWs()
   cleanup()
+  vi.useRealTimers()
 })
 
 /** Renders the app and completes the background WS handshake. */
@@ -204,9 +205,8 @@ it('updates the LAN toggle on a broadcast state event', () => {
   expect(lanToggle().checked).toBe(true)
 })
 
-// By label, not role: the Shell paints the skin, and the skin folds the
-// tools out of the accessibility tree while off (a hidden node has no
-// accessible name) — what these tests pin is the mount, not the fold.
+// By label, not role: the skin folds the tools out of the accessibility
+// tree while off (no accessible name) — these tests pin the mount.
 const lanUrlField = () => screen.queryByLabelText<HTMLInputElement>('LAN URL')
 const copyButton = () => screen.queryByLabelText('Copy URL')
 const qrButton = () => screen.queryByLabelText('Show QR code')
@@ -300,7 +300,6 @@ it('walks the badge through drop and recovery, reconciling state', () => {
     snapshot: fixtureState({ power: false }),
   })
   expect(powerToggle().checked).toBe(false)
-  vi.useRealTimers()
 })
 
 // Behavior 3 (#13): another tab flipped power — its broadcast `state`
@@ -384,7 +383,7 @@ const skinText = () => document.getElementById('skin')?.textContent
 const sentSetSkin = (socket: MockWebSocket) =>
   socket.sentCommands().filter((frame) => frame.cmd === 'set_skin')
 
-// Behaviour 5 (#136): `setSkin` → `set_skin` on the wire; the choice
+// Behavior 5 (#136): `setSkin` → `set_skin` on the wire; the choice
 // lands local-first on the daemon's ack (the broadcast goes to *other*
 // clients — ADR-0005), and the Shell's effect swaps the `<style>` text.
 it('sends set_skin and swaps the skin text on the ack', async () => {
@@ -412,7 +411,7 @@ it('sends set_skin and swaps the skin text on the ack', async () => {
   expect(skinText()).toBe(findSkin('classic').css)
 })
 
-// Behaviour 5 (#136): a refused `set_skin` never moves the choice — the
+// Behavior 5 (#136): a refused `set_skin` never moves the choice — the
 // error-path reconcile restores daemon truth; the text stays put.
 it('leaves the skin text unchanged when set_skin errors', async () => {
   const socket = renderConnected()
@@ -436,11 +435,11 @@ it('leaves the skin text unchanged when set_skin errors', async () => {
 /** The swap's transition suppressor — present only during a swap. */
 const suppressor = () => document.getElementById('skin-swap')
 
-// Behaviour 4 (#136): a broadcast snapshot naming another skin swaps the
-// `<style id="skin">` text; the swap is a hard cut — a suppressor
-// `<style>` kills every transition for the frame the new sheet lands
-// and leaves after a double rAF (ADR-0013). The first paint needs none.
-it('swaps the skin text on a broadcast snapshot, transitions suppressed for two frames', () => {
+// Behavior 4 (#136): a broadcast snapshot naming another skin swaps the
+// `<style id="skin">` text as a hard cut — a suppressor `<style>` kills
+// every transition while the new sheet lands and leaves after a double
+// rAF (ADR-0013). The first paint needs none.
+it('swaps the skin text on a broadcast snapshot under a transition suppressor, gone after two frames', () => {
   vi.useFakeTimers({
     toFake: ['requestAnimationFrame', 'cancelAnimationFrame'],
   })
@@ -461,5 +460,4 @@ it('swaps the skin text on a broadcast snapshot, transitions suppressed for two 
   expect(suppressor()).not.toBeNull()
   vi.advanceTimersToNextFrame()
   expect(suppressor()).toBeNull()
-  vi.useRealTimers()
 })
