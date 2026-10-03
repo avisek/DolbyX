@@ -5,7 +5,7 @@
  * @vitest-environment-options {"url": "http://192.168.1.7:5173/"}
  */
 import { expect, it, vi } from 'vitest'
-import { findSkin } from './skins'
+import { defaultSkin, findSkin } from './skins'
 import { fixtureBootstrap } from './test/fixture'
 import { MockWebSocket } from './test/mock-ws'
 
@@ -24,21 +24,28 @@ it('redirects a direct :5173 visit to the same-host daemon and halts', async () 
   )
 })
 
-// Behavior 2 (#136): the first paint reads `skin` from Bootstrap — the
-// `<style id="skin">` holds that skin's text before the app renders, no
-// flash, no second request (ADR-0013).
-it('paints the Bootstrap skin into <style id="skin"> before rendering', async () => {
-  window.__BOOTSTRAP__ = fixtureBootstrap({ skin: 'classic' })
+/** Boots the app entry afresh on a Bootstrap naming `skin`; the painted text. */
+async function bootWith(skin: string): Promise<string | undefined> {
+  window.__BOOTSTRAP__ = fixtureBootstrap({ skin })
   vi.stubGlobal('WebSocket', MockWebSocket)
+  document.getElementById('skin')?.remove()
   const root = document.createElement('div')
   root.id = 'root'
-  document.body.append(root)
+  document.body.replaceChildren(root)
   vi.resetModules()
-
   await import('./main')
-
-  expect(document.head.querySelector('style#skin')?.textContent).toBe(
-    findSkin('classic').css,
-  )
   expect(root.querySelector('.app')).not.toBeNull()
+  return document.head.querySelector('style#skin')?.textContent ?? undefined
+}
+
+// Behaviour 2 (#136): the first paint reads `skin` from Bootstrap — the
+// `<style id="skin">` holds that skin's text before the app renders, no
+// flash, no second request (ADR-0013)…
+it('paints the Bootstrap skin into <style id="skin"> before rendering', async () => {
+  expect(await bootWith('classic')).toBe(findSkin('classic').css)
+})
+
+// …and an id the registry doesn't ship paints the default.
+it('paints the default for an unknown Bootstrap skin', async () => {
+  expect(await bootWith('nope')).toBe(defaultSkin.css)
 })

@@ -75,8 +75,10 @@ order, first = default. Shipped: `remastered/` (default), `classic/`.
 3. Declare `color-scheme` on `:root` (`dark`, or `light dark` with
    `light-dark()` values). Mandatory, not stylistic: the build lowers
    `light-dark()` only where the sheet declares a scheme.
-4. Add a sheet: create `src/skins/<id>/<Name>.css`, `@import` it from
-   that skin's `index.css`.
+
+**Add a sheet**: create `src/skins/<id>/<Name>.css`, `@import` it from
+that skin's `index.css` — every sheet in the directory must be reachable
+from it.
 
 **Switching** ([ADR-0013](../docs/adr/0013-skin-choice-daemon-root-scalar-bundled-skins.md)):
 `skin` is a daemon root scalar carried in every snapshot. Every
@@ -90,7 +92,7 @@ default. The daemon never validates the id.
 masks and step values are its own — nothing outside the skin reads one;
 no shared token table exists. Only the skeleton is contract: classes,
 modifiers, and the published data vars (`--value`, `--norm`, `--count`,
-`--bands`, `--exc`, `--gain`, …).
+`--exc`, `--gain`, …).
 
 **Assets** live in the skin's directory, referenced by relative `url()`
 (`url('./icons/plus.svg')`, `url('./Inter.woff2')`); the build inlines

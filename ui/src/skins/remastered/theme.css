@@ -1,6 +1,5 @@
-/* Remastered skin tokens (ADR-0011): the skin's vocabulary — names are the
-   contract, values are Remastered's. Components never read one; a second
-   skin redefines them. */
+/* Remastered skin custom properties (ADR-0011): the skin's private
+   vocabulary — nothing outside the skin reads one (switching addendum). */
 :root {
   /* Colour scheme (ADR-0011, switching addendum): mandatory — the
      build lowers light-dark() only where the sheet declares one */

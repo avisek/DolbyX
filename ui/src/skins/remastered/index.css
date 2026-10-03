@@ -1,5 +1,5 @@
 /* Remastered skin entry point (ADR-0011): the one stylesheet the Skin
-   registry bundles for this skin (ADR-0013). Tokens, base, then one BEM
+   registry bundles for this skin (ADR-0013). Properties, base, then one BEM
    file per component (the order the TSX imports once produced). */
 @import './theme.css';
 @import './base.css';

@@ -1,8 +1,10 @@
 /**
- * Slice 02 (#84): the Classic skin is the only stylesheet consumer —
- * one entry point imports every component's BEM CSS, components import
- * none (ADR-0011 addendum). The lint rule is the enforcement; these
- * tests pin that it exists and fires, and that the tree obeys it.
+ * The CSS-import contract (#84, #94, #136): components import no CSS;
+ * each Skin entry point `@import`s its skin's every sheet; the Skin
+ * registry bundles the entry points as text and is the only module
+ * importing CSS (ADR-0011 addenda, ADR-0013). The lint rule enforces
+ * it; these tests pin that it fires, that the tree obeys it, and that
+ * directories, entry points and registry rows stay 1:1.
  * @vitest-environment node
  */
 import { ESLint } from 'eslint'
@@ -55,8 +57,9 @@ describe('the tree', () => {
     { query: '?raw', import: 'default', eager: true },
   )
   const cssImports = (code: string) =>
-    code.match(/import\s+(?:\w+\s+from\s+)?['"][^'"]*\.css(?:\?\w+)?['"]/g) ??
-    []
+    code.match(
+      /import\s+(?:[^'"]*?\sfrom\s+)?['"][^'"]*\.css(?:\?\w+)?['"]/g,
+    ) ?? []
 
   it('imports no stylesheet outside the Skin registry', () => {
     expect(Object.keys(sources)).toContain('./main.tsx')
@@ -138,10 +141,13 @@ describe('the Skin registry', () => {
     ]
       .map(([, dir]) => dir ?? '')
       .sort()
+    const anyCss = source.match(/['"][^'"]*\.css(?:\?\w+)?['"]/g) ?? []
     const { skins } = await import('./skins')
 
     expect(dirs.length).toBeGreaterThan(0)
     expect(imported).toEqual(dirs)
+    // Nothing but the entry points — no stray sheet, no other query.
+    expect(anyCss).toHaveLength(dirs.length)
     expect(skins.map(({ id }) => id).sort()).toEqual(dirs)
   })
 })

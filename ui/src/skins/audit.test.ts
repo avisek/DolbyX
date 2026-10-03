@@ -62,9 +62,9 @@ describe('each skin', () => {
   })
 })
 
-// The default skin has one source: the daemon's `defaults.toml` ships
-// the id, and the registry's first row must be it (ADR-0013).
-describe('the default skin', () => {
+// What an unknown id paints has one source: the daemon's `defaults.toml`
+// ships the id, and the registry's first row must be it (ADR-0013).
+describe('defaultSkin', () => {
   it('is the id defaults.toml ships', () => {
     const { skin } = parse(defaultsToml) as { skin: string }
     expect(defaultSkin.id).toBe(skin)
