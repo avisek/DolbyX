@@ -6,6 +6,7 @@
  */
 import { createStore, reconcile } from 'solid-js/store'
 import type { EqPreset, Profile, StateSnapshot } from '../lib/ws'
+import { defaultSkin } from '../skins'
 
 // The wire type is readonly; the store's setter needs writable paths.
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
@@ -17,6 +18,7 @@ const inert: StateSnapshot = {
   power: false,
   lan_access: false,
   lan_url: null,
+  skin: defaultSkin.id,
   selected_profile: '',
   profiles: [],
   eq_presets: [],

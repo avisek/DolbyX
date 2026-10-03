@@ -44,9 +44,9 @@ hot-reload through the daemon's origin. Inside `ui/`: `pnpm dev` /
   (arriving with their slices)
 - `src/components/` — `PowerToggle`, `ConnectionBadge`, … one `.tsx`
   per component; no CSS (see Skin authoring)
-- `src/skins/classic/` — the Classic skin: tokens, resets, one BEM
-  stylesheet per component, and `index.css` — the only stylesheet the
-  app imports
+- `src/skins/` — the Skin registry (`index.ts`) + one directory per
+  skin (`remastered/`, `classic/`), each a `index.css` entry point
+  importing its sheets; `store/skin.ts` paints the chosen one
 - `src/test/` — shared fixtures + the mocked `WebSocket` (the sanctioned
   UI test seam); `e2e/` — Playwright against the real daemon + engine
 
@@ -58,49 +58,49 @@ for display only.
 
 ## Skin authoring
 
-A **Skin** is CSS only ([ADR-0011](../docs/adr/0011-css-skin-contract.md)).
-Components render a fixed **skeleton** — semantic elements, state as BEM
+A **Skin** is CSS only ([ADR-0011](../docs/adr/0011-css-skin-contract.md)):
+components render a fixed **skeleton** — semantic elements, state as BEM
 modifiers, data as CSS custom properties — and import no CSS; the skin
-paints it. v2.0 ships one skin, **Classic**, and no switcher.
+paints it. A skin is **a directory + a registry row**: `src/skins/<id>/`
+holding `index.css` (the entry point, `@import`ing every sheet in the
+directory) and `src/skins/index.ts` listing `{ id, label, css }`, pill
+order, first = default. Shipped: `remastered/` (default), `classic/`.
 
-**Tree** — `src/skins/classic/`:
+**Add a skin**
 
-- `index.css` — the skin entry point; `main.tsx` imports only this
-- `theme.css` — tokens; `base.css` — resets + typography
-- `<Component>.css` — one BEM file per component; `index.css` orders them
-- `Field.css` — the inline field's geometry, shared by the numeric box,
-  the URL field and the rename field; `ResetMarker.css` — the Reset
-  marker's morph, shared by card + header + Row
+1. Copy a directory: `cp -r src/skins/remastered src/skins/<id>`.
+2. Register it: `import <id> from './<id>/index.css?inline'` + a row in
+   `skins`. Only this module may import CSS — ESLint rejects it
+   everywhere else, `?inline` included.
+3. Declare `color-scheme` on `:root` (`dark`, or `light dark` with
+   `light-dark()` values). Mandatory, not stylistic: the build lowers
+   `light-dark()` only where the sheet declares a scheme.
 
-**Add a component's stylesheet**: create `src/skins/classic/<Name>.css`,
-`@import` it from `index.css`. Never import CSS from `.tsx` — ESLint
-rejects it everywhere but `main.tsx` (`src/skin.test.ts` pins the rule).
+**Add a sheet**: create `src/skins/<id>/<Name>.css`, `@import` it from
+that skin's `index.css` — every sheet in the directory must be reachable
+from it.
 
-**Tokens** (`theme.css`) — the skin's private vocabulary; components and
-tests never read them:
+**Switching** ([ADR-0013](../docs/adr/0013-skin-choice-daemon-root-scalar-bundled-skins.md)):
+`skin` is a daemon root scalar carried in every snapshot. Every
+registered entry point is bundled into `index.html` as text; one
+`<style id="skin">` holds the active skin's, painted from Bootstrap
+before the first render and swapped live when the id changes (transitions
+suppressed for the swap). An id the registry doesn't ship paints the
+default. The daemon never validates the id.
 
-| Token                                                                                                           | Meaning                                                              |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `--color-bg` `--color-surface` `--color-accent` `--color-text` `--color-text-muted` `--font-sans` `--font-mono` | palette + type                                                       |
-| `--space-1…6`                                                                                                   | spacing scale, 0.25–2 rem                                            |
-| `--control-h`                                                                                                   | one height for input / toggle / tristate / slider                    |
-| `--radius-0` `--radius-1` `--radius-2` `--radius-pill`                                                          | bars + tracks / controls / cards / pills                             |
-| `--track-h` `--thumb-inset` `--thumb-border` `--band-gap` `--ring-offset`                                       | Slider track; switch thumb; Slider thumb; bands; ring gap            |
-| `--hue-settable` `--hue-experimental` `--hue-readonly`                                                          | 4-CC color by settability bucket                                     |
-| `--fold-ms` `--fold-ease`                                                                                       | fold / disclosure motion                                             |
-| `--focus-ring` `--hover-line`                                                                                   | the focus outline; the hover border beneath it                       |
-| `--power-h` `--reset-w`                                                                                         | the header power switch; the Reset marker square                     |
-| `--text-xs/sm/md/lg/title` `--tracking` `--tracking-wide`                                                       | type scale; letter-spacing                                           |
-| `--page-w` `--vis-min` `--qr-w` `--label-w`                                                                     | Shell column; visualizer cell; QR; picker label                      |
-| `--z-popover` `--shadow-popover` `--shadow-editor`                                                              | the one layer above the flow; its lift; the Band editor's            |
-| `--hover-ms` `--off-opacity` `--disabled-opacity`                                                               | hover fade; Off-look; disabled actions                               |
-| `--hover-bg` `--tint` `--focus-tint`                                                                            | hover lift; accent tints (pill, focused surface)                     |
-| `--icon-size` `--icon-plus/pencil/trash/rotate-ccw/copy/check/qr-code`                                          | Icon tokens: 24-grid outline SVG masks                               |
-| `--bands-lines` `--bands-hover` `--bands-live`                                                                  | Band strip lines; hovered column; Live bars                          |
-| `--vis-bg` `--vis-pip` `--vis-lattice` `--vis-brick-*` `--vis-off`                                              | visualizer: drawables as image tokens; flat paints                   |
-| `--eq-thumb(-active)` `--eq-track-core/-glow` `--eq-curve` `--eq-*-w` `--eq-glow-blur` `--eq-thumb-size`        | EQ editor: thumb drawables; colours; widths (px, the painter's unit) |
+**Custom properties are private.** A skin's palette, spacing scale, icon
+masks and step values are its own — nothing outside the skin reads one;
+no shared token table exists. Only the skeleton is contract: classes,
+modifiers, and the published data vars (`--value`, `--norm`, `--count`,
+`--exc`, `--gain`, …).
 
-**Rules** (ADR-0011 + addendum):
+**Assets** live in the skin's directory, referenced by relative `url()`
+(`url('./icons/plus.svg')`, `url('./Inter.woff2')`); the build inlines
+them as data URIs, so a skin never adds a route. Budget: ≤ 2 font weights
+per skin (~30 KB each inlined, Latin subset — subset manually, e.g.
+`pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
+
+**Rules** (ADR-0011 + addenda):
 
 - Layout is the skin's: nested `subgrid`, multicol masonry, anchor
   positioning, `transform`, `z-index`, `@property`. Never
@@ -108,30 +108,21 @@ tests never read them:
 - Collapsed content is state: animate the body's track, then a
   _delayed_ `visibility` takes it out of tab order. Hover/focus-revealed
   chrome hides with `opacity` only — it must stay focusable.
-- Hover rules sit under focus weight: wrap the hover selector in
-  `:where()`; a focused control always wins.
+- Hover rules sit under focus weight: wrap the hover pseudo-class alone
+  in `:where()` (`.row:where(:hover)`); a focused control always wins.
 - Read modifiers (`--exp --ro --preset --diverged --collapsed …`) and
-  continuous vars in real units (`--value`, `--norm`, `--count`);
-  quantize with `round(…, step)`, step a numeric token. No badge
-  elements: color-code the 4-CC or synthesize text via `::before` /
-  `::after`.
+  continuous vars in real units; quantize with `round(…, step)`, step a
+  numeric custom property. No badge elements: colour-code the 4-CC or
+  synthesize text via `::before` / `::after`.
 - The reset marker is one real `button`, `disabled` when clean: paint a
   dot at rest, morph to ↺ on hover / `:focus-visible`.
-- Chromium is the target: subgrid, `:has`, anchor positioning,
-  `@property`, `overflow: clip` are fair game.
-- **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`
-  (`src/skins/audit.test.ts` pins it). `100%` height chains; wrapping
-  and container queries reflow regions (thresholds are rem literals —
-  size queries can't read tokens). The **Off-look** is one Shell rule
-  dimming everything but the header by `opacity`, never `filter`.
-- **Screen-level checks** (`e2e/main-screen.spec.ts`): no sideways
-  overflow at 390 / 700 / 1280 with every region open, a skin-painted
-  focus ring on every tab stop, the badge's `--connected` following
-  the socket. Tests pin behaviour and reachability, never taste: no
-  reads of a skin's custom properties, no literal colours or lengths,
-  no timings, no screenshots.
-- **Icons**: buttons render empty, named by `aria-label`; paint an
-  Icon token as a mask in `currentColor`:
+- **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`;
+  `100%` height chains; wrapping and container queries reflow regions
+  (thresholds are rem literals — size queries can't read custom
+  properties). The **Off-look** dims everything but the header by
+  `opacity`, never `filter`.
+- **Icons**: buttons render empty, named by `aria-label`; paint an Icon
+  mask in `currentColor` from a skin-private property or an asset file:
 
   ```css
   .my-button::before {
@@ -143,3 +134,20 @@ tests never read them:
     mask-size: contain;
   }
   ```
+
+- Chromium is the target: subgrid, `:has`, anchor positioning,
+  `@property`, `overflow: clip` are fair game.
+
+**What tests check** — behaviour and reachability, never taste:
+
+- Unit audits (`src/skin.test.ts`, `src/skins/audit.test.ts`): no CSS
+  import outside the registry; skin directories ↔ registry 1:1; every
+  sheet reachable from its skin's `index.css`; `color-scheme` on
+  `:root`; no viewport unit; the registry's default = `defaults.toml`'s.
+- Screen-level (`e2e/main-screen.spec.ts`): no sideways overflow at
+  390 / 700 / 1280 with every region open, a visible focus indicator on
+  every tab stop, the badge's `--connected` following the socket.
+
+Never checked: a skin's custom properties, literal colours or lengths,
+timings, screenshots, hover tints, thumb scale, reveal timing, popover
+placement — all skin policy.

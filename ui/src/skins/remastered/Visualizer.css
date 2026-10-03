@@ -1,0 +1,138 @@
+/* Structure (ADR-0008 markup tree): the wrappers lay out, the leaves
+   paint. Everything below the Classic banner is skin policy
+   (ADR-0011) — another skin replaces it without touching the TSX. */
+
+.visualizer {
+  position: relative;
+}
+
+.vis-columns {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.vis-column {
+  position: relative;
+  flex: 1;
+}
+
+/* — Classic: the faithful DDP look. Constants from the original
+   painters (ADR-0008): 48 rows × 1 dB, window [−12, +36]; the paints
+   are the `--vis-*` tokens (theme.css), lifted from the DsUI
+   drawables. — */
+
+.visualizer {
+  background: var(--vis-bg);
+  inline-size: 100%; /* fills its Shell cell */
+  aspect-ratio: 885 / 390; /* the background asset's own proportions */
+  /* Vis idle descent duration — HITL-eyeballed Classic constant. */
+  --idle-descent: 700ms;
+}
+
+/* The data vars, registered so Classic can transition them — numbers,
+   inherited to the leaves that display them; initials = the floor. */
+@property --exc {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: -12;
+}
+
+@property --gain {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Vis idle: the component snaps the vars to the floor and raises the
+   modifier in one recalc (ADR-0008); Classic animates the *descent* by
+   transitioning the vars under idle only — live tracking stays exact
+   (0 s), and round() re-quantizes per frame, so fills walk down
+   brick-by-brick while the pip glides. A fresh frame drops the
+   modifier in the same recalc as its vars, so exit snaps through the
+   live rule with no floor flash. */
+.visualizer--idle .vis-column {
+  transition:
+    --exc var(--idle-descent) linear,
+    --gain var(--idle-descent) linear;
+}
+
+.vis-column {
+  /* Classic's per-band coordinate device: cqh below measures the
+     column. (No stacking context here — contain: layout creates none —
+     so the leaves' z 1–3 interleave across columns in the shared
+     context; harmless, columns never overlap. The editor rides above
+     at z 4–5, EqCurve.css.) */
+  container-type: size;
+  /* One row: 1 dB of the 48-dB window. */
+  --row: calc(100cqh / 48);
+  /* Quantization steps (ADR-0011), in dB — 1 dB ≡ 1 row; derived
+     skins retune by overriding these two. The fill snaps to whole
+     rows. The pip's step is the wire's own 1/16-dB quantum: every
+     `vis` value is a multiple of it, so rounding is an exact identity
+     and the pip stays continuous, like the original — while a literal
+     `none` could never feed round(), it would void the whole
+     `bottom` declaration at computed-value time. */
+  --exc-step: 1;
+  --gain-step: 0.0625;
+}
+
+/* The fill displays `--exc`: linear (--exc + 12) / 48 of the field,
+   quantized down to whole rows — the original's brick count, except at
+   the exact floor, deliberately empty (silence looks silent). The
+   step quantizes in dB space, where 1/16-dB values are exact — a
+   percentage-space round() can land 11.999… and drop a row. */
+.vis-column__fill {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  height: calc(
+    clamp(0, round(down, var(--exc) + 12, var(--exc-step)), 48) * var(--row)
+  );
+  /* Zones by absolute row — bottom 30 blue, 6 yellow, top 12 red —
+     anchored to the field: the gradient line starts at the fill's
+     bottom edge, which is the field's. */
+  background: linear-gradient(
+    to top,
+    var(--vis-brick-blue) 0 calc(30 * var(--row)),
+    var(--vis-brick-yellow) calc(30 * var(--row)) calc(36 * var(--row)),
+    var(--vis-brick-red) calc(36 * var(--row)) calc(48 * var(--row))
+  );
+}
+
+/* The lattice: per-column chrome whose lines carve the fill into
+   bricks — the original's 1-px black insets (a gutter at each column
+   start, a line at each row top; outer right/bottom edges unpainted). */
+.vis-column__lattice {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-left: 1px solid var(--vis-lattice);
+  background-image: linear-gradient(var(--vis-lattice) 1px, transparent 1px);
+  background-size: 100% var(--row);
+}
+
+/* The pip displays `--gain`, continuous (`--gain-step` = the wire
+   quantum — see the steps above): one brick-sized marker whose travel
+   is the field minus one brick, riding half a brick high — the
+   original's placement — so it straddles lattice lines. */
+.vis-column__pip {
+  position: absolute;
+  right: 0;
+  bottom: calc(
+    round(down, var(--gain) + 12, var(--gain-step)) / 48 *
+      (100cqh - var(--row)) + var(--row) / 2
+  );
+  left: 1px;
+  z-index: 3;
+  height: var(--row);
+  background: var(--vis-pip);
+}
+
+/* `ven` off (`visualizer--off`): fills + pips dark — the DSP has
+   stopped filling, frames carry frozen values — chrome and background
+   stay. */
+.visualizer--off .vis-column__fill,
+.visualizer--off .vis-column__pip {
+  background: var(--vis-off);
+}

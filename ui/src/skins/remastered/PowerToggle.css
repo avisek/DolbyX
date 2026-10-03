@@ -1,0 +1,37 @@
+/* The power Row: `Power` · a larger switch at the header's end. The
+   label's `::before` stretches over the header (its positioned
+   ancestor) and bleeds past it by --space-3 — the row's whole hit
+   surface, so a hover anywhere on the row (the wordmark included) tints
+   it and a click forwards to the switch; the switch, positioned and
+   later in the tree, stays on top. */
+
+.power {
+  --control-h: var(--power-h);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+  cursor: pointer;
+}
+
+.power::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+  border-radius: var(--radius-2);
+  transition: background var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a row holding focus always wins. */
+.power:where(:hover)::before {
+  background: var(--hover-bg);
+}
+
+.power:has(:focus-visible)::before {
+  background: var(--focus-tint);
+}
+
+.power__text {
+  font-size: var(--text-md);
+}

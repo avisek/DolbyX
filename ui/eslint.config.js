@@ -15,21 +15,23 @@ export default defineConfig(
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   { files: ['src/**/*.{ts,tsx}'], ...solid },
-  // Skin contract (ADR-0011): components import no CSS. The Classic skin
-  // entry point imports every stylesheet; the app entry imports only
-  // that. The rule is the test — see src/skin.test.ts.
+  // Skin contract (ADR-0011): components import no CSS. Each Skin entry
+  // point imports its skin's every stylesheet; the Skin registry imports
+  // the entry points as text (ADR-0013) — the one exemption. `**/*.css`
+  // never matches `x.css?inline`, hence the query pattern. The rule is
+  // the test — see src/skin.test.ts.
   {
     files: ['**/*.{ts,tsx}'],
-    ignores: ['src/main.tsx'],
+    ignores: ['src/skins/index.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: ['*.css', '**/*.css'],
+              group: ['*.css', '**/*.css', '**/*.css?*'],
               message:
-                'Stylesheets belong to the skin: add it to src/skins/classic/index.css (ADR-0011).',
+                "Stylesheets belong to a skin: @import it from that skin's index.css; only the Skin registry (src/skins/index.ts) imports CSS (ADR-0011, ADR-0013).",
             },
           ],
         },

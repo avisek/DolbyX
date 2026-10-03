@@ -1,0 +1,169 @@
+/* One category card (#85): a two-row grid — header over a folding
+   body — over four shared tracks (code | label | reset | control) the
+   cards subgrid onto, so rows align across every card. The Fold is
+   state (`adv-cat--collapsed`, ADR-0011 addendum): only the body's row
+   track animates (1fr ↔ 0fr); margins and paddings never move. The
+   body keeps its full height and spills past the shrinking row; the
+   section clips the spill, and the body leaves the tab order once the
+   fold lands (delayed `visibility`). */
+
+.adv-cat {
+  --head-x: var(--space-4);
+  --code-w: 3.3rem;
+  --card-label-w: 8.5rem;
+  --ctl-min: 11rem;
+
+  display: grid;
+  /*   minmax(0, …)         the row may shrink to nothing
+       align-content: start leftover space stays empty, head never grows
+       align-items: start   the body keeps full height, spills past its row
+       overflow: hidden     this box clips the spill */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns:
+    var(--code-w) var(--card-label-w) var(--reset-w)
+    minmax(var(--ctl-min), 1fr);
+  column-gap: var(--space-2);
+  align-content: start;
+  align-items: start;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  overflow: hidden;
+  break-inside: avoid;
+  transition: grid-template-rows var(--fold-ms) var(--fold-ease);
+}
+
+/* Under native masonry the panel body's gap spaces the cards. */
+@supports (grid-template-rows: masonry) or (display: masonry) {
+  .adv-cat {
+    margin-bottom: 0;
+  }
+}
+
+.adv-cat--collapsed {
+  grid-template-rows: auto minmax(0, 0fr);
+}
+
+/* — Header: the toggle IS the header's box, edge to edge; the reset
+   marker floats over its right end, inside the padding the toggle
+   reserves — */
+
+.adv-cat__head {
+  position: relative;
+  grid-column: 1 / -1;
+}
+
+.adv-cat__toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) calc(var(--head-x) + var(--reset-w) + var(--space-1))
+    var(--space-2) var(--head-x);
+  border: none;
+  border-bottom: 1px solid var(--color-bg);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color var(--fold-ms) var(--fold-ease),
+    border-radius var(--fold-ms) var(--fold-ease);
+}
+
+/* Hover under focus weight: a focused header always wins. */
+:where(.adv-cat__head:hover) .adv-cat__toggle {
+  background: var(--hover-bg);
+}
+
+.adv-cat__toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -1px;
+}
+
+/* Folded: the divider fades and the header takes the card's full
+   rounding — the same clock as the fold. */
+.adv-cat--collapsed .adv-cat__toggle {
+  border-bottom-color: transparent;
+  border-radius: var(--radius-2);
+}
+
+.adv-cat__chevron {
+  flex: none;
+  width: 1.3rem;
+  color: var(--color-accent);
+  font-size: 1.3rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.adv-cat__chevron::before {
+  content: '▾';
+  display: inline-block;
+  transition: transform var(--fold-ms) var(--fold-ease);
+}
+
+.adv-cat--collapsed .adv-cat__chevron::before {
+  transform: rotate(-90deg);
+}
+
+.adv-cat__title {
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+/* A category writing to the selected EQ preset is captioned — words
+   from the skin, no badge element (ADR-0011 addendum). */
+.adv-cat--preset .adv-cat__title::after {
+  content: ' · EQ preset';
+  color: var(--color-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+}
+
+.adv-cat__count {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.adv-cat__count::after {
+  content: ' params';
+}
+
+/* The Reset marker's slot, over the header's right end; its morph
+   lives in ResetMarker.css. */
+.adv-cat__reset {
+  position: absolute;
+  top: 50%;
+  right: var(--head-x);
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  background: none;
+  translate: 0 -50%;
+}
+
+/* — Body: the card's block spacing lives here, so it folds with the
+   body and the clip edge is the header's bottom once folded. Inline
+   padding insets the tracks; a card's own padding lands its content on
+   the header's text edge — */
+
+.adv-cat__body {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  transition: visibility 0s linear 0s;
+}
+
+/* Collapsed content leaves the tab order — after the fold, so the
+   animation never runs over an already-vanished body. */
+.adv-cat--collapsed .adv-cat__body {
+  visibility: hidden;
+  transition-delay: var(--fold-ms);
+}

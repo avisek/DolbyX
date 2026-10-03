@@ -1,0 +1,16 @@
+/* The live WS state as a filled pill: muted while reconnecting, tinted
+   accent once connected. */
+
+.connection-badge {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking);
+}
+
+.connection-badge--connected {
+  background: var(--tint);
+  color: var(--color-accent);
+}

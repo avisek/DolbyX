@@ -1,0 +1,87 @@
+/* One parameter card (#85): a form row subgridded onto the category's
+   four tracks — code | label | reset | control — so rows align across
+   every card. Access is color-coded on the 4-CC chip by hue token;
+   labels wrap, never truncate. The Reset marker's morph lives in
+   ResetMarker.css; only its slot is here. */
+
+.adv-card {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: default;
+  transition: background 0.12s ease;
+}
+
+/* Hover under focus weight: a card holding focus always wins. */
+.adv-card:where(:hover) {
+  background: var(--hover-bg);
+}
+
+.adv-card:has(:focus-visible) {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+
+.adv-card__code {
+  grid-column: 1;
+  justify-self: start;
+  padding: 0.12rem 0.38rem;
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  color: var(--hue-settable);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.adv-card--exp .adv-card__code {
+  color: var(--hue-experimental);
+}
+
+.adv-card--ro .adv-card__code {
+  color: var(--hue-readonly);
+}
+
+.adv-card__label {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.adv-card--ro .adv-card__label {
+  color: var(--color-text-muted);
+}
+
+/* The Reset marker's slot — a fixed square on the reset track; read-only
+   cards leave it empty. */
+.adv-card__reset {
+  grid-column: 3;
+  justify-self: center;
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  background: none;
+}
+
+.adv-card__control {
+  display: flex;
+  grid-column: 4;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The generic readout: values as text, wrapping across the track. */
+.adv-readout {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}

@@ -73,6 +73,12 @@ export interface StateSnapshot {
    * value it already holds. Showing it only while on is UI policy.
    */
   readonly lan_url: string | null
+  /**
+   * The chosen skin's id (ADR-0013) — a root scalar like `lan_access`,
+   * opaque to the daemon: the UI's Skin registry judges it, and an id
+   * it doesn't ship paints the default.
+   */
+  readonly skin: string
   readonly selected_profile: string
   readonly profiles: readonly Profile[]
   readonly eq_presets: readonly EqPreset[]
