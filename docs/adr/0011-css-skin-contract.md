@@ -145,3 +145,53 @@ across snapshots. Component-owned, like every keyboard rule.
 **Fields size to their content.** The rename field renders in flow with
 `field-sizing: content`, starting at the pill's width and growing as
 typed — no absolute overlay, no measured widths.
+
+## Addendum (2026-10-03) — skin switching
+
+The "exactly one skin, no switching mechanism" clause above is
+superseded: skins are chosen per daemon and swapped live
+([ADR-0013](0013-skin-choice-daemon-root-scalar-bundled-skins.md)).
+What that forced the contract to settle:
+
+**Only the skeleton is contract.** Classes, modifiers, and published
+data vars are the interface a skin reads; a skin's own custom
+properties — its palette, spacing scale, icon masks, step values — are
+private. A tokens file is an authoring habit, not a rule; nothing
+outside the skin (no component, no test, no other skin) reads one. The
+glossary's *Token* is gone; *Icon mask* names the glyph rule without it.
+
+**Skins are plain, unscoped CSS.** No per-skin prefix, no layering
+between skins (Classic is a copy, not an `@import` of Remastered plus
+overrides): a skin author edits one directory and never reasons about
+another skin's rules. The cost — duplicated bytes between similar
+skins — is paid by the single-file bundle, not the author.
+
+**Colour scheme is `prefers-color-scheme`, declared by the skin.** A
+skin writes `color-scheme` on `:root` and uses `light-dark()` in its
+values; the declaration is mandatory, not stylistic — the build lowers
+`light-dark()` only where the sheet declares a scheme (an audit pins
+it). There is no in-UI override; a dark-only skin declares `dark`.
+
+**Assets live in the skin.** Fonts, images, SVG files sit in the skin's
+directory and are referenced by relative `url()`; the build inlines
+them. Budget: ≤ 2 font weights per skin (~30 KB each inlined, Latin
+subset; subsetting is manual, documented in the authoring guide).
+
+**Tests pin behaviour and reachability, never taste.** The contract
+suite — no horizontal overflow across widths with every region open, a
+visible focus indicator on every tab stop, every control hit-testable
+at its centre — runs over every registered skin, in both colour
+schemes where the skin supports both. Behavioural suites (drag, scrub,
+paint, WS, folds leaving tab order) run on the default skin only.
+Nothing reads a skin's custom properties, pins a literal colour or
+length, times a linger, or compares a screenshot: off-look dimming,
+popover placement, hover tints, thumb scale and reveal timing are skin
+policy. The unit audits that survive are structural (components import
+no CSS, no viewport units, `color-scheme` declared, skin directories ↔
+registry 1:1).
+
+**Skeleton additions.** The Skin picker reuses the Picker skeleton with
+actions and rename omitted; the LAN Access Row and the Skin picker sit
+between the Master controls and the Advanced panel, unwrapped. The GEQ
+editor publishes its slider and band counts (`--count`, `--bands`) on
+`.eq-sliders` so no skin hardcodes the grid.
