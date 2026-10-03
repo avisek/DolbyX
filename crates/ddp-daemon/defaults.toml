@@ -7,6 +7,8 @@
 power = true
 # v2 root scalar (ADR-0012): a fresh install is this-PC-only.
 lan_access = false
+# v2 root scalar (ADR-0013): the chosen skin — opaque, the UI's Skin registry judges it.
+skin = "remastered"
 selected_profile = "music"
 
 # Shared operational config — applies to every profile, stated once

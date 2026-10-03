@@ -84,6 +84,7 @@ pub(crate) struct Namespace {
 struct DefaultsFile {
     power: bool,
     lan_access: bool,
+    skin: String,
     selected_profile: ProfileId,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -99,6 +100,7 @@ struct DefaultsFile {
 struct ConfigFile {
     power: Option<bool>,
     lan_access: Option<bool>,
+    skin: Option<String>,
     selected_profile: Option<ProfileId>,
     #[serde(default)]
     profile: IndexMap<String, toml::Value>,
@@ -113,6 +115,7 @@ struct ConfigFile {
 pub struct ConfigOverlay {
     pub(crate) power: Option<bool>,
     pub(crate) lan_access: Option<bool>,
+    pub(crate) skin: Option<String>,
     pub(crate) selected_profile: Option<ProfileId>,
     pub(crate) profile: Namespace,
     pub(crate) eq_preset: Namespace,
@@ -306,6 +309,7 @@ pub fn parse_defaults(document: &str, defs: &[ParameterDef]) -> Result<Defaults,
     let defaults = Defaults {
         power: file.power,
         lan_access: file.lan_access,
+        skin: file.skin,
         selected_profile: file.selected_profile,
         profiles,
         eq_presets,
@@ -409,6 +413,7 @@ pub fn parse_config(
         power: file.power,
         selected_profile: file.selected_profile,
         lan_access: file.lan_access,
+        skin: file.skin,
         profile,
         eq_preset,
     })
@@ -460,6 +465,10 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     let mut state = State::new_from_defaults(defaults);
     state.power = overlay.power.unwrap_or(defaults.power);
     state.lan_access = overlay.lan_access.unwrap_or(defaults.lan_access);
+    state.skin = overlay
+        .skin
+        .clone()
+        .unwrap_or_else(|| defaults.skin.clone());
     if let Some(selected) = &overlay.selected_profile {
         state.selected_profile = selected.clone();
     }
@@ -551,6 +560,9 @@ pub fn serialize_overlay(
     }
     if state.lan_access != defaults.lan_access {
         emit_value(&mut doc, "lan_access", &toml_bool(state.lan_access));
+    }
+    if state.skin != defaults.skin {
+        emit_value(&mut doc, "skin", &toml_string(&state.skin));
     }
     if state.selected_profile != defaults.selected_profile {
         emit_value(
@@ -778,6 +790,7 @@ mod tests {
     const DEFAULTS: &str = r#"
 power = true
 lan_access = false
+skin = "remastered"
 selected_profile = "music"
 
 [profile]
@@ -1010,11 +1023,13 @@ iebt = [67, 95]
         let cases = [
             ("power = true\n".to_string(), "lan_access"),
             (
-                "power = true\nlan_access = false\n".to_string(),
+                "power = true\nlan_access = false\nskin = \"remastered\"\n".to_string(),
                 "selected_profile",
             ),
             // Issue #70: the strict root — lan_access must be stated.
             (DEFAULTS.replace("lan_access = false\n", ""), "lan_access"),
+            // Issue #135: likewise `skin` (ADR-0013).
+            (DEFAULTS.replace("skin = \"remastered\"\n", ""), "skin"),
             ("power = tru".to_string(), "expected"),
             (DEFAULTS.replace("power = true", "power = true\nx = 1"), "x"),
             (DEFAULTS.replace("dvla = 4", "dvla = 11"), "outside"),
@@ -1146,7 +1161,7 @@ iebt = [67, 95]
         for (first, second, expected, layer) in layers {
             let (defaults_doc, config_doc) = match first {
                 "cfg-shared" => (
-                    "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
+                    "power = true\nlan_access = false\nskin = \"remastered\"\nselected_profile = \"music\"\n[profile]\ndvla = 6\n[profile.music]\nname = \"Music\"\ndvla = 5\n".to_string(),
                     if second.is_empty() {
                         "[profile]\ndvla = 3\n".to_string()
                     } else {
@@ -1155,7 +1170,7 @@ iebt = [67, 95]
                 ),
                 shared => (
                     format!(
-                        "power = true\nlan_access = false\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
+                        "power = true\nlan_access = false\nskin = \"remastered\"\nselected_profile = \"music\"\n[profile]\n{shared}\n[profile.music]\nname = \"Music\"\n{second}\n"
                     ),
                     String::new(),
                 ),
@@ -1197,6 +1212,53 @@ iebt = [67, 95]
         );
         let _ = state
             .apply(Command::SetLanAccess { on: false }, &defs)
+            .unwrap();
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &loaded, &defs),
+            "",
+            "back on the default ⇒ dropped, not stored"
+        );
+    }
+
+    /// Issue #135: `skin` rides the cascade like `lan_access` (ADR-0013)
+    /// — shipped `"remastered"`, a config statement shadows it, the
+    /// write law stores exactly the divergence.
+    #[test]
+    fn skin_rides_the_cascade_and_the_write_law() {
+        let defs = defs();
+        let defaults = defaults();
+        assert_eq!(defaults.skin, "remastered", "shipped default");
+
+        let loaded = ConfigOverlay::default();
+        let mut state = resolve(&defaults, &loaded);
+        assert_eq!(state.skin, "remastered");
+
+        let stated = parse_config("skin = \"classic\"\n", &defs, &defaults).unwrap();
+        assert_eq!(
+            resolve(&defaults, &stated).skin,
+            "classic",
+            "config shadows"
+        );
+
+        let _ = state
+            .apply(
+                Command::SetSkin {
+                    id: "classic".into(),
+                },
+                &defs,
+            )
+            .unwrap();
+        assert_eq!(
+            serialize_overlay(&state, &defaults, &loaded, &defs),
+            "skin = \"classic\"\n"
+        );
+        let _ = state
+            .apply(
+                Command::SetSkin {
+                    id: "remastered".into(),
+                },
+                &defs,
+            )
             .unwrap();
         assert_eq!(
             serialize_overlay(&state, &defaults, &loaded, &defs),

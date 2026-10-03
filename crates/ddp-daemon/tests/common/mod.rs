@@ -251,6 +251,26 @@ pub async fn set_power(ws: &mut WsClient, on: bool) {
     }
 }
 
+/// Issues a `set_skin` and awaits its `ack` promise-style, as
+/// [`set_power`].
+pub async fn set_skin(ws: &mut WsClient, id: &str) {
+    let request_id = format!("rq-set-skin-{}", id.len());
+    send_json(
+        ws,
+        &serde_json::json!({ "cmd": "set_skin", "request_id": request_id, "id": id }),
+    )
+    .await;
+    loop {
+        let frame = recv_json(ws).await;
+        if frame["type"] == "state" || frame["type"] == "vis" {
+            continue;
+        }
+        assert_eq!(frame["type"], "ack", "set_skin must ack, got {frame}");
+        assert_eq!(frame["request_id"], request_id.as_str());
+        return;
+    }
+}
+
 /// Issues an `edit_profile` patching one param and awaits its `ack`
 /// promise-style, as [`set_power`].
 pub async fn edit_param(ws: &mut WsClient, id: &str, param: &str, values: &[i16]) {

@@ -6,7 +6,7 @@ mod common;
 
 use common::{
     assert_config_becomes, assert_config_becomes_within, connected, edit_param, recv_json,
-    set_power, start_daemon, start_over, ws_connect,
+    set_power, set_skin, start_daemon, start_over, ws_connect,
 };
 
 /// Behavior 5 (issue #27), leading edge: an idle mutation is on disk
@@ -147,4 +147,27 @@ async fn a_restart_reloads_power_from_the_config_overlay() {
         "power must survive a restart"
     );
     assert_eq!(snapshot["snapshot"]["selected_profile"], "music");
+}
+
+/// Issue #135 (ADR-0013): `skin` persists by the write law and a
+/// restart reloads it from the overlay.
+#[tokio::test]
+async fn a_restart_reloads_skin_from_the_config_overlay() {
+    let daemon = start_daemon().await;
+    let config = daemon.dir.path().join("data").join("config.toml");
+
+    let mut ws = connected(daemon.addr()).await;
+    set_skin(&mut ws, "classic").await;
+    assert_config_becomes(&config, "skin = \"classic\"\n").await;
+
+    drop(ws);
+    daemon.handle.shutdown().await;
+
+    let (restarted, _stub) = start_over(&daemon.dir).await;
+    let mut ws = ws_connect(restarted.addr()).await;
+    let snapshot = recv_json(&mut ws).await;
+    assert_eq!(
+        snapshot["snapshot"]["skin"], "classic",
+        "skin must survive a restart"
+    );
 }
