@@ -128,7 +128,8 @@ tests never read them:
   overflow at 390 / 700 / 1280 with every region open, a skin-painted
   focus ring on every tab stop, the badge's `--connected` following
   the socket. Tests pin behaviour and reachability, never taste: no
-  token reads, literal colours or lengths, timings, or screenshots.
+  reads of a skin's custom properties, no literal colours or lengths,
+  no timings, no screenshots.
 - **Icons**: buttons render empty, named by `aria-label`; paint an
   Icon token as a mask in `currentColor`:
 
