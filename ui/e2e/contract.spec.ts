@@ -129,20 +129,28 @@ interface Stop {
   readonly clip: Clip
 }
 
+/** A walked stop: its name, and whether its clip changed with focus. */
+interface StopMark {
+  readonly name: string
+  readonly marked: boolean
+}
+
 /**
- * The focused element, scrolled into view, with its clip — its own box
- * ∪ its `label`s' boxes (a hidden radio paints through its pill, a
- * tristate segment through its card), inflated and clamped to the
- * viewport — named by its accessible name, or its nearest named
- * ancestor's (a category header's section; a radio's group, plus the
- * radio's own label). `null` once Tab has left the document.
+ * The focused element, scrolled into view; `null` once Tab has left
+ * the document. Clip: its own box ∪ its `label`s' boxes (a hidden radio
+ * paints through its pill, a tristate segment through its card),
+ * inflated and clamped to the viewport. Name: its accessible name, else
+ * its nearest named ancestor's (a category header's section; a radio's
+ * group) plus, for a radio, its own label's text — the last of its
+ * labels, as a tristate radio is labelled by its card first.
  */
 const describeStop = (margin: number): Stop | null => {
   const el = document.activeElement
   if (!(el instanceof HTMLElement) || el === document.body) return null
   // The element itself, never its label: Chromium moves the sequential
   // focus navigation starting point to whatever is scrolled into view.
-  el.scrollIntoView({ block: 'center', inline: 'nearest' })
+  // Instant: a skin's smooth scrolling would shoot mid-scroll.
+  el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' })
   const labels = el instanceof HTMLInputElement ? [...(el.labels ?? [])] : []
   const boxes = [el, ...labels].map((node) => node.getBoundingClientRect())
   const { clientWidth, clientHeight } = document.documentElement
@@ -180,59 +188,42 @@ const describeStop = (margin: number): Stop | null => {
   }
 }
 
-/**
- * The walk's wire: raw CDP. Every Playwright call carries a dozen ms
- * of plumbing and the walk makes ~800 of them; the frame capture is
- * the one cost that stays (~35 ms).
- */
-class Walker {
-  readonly #cdp: CDPSession
+// The walk's wire is raw CDP: Playwright's wrappers cost 3–15× per
+// call and the walk makes ~800; the frame capture (~35 ms) stays.
 
-  private constructor(cdp: CDPSession) {
-    this.#cdp = cdp
-  }
+/** Presses Tab — a real key, so the stop matches `:focus-visible`. */
+async function tab(cdp: CDPSession): Promise<void> {
+  const key = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+}
 
-  static async open(page: Page): Promise<Walker> {
-    return new Walker(await page.context().newCDPSession(page))
-  }
-
-  async close(): Promise<void> {
-    await this.#cdp.detach()
-  }
-
-  /** Presses Tab — a real key, so the stop matches `:focus-visible`. */
-  async tab(): Promise<void> {
-    const key = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }
-    await this.#cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key })
-    await this.#cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
-  }
-
-  /** Runs `fn(arg)` in the page, awaiting a returned promise. */
-  async run<A, T>(fn: (arg: A) => T, arg?: A): Promise<Awaited<T>> {
-    const { result, exceptionDetails } = await this.#cdp.send(
-      'Runtime.evaluate',
-      {
-        expression: `(${fn.toString()})(${JSON.stringify(arg)})`,
-        returnByValue: true,
-        awaitPromise: true,
-      },
+/** Runs `fn(arg)` in the page, awaiting a returned promise. */
+async function run<A, T>(
+  cdp: CDPSession,
+  fn: (arg: A) => T,
+  arg?: A,
+): Promise<Awaited<T>> {
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression: `(${fn.toString()})(${JSON.stringify(arg)})`,
+    returnByValue: true,
+    awaitPromise: true,
+  })
+  if (exceptionDetails) {
+    throw new Error(
+      exceptionDetails.exception?.description ?? exceptionDetails.text,
     )
-    if (exceptionDetails) {
-      throw new Error(
-        exceptionDetails.exception?.description ?? exceptionDetails.text,
-      )
-    }
-    return result.value as Awaited<T>
   }
+  return result.value as Awaited<T>
+}
 
-  /** The clip's pixels as the encoder's bytes: same pixels ⇒ same string. */
-  async shoot(clip: Clip): Promise<string> {
-    const { data } = await this.#cdp.send('Page.captureScreenshot', {
-      format: 'png',
-      clip: { ...clip, scale: 1 },
-    })
-    return data
-  }
+/** The clip's pixels as the encoder's bytes: same pixels ⇒ same string. */
+async function capture(cdp: CDPSession, clip: Clip): Promise<string> {
+  const { data } = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    clip: { ...clip, scale: 1 },
+  })
+  return data
 }
 
 /**
@@ -243,41 +234,46 @@ class Walker {
  * blurred element (the sequential focus navigation starting point), so
  * the blurred shot needs no refocus.
  */
-async function walk(page: Page): Promise<{ name: string; marked: boolean }[]> {
+async function walk(page: Page): Promise<StopMark[]> {
   await page.reload()
   // By class: the open panel's readouts are `status` roles too.
   await expect(page.locator('.connection-badge')).toHaveText('Connected')
-  await expandAdvanced(page)
+  // Open from the setup's pref — a click here would seat the starting
+  // point on the header and skip the main screen.
+  await expect(page.getByRole('button', { name: 'Advanced' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
   await page.mouse.move(0, 0)
   await page.addStyleTag({ content: WALK_STYLE })
-  const walker = await Walker.open(page)
+  const cdp = await page.context().newCDPSession(page)
   try {
-    await walker.run(() => document.fonts.ready)
-    const stops: { name: string; marked: boolean }[] = []
+    await run(cdp, () => document.fonts.ready)
+    const stops: StopMark[] = []
     for (let i = 0; i < MAX_STOPS; i++) {
-      await walker.tab()
-      const stop = await walker.run(describeStop, CLIP_MARGIN)
+      await tab(cdp)
+      const stop = await run(cdp, describeStop, CLIP_MARGIN)
       if (stop === null) return stops
-      const focused = await walker.shoot(stop.clip)
-      await walker.run(() => {
+      const focused = await capture(cdp, stop.clip)
+      await run(cdp, () => {
         ;(document.activeElement as HTMLElement).blur()
       })
-      const blurred = await walker.shoot(stop.clip)
+      const blurred = await capture(cdp, stop.clip)
       stops.push({ name: stop.name, marked: focused !== blurred })
     }
     throw new Error(
       `focus never left the document in ${String(MAX_STOPS)} Tabs`,
     )
   } finally {
-    await walker.close()
+    await cdp.detach()
   }
 }
 
 /**
  * Every Picker action enabled — a scratch profile, a captured preset,
- * one EQ slider nudge diverging the capture (picker.spec's setup) —
- * one Master control nudged for its Reset marker, LAN on for its
- * tools, the panel open: the longest tab order the screen has.
+ * one EQ slider nudge diverging the capture — LAN on for its tools, the
+ * panel open (a pref the walk's reloads keep): the longest tab order
+ * the screen has.
  */
 async function enableEveryStop(page: Page): Promise<void> {
   const stateFrames = countStateFrames(page)
@@ -294,20 +290,15 @@ async function enableEveryStop(page: Page): Promise<void> {
   await expect.poll(stateFrames).toBe(4)
   await page.locator('.eq-slider').first().focus()
   await page.keyboard.press('ArrowUp')
-  await page.getByRole('textbox', { name: 'Dialog Enhancer amount' }).focus()
-  await page.keyboard.press('ArrowUp')
-  await expect(
-    page.getByRole('button', { name: 'Reset Dialog Enhancer' }),
-  ).toBeEnabled()
   await flipLan(page, true)
   await expandAdvanced(page)
 }
 
 /**
- * The Master control Rows' stops: the Reset marker (live — the scratch
- * profile diverges from its Baseline, the Fallback profile, on every
- * Master control), the switch, the box and the Slider, which share a
- * name.
+ * The Master control Rows' stops: the Reset marker (live: the scratch
+ * profile clones Music, whose values sit off a custom's Baseline — the
+ * parameter defaults — on every Master control), the switch, the box
+ * and the Slider, which share a name.
  */
 const masterStops = (control: string) => [
   `Reset ${control}`,
@@ -321,11 +312,11 @@ const masterStops = (control: string) => [
  * cards' in table order — `one` a single control, `numeric` the field
  * then its Slider, `reset` a live Reset marker (the category's when
  * unnamed). Which markers are live and where the tristates sit follow
- * from Music's values against the Fallback profile's (defaults.toml).
+ * from Music's values against the parameter defaults.
  */
 const category = (
   label: string,
-  cards: (card: {
+  cards: (names: {
     one: (name: string) => string
     numeric: (name: string) => string[]
     reset: (name?: string) => string

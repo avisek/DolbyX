@@ -157,5 +157,5 @@ subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
   paints from Bootstrap with no extra request.
 
 Never checked: a skin's custom properties, literal colours or lengths,
-timings, screenshots, hover tints, thumb scale, reveal timing, popover
+timings, golden screenshots, hover tints, thumb scale, reveal timing, popover
 placement — all skin policy.
