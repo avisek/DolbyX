@@ -110,11 +110,23 @@ for (const variant of VARIANTS) {
         await page.mouse.move(vis.x + vis.width / 2, vis.y + vis.height / 2)
       await page.waitForTimeout(400)
       await shoot(page, `${variant}-${scheme}-eq`, vis ?? undefined)
+      // Hover one EQ thumb (the third slider) for the hover look.
+      const thumb = page
+        .locator('.eq-slider')
+        .nth(2)
+        .locator('.eq-slider__thumb')
+      await thumb.hover()
+      await page.waitForTimeout(300)
+      await shoot(
+        page,
+        `${variant}-${scheme}-eq-hover`,
+        vis ?? undefined,
+        'allow',
+      )
       // The switcher: hover (b) or click the box (c) opens it; then a
       // pick, which closes c.
       const picker = page.locator('.picker--skin')
-      const checked = picker.locator('.picker__radio:checked + .picker__option')
-      await checked.click()
+      await picker.locator('.picker__radio:checked + .picker__option').click()
       await page.waitForTimeout(300)
       const box = await picker.boundingBox()
       const clip = box
@@ -126,9 +138,28 @@ for (const variant of VARIANTS) {
           }
         : undefined
       await shoot(page, `${variant}-${scheme}-switcher`, clip, 'allow')
-      await picker.getByText('Paper').click()
+      // c lays the radio over its label while open: that is the hit
+      // target there; b's radio is a 1-px hidden box, the label is.
+      await picker
+        .locator(
+          variant === 'c'
+            ? '#picker-skin-paper'
+            : 'label[for="picker-skin-paper"]',
+        )
+        .click()
       await page.waitForTimeout(300)
       await shoot(page, `${variant}-${scheme}-switcher-picked`, clip, 'allow')
+      // Reopen with a late pick: c slides the list up, the box stays.
+      await picker.locator('.picker__radio:checked + .picker__option').click()
+      await page.waitForTimeout(300)
+      await shoot(
+        page,
+        `${variant}-${scheme}-switcher-reopened`,
+        clip
+          ? { ...clip, y: clip.y - 160, height: clip.height + 160 }
+          : undefined,
+        'allow',
+      )
       if (variant === 'a') {
         await expandAdvanced(page)
         await page.waitForTimeout(400)

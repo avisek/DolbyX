@@ -104,7 +104,38 @@
   border: 2px solid var(--vis-field);
   background: var(--eq-ink);
   box-shadow: 0 0 6px var(--vis-glow);
-  transition: scale var(--hover-ms) ease;
+  transition:
+    scale var(--hover-ms) ease,
+    box-shadow var(--hover-ms) ease,
+    background var(--hover-ms) ease;
+}
+
+[data-variant='a'] .eq-slider__track {
+  transition: background var(--hover-ms) ease;
+}
+
+/* Hover, per EQ slider: a wider hit pad around the dot (the strip
+   itself is zero-width), the dot grows with a soft ring, the track
+   lights. Hover under focus weight; the drag state outranks both. */
+[data-variant='a'] .eq-slider__thumb::before {
+  content: '';
+  position: absolute;
+  inset: -0.5rem;
+  border-radius: 50%;
+}
+
+[data-variant='a'] .eq-slider:where(:hover) .eq-slider__thumb,
+[data-variant='a'] .eq-slider:focus-visible .eq-slider__thumb {
+  scale: 1.3;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--eq-ink) 22%, transparent),
+    0 0 10px var(--vis-glow);
+}
+
+[data-variant='a'] .eq-slider:where(:hover) .eq-slider__track,
+[data-variant='a'] .eq-slider:focus-visible .eq-slider__track,
+[data-variant='a'] .eq-slider--active .eq-slider__track {
+  background: color-mix(in srgb, var(--eq-ink) 50%, transparent);
 }
 
 [data-variant='a'] .eq-slider--active .eq-slider__thumb {
@@ -255,18 +286,32 @@
   font-size: var(--text-xs);
 }
 
-/* — C: a real dropdown, CSS-only on the fixed skeleton. Two clocks on
-   the list, registered numbers each animated linearly "forever":
-   `--since-focus` restarts when the list gains focus (:focus-within);
-   `--since-pick` restarts when the checked radio changes (the
-   animation-name follows the checked index via :has()). Open iff the
-   focus is newer than the pick: click the box → open; click an
-   option → the pick is newer → closed; click away → focus gone → the
-   focus clock snaps to "long ago" → closed. Tab in → open; Arrows
-   pick without opening, like a native select. `forwards`: a clock
-   fast-forwarded to its end (Playwright's animations: disabled) holds
-   there instead of snapping back. Cost: two running animations on one
-   element. — */
+/* — C: a real dropdown, CSS-only on the fixed skeleton.
+
+   Open / closed — two clocks on the list, registered numbers each
+   animated linearly "forever": `--since-focus` restarts when the list
+   gains focus (:focus-within); `--since-pick` restarts when the checked
+   radio changes (the animation-name follows the checked index via
+   :has()). Open iff the focus is newer than the pick. Click the box →
+   open; click an option → the pick is newer → closed; click away →
+   focus gone → the focus clock snaps to "long ago" → closed. Tab in →
+   open; Arrows pick without opening, like a native select. `forwards`:
+   a clock fast-forwarded to its end (Playwright's animations:
+   disabled) holds there instead of snapping back.
+
+   The hit target is the radio, not the label: a mouse-down on a label
+   moves focus to the body (labels are not focusable) and the menu
+   would fold under the pointer before the mouse-up. Each radio is laid
+   over its label on the same grid row, so focus only ever moves
+   between radios and :focus-within never drops mid-click.
+
+   Order is DOM order. Closed, every row but the checked one has zero
+   height, so the checked item sits at the list's top — the box. Open,
+   the rows unfold in place and the list slides up by the checked
+   index, so the box stays put and the menu grows around it (the
+   macOS pop-up idiom). Caveats: a click on the box while open is no
+   state change, so it stays open (click away or pick to close); a
+   long list with a late pick can run above the page. — */
 @property --since-focus {
   syntax: '<number>';
   inherits: false;
@@ -382,9 +427,11 @@
 
 /* The list: absolutely positioned inside its grid area (0 0 is the
    options column's corner); `--open` 0/1 from the clocks; its panel
-   chrome scales with it. */
+   chrome scales with it; it slides up by the checked index while
+   open. */
 [data-variant='c'] .picker--skin .picker__options {
   --open: clamp(0, (var(--since-pick) - var(--since-focus)) * 1000, 1);
+  --pitch: calc(var(--control-h) + var(--space-1));
   --shadow-ink: light-dark(rgb(18 36 56 / 18%), rgb(0 0 0 / 45%));
 
   position: absolute;
@@ -392,8 +439,13 @@
   left: 0;
   z-index: var(--z-popover);
   display: grid;
-  gap: var(--space-1);
-  min-inline-size: 11rem;
+  /* Explicit rows: an abspos grid child only takes its grid area as
+     containing block between *explicit* lines — implicit ones, and an
+     `auto` end line, resolve to the padding edge (so rows are placed
+     n / n+1). Eight covers the registry; empty rows are 0. */
+  grid-template-rows: repeat(8, auto);
+  grid-template-columns: minmax(11rem, max-content);
+  gap: 0;
   padding: calc(var(--open) * var(--space-1));
   border: 1px solid
     color-mix(in srgb, var(--hover-line) calc(var(--open) * 100%), transparent);
@@ -405,68 +457,95 @@
   );
   box-shadow: 0 var(--space-2) var(--space-5)
     color-mix(in srgb, var(--shadow-ink) calc(var(--open) * 100%), transparent);
+  translate: calc(-1 * var(--open) * var(--space-1))
+    calc(-1 * var(--open) * (var(--space-1) + var(--idx, 0) * var(--pitch)));
   animation: since-pick-1 1000000s linear forwards;
   transition:
     padding var(--hover-ms) ease,
     border-color var(--hover-ms) ease,
     background var(--hover-ms) ease,
-    box-shadow var(--hover-ms) ease;
+    box-shadow var(--hover-ms) ease,
+    translate var(--hover-ms) ease;
+}
+
+/* The radio over its label: absolutely positioned in the label's grid
+   area (an abspos grid child with an explicit area uses that area as
+   its containing block), so it adds nothing to the row's height and
+   folds with it; on top, invisible, clickable. */
+[data-variant='c'] .picker--skin .picker__radio {
+  position: absolute;
+  z-index: 1;
+  grid-column: 1;
+  inset: 0;
+  inline-size: auto;
+  block-size: auto;
+  margin: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* The checked radio covers its label only while open. Closed, the
+   label takes the click: a label mouse-down blurs (nothing to close)
+   and the click refocuses the radio — the focus clock restarts, the
+   menu opens — even when that radio already held focus after a pick.
+   Open, the radio takes the click: no state change, the menu stays
+   (click away or pick to close). */
+[data-variant='c'] .picker--skin .picker__radio:checked {
+  inset-block-end: auto;
+  block-size: calc(var(--open) * 100%);
+}
+
+[data-variant='c'] .picker--skin .picker__option {
+  grid-column: 1;
+  justify-content: space-between;
+  overflow: clip;
+  white-space: nowrap;
+  /* The gap, as a margin that folds with the row. */
+  margin-block-start: calc(var(--open) * var(--space-1));
+  transition:
+    max-block-size var(--hover-ms) ease,
+    margin var(--hover-ms) ease,
+    opacity var(--hover-ms) ease,
+    background var(--hover-ms) ease,
+    border-color var(--hover-ms) ease,
+    border-width var(--hover-ms) ease,
+    color var(--hover-ms) ease;
+}
+
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(1) {
+  margin-block-start: 0;
+}
+
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(1),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(1) {
+  grid-row: 1 / 2;
 }
 
 [data-variant='c']
   .picker--skin
   .picker__options:has(.picker__radio:nth-of-type(1):checked) {
+  --idx: 0;
+
   animation-name: since-pick-1;
 }
 
 [data-variant='c']
   .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(2):checked) {
-  animation-name: since-pick-2;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(3):checked) {
-  animation-name: since-pick-3;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(4):checked) {
-  animation-name: since-pick-4;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(5):checked) {
-  animation-name: since-pick-5;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(6):checked) {
-  animation-name: since-pick-6;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(7):checked) {
-  animation-name: since-pick-7;
-}
-
-[data-variant='c']
-  .picker--skin
-  .picker__options:has(.picker__radio:nth-of-type(8):checked) {
-  animation-name: since-pick-8;
-}
-
-/* Focused: the focus clock joins the list (the pick clock keeps
-   running — same name, never restarted). */
-[data-variant='c']
-  .picker--skin
   .picker__options:focus-within:has(.picker__radio:nth-of-type(1):checked) {
   animation-name: since-focus, since-pick-1;
+}
+
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(2),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(2) {
+  grid-row: 2 / 3;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(2):checked) {
+  --idx: 1;
+
+  animation-name: since-pick-2;
 }
 
 [data-variant='c']
@@ -475,10 +554,36 @@
   animation-name: since-focus, since-pick-2;
 }
 
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(3),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(3) {
+  grid-row: 3 / 4;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(3):checked) {
+  --idx: 2;
+
+  animation-name: since-pick-3;
+}
+
 [data-variant='c']
   .picker--skin
   .picker__options:focus-within:has(.picker__radio:nth-of-type(3):checked) {
   animation-name: since-focus, since-pick-3;
+}
+
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(4),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(4) {
+  grid-row: 4 / 5;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(4):checked) {
+  --idx: 3;
+
+  animation-name: since-pick-4;
 }
 
 [data-variant='c']
@@ -487,10 +592,36 @@
   animation-name: since-focus, since-pick-4;
 }
 
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(5),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(5) {
+  grid-row: 5 / 6;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(5):checked) {
+  --idx: 4;
+
+  animation-name: since-pick-5;
+}
+
 [data-variant='c']
   .picker--skin
   .picker__options:focus-within:has(.picker__radio:nth-of-type(5):checked) {
   animation-name: since-focus, since-pick-5;
+}
+
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(6),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(6) {
+  grid-row: 6 / 7;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(6):checked) {
+  --idx: 5;
+
+  animation-name: since-pick-6;
 }
 
 [data-variant='c']
@@ -499,10 +630,36 @@
   animation-name: since-focus, since-pick-6;
 }
 
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(7),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(7) {
+  grid-row: 7 / 8;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(7):checked) {
+  --idx: 6;
+
+  animation-name: since-pick-7;
+}
+
 [data-variant='c']
   .picker--skin
   .picker__options:focus-within:has(.picker__radio:nth-of-type(7):checked) {
   animation-name: since-focus, since-pick-7;
+}
+
+[data-variant='c'] .picker--skin .picker__radio:nth-of-type(8),
+[data-variant='c'] .picker--skin .picker__option:nth-of-type(8) {
+  grid-row: 8 / 9;
+}
+
+[data-variant='c']
+  .picker--skin
+  .picker__options:has(.picker__radio:nth-of-type(8):checked) {
+  --idx: 7;
+
+  animation-name: since-pick-8;
 }
 
 [data-variant='c']
@@ -511,23 +668,9 @@
   animation-name: since-focus, since-pick-8;
 }
 
-[data-variant='c'] .picker--skin .picker__option {
-  justify-content: space-between;
-  overflow: clip;
-  white-space: nowrap;
-  transition:
-    max-block-size var(--hover-ms) ease,
-    margin var(--hover-ms) ease,
-    opacity var(--hover-ms) ease,
-    background var(--hover-ms) ease,
-    border-color var(--hover-ms) ease,
-    color var(--hover-ms) ease;
-}
-
-/* The checked one is the box: first, field-coloured, a chevron; lit
-   while the menu is open. */
+/* The checked one is the box: field-coloured, a chevron; lit while
+   the menu is open. */
 [data-variant='c'] .picker--skin .picker__radio:checked + .picker__option {
-  order: -1;
   border-color: var(--hover-line);
   background: var(--color-bg);
   color: color-mix(
@@ -547,14 +690,24 @@
   font-size: var(--text-xs);
 }
 
-/* The rest: zero height (border-box, so the border folds too) and the
-   gap swallowed while closed; full height while open. */
+/* Hover rides the radio now (it is on top). */
+[data-variant='c']
+  .picker--skin
+  .picker__radio:where(:hover)
+  + .picker__option {
+  border-color: var(--hover-line);
+  color: var(--color-text);
+}
+
+/* The rest: zero height (border-box, so the border folds too) while
+   closed; full height while open. */
 [data-variant='c']
   .picker--skin
   .picker__radio:not(:checked)
   + .picker__option {
   max-block-size: calc(var(--open) * var(--control-h));
-  margin-block-start: calc((var(--open) - 1) * var(--space-1));
+  /* border-box, but a border never compresses: fold it too. */
+  border-width: calc(var(--open) * 1px);
   opacity: var(--open);
 }
 

@@ -13,4 +13,5 @@ Throwaway branch `prototype/remastered`. Run `just dev`, open
 
 Files: `<variant>-<scheme>-<width>.png` (full page), `-idle` (no feed:
 pips / thumbs / curve aligned at 0 dB), `-eq` (editor over a feed),
-`-switcher` (opened) / `-switcher-picked` (after a pick), `advanced-<scheme>.png`.
+`-switcher` (opened) / `-switcher-picked` (after a pick) /
+`-switcher-reopened` (c: late pick, list slides up around the box), `-eq-hover` (a: thumb hover), `advanced-<scheme>.png`.
