@@ -1,43 +1,13 @@
 /**
  * #94: the main screen as one product — real browser, real daemon, the
- * default skin. Screen-level invariants jsdom can't see (ADR-0011): no
- * sideways overflow with every region open, a visible focus indicator
- * on every tab stop, the connection badge's modifier following the
- * socket.
+ * default skin. What jsdom can't see (ADR-0011): a visible focus
+ * indicator on every tab stop (interim — #138 Part 2 moves the walk
+ * into contract.spec as a per-skin pixel diff), the connection badge's
+ * modifier following the socket. The overflow matrix lives in
+ * contract.spec, looped over every skin.
  */
 import type { Page } from '@playwright/test'
-import {
-  expandAdvanced,
-  expect,
-  expectNoOverflow,
-  flipLan,
-  foldSettled,
-  openAt,
-  test,
-} from './fixtures'
-
-// Behavior 2: with the panel open and LAN on, nothing widens the page at
-// any width — QR Popover closed, open, and closed again.
-for (const width of [390, 700, 1280]) {
-  test(`at ${String(width)}px nothing overflows with the panel open, LAN on, QR open and closed`, async ({
-    page,
-  }) => {
-    await openAt(page, width)
-    await expandAdvanced(page)
-    await flipLan(page, true)
-    await foldSettled(page)
-    await expectNoOverflow(page)
-
-    const figure = page.locator('.lan-access__qr')
-    await page.getByRole('button', { name: 'Show QR code' }).click()
-    await expect(figure).toBeFocused()
-    await expectNoOverflow(page)
-
-    await page.keyboard.press('Escape')
-    await expect(figure).toBeHidden()
-    await expectNoOverflow(page)
-  })
-}
+import { expect, flipLan, openAt, test } from './fixtures'
 
 /** One tab stop of the walk: what holds focus, and whether it shows it. */
 interface Stop {

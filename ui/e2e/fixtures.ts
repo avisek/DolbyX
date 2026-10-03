@@ -24,6 +24,11 @@ export interface DaemonHandle {
   readonly origin: string
   /** The plugin socket it serves (Slice 11) — synthetic plugins here. */
   readonly socketPath: string
+  /**
+   * Its `config.toml`: hand-write it between `stop` and `start` to boot
+   * over a chosen overlay (a skin id the UI doesn't ship, #138).
+   */
+  readonly configPath: string
   /** SIGTERMs and waits: flushes `config.toml`, reaps the engine. */
   stop(): Promise<void>
   /** Boots again on the same port over the same config dir. */
@@ -49,6 +54,10 @@ class Daemon implements DaemonHandle {
 
   get socketPath(): string {
     return join(this.#configDir, 'dolbyx.sock')
+  }
+
+  get configPath(): string {
+    return join(this.#configDir, 'config.toml')
   }
 
   /** Everything the daemon wrote — attached to failed tests. */
@@ -189,11 +198,140 @@ export const foldSettled = (page: Page) =>
  * the click.
  */
 export async function expandAdvanced(page: Page): Promise<void> {
+  await setAdvanced(page, true)
+}
+
+/** Collapses the Advanced panel — the contract loop's reset between skins. */
+export async function collapseAdvanced(page: Page): Promise<void> {
+  await setAdvanced(page, false)
+}
+
+async function setAdvanced(page: Page, open: boolean): Promise<void> {
   const header = page.getByRole('button', { name: 'Advanced' })
-  if ((await header.getAttribute('aria-expanded')) === 'false') {
+  if ((await header.getAttribute('aria-expanded')) !== String(open)) {
     await header.click()
   }
-  await expect(header).toHaveAttribute('aria-expanded', 'true')
+  await expect(header).toHaveAttribute('aria-expanded', String(open))
+}
+
+/** The active skin's `<style>` text — what the page is painted with. */
+export const skinText = (page: Page) =>
+  page.evaluate(() => document.getElementById('skin')?.textContent ?? '')
+
+/** The Skin picker's radios, pill order; each `value` is the id (Picker.tsx). */
+export const skinRadios = (page: Page) =>
+  page.locator('.picker--skin .picker__radio')
+
+/** The Skin picker's radio for a registered id. */
+export const skinRadio = (page: Page, id: string) =>
+  skinRadios(page).and(page.locator(`[value="${id}"]`))
+
+/**
+ * The registered skins as the page offers them — the Skin picker's
+ * radios, pill order: one source of truth, no CSS in Node (#138).
+ */
+export async function skinList(
+  page: Page,
+): Promise<{ id: string; label: string }[]> {
+  const skins = await skinRadios(page).evaluateAll((radios) =>
+    radios.map((radio) => ({
+      id: (radio as HTMLInputElement).value,
+      label: (radio as HTMLInputElement).labels?.[0]?.textContent ?? '',
+    })),
+  )
+  // An empty loop would pass every contract vacuously.
+  expect(skins.length).toBeGreaterThan(1)
+  return skins
+}
+
+/**
+ * Switches the daemon's skin from a probe socket the page opens — a
+ * second client, so the daemon's fan-out reaches the page's own socket
+ * (the picking tab never sees its own snapshot) — and waits for the
+ * pill: the Shell swaps the `<style>` text in the same synchronous
+ * effect that checks it (and two skins' texts may be byte-identical —
+ * Classic is Remastered's copy until #139). Already the page's skin:
+ * nothing to send.
+ */
+export async function setSkin(page: Page, id: string): Promise<void> {
+  const radio = skinRadio(page, id)
+  if (await radio.isChecked()) return
+  await page.evaluate(
+    (id) =>
+      new Promise<void>((resolve, reject) => {
+        const probe = new WebSocket(`ws://${location.host}/ws`)
+        probe.onerror = () => {
+          reject(new Error('probe socket failed'))
+        }
+        probe.onopen = () => {
+          probe.send(
+            JSON.stringify({ cmd: 'set_skin', request_id: 'probe', id }),
+          )
+        }
+        probe.onmessage = (event) => {
+          const frame = JSON.parse(String(event.data)) as {
+            type: string
+            request_id?: string
+          }
+          if (frame.request_id !== 'probe') return
+          probe.close()
+          if (frame.type === 'ack') resolve()
+          else reject(new Error(`set_skin ${id}: ${frame.type}`))
+        }
+      }),
+    id,
+  )
+  await expect(radio).toBeChecked()
+}
+
+/** Whether the painted skin declares both schemes on `:root`. */
+export const declaresLightDark = (page: Page) =>
+  page.evaluate(() => {
+    const scheme = getComputedStyle(document.documentElement).colorScheme
+    return scheme.includes('light') && scheme.includes('dark')
+  })
+
+/**
+ * Every control in the tab order is reachable by the pointer: a hit at
+ * the centre of its hit surface lands on itself, a descendant, or one
+ * of its `label`s. The hit surface is the control's own box, or its
+ * `label` where the skin took the control out of hit testing
+ * (`pointer-events: none` — a hidden radio painted through its pill).
+ * Visible means not folded away (`display` / `visibility`):
+ * opacity-hidden chrome must still take the pointer (ADR-0011).
+ * Disabled controls (`disabled`, or `aria-disabled` dropping a Slider
+ * to `tabindex=-1`) and roving members (`tabindex=-1`: band editors,
+ * opened through their band) are reached through their owner, not the
+ * pointer, and are skipped.
+ */
+export async function expectReachable(page: Page): Promise<void> {
+  const unreachable = await page.evaluate(() => {
+    const misses: string[] = []
+    const controls = document.querySelectorAll<HTMLElement>(
+      'button, [role=switch], input[type=radio], [role=radio], [role=slider], input[type=text], textarea, [role=textbox]',
+    )
+    for (const el of controls) {
+      if (!el.checkVisibility({ visibilityProperty: true })) continue
+      if (el.matches(':disabled') || el.tabIndex < 0) continue
+      const labels =
+        el instanceof HTMLInputElement ? [...(el.labels ?? [])] : []
+      const surface =
+        getComputedStyle(el).pointerEvents === 'none' ? (labels[0] ?? el) : el
+      surface.scrollIntoView({ block: 'center', inline: 'nearest' })
+      const { left, top, width, height } = surface.getBoundingClientRect()
+      const hit = document.elementFromPoint(left + width / 2, top + height / 2)
+      const reached =
+        hit !== null &&
+        (el.contains(hit) || labels.some((label) => label.contains(hit)))
+      if (!reached) {
+        const name =
+          el.getAttribute('aria-label') ?? (labels[0] ?? el).textContent.trim()
+        misses.push(`${el.tagName.toLowerCase()}.${el.className} "${name}"`)
+      }
+    }
+    return misses
+  })
+  expect(unreachable).toEqual([])
 }
 
 export { expect }
