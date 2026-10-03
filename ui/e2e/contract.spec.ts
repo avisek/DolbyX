@@ -74,8 +74,11 @@ for (const width of [390, 700, 1280]) {
         await contract(page)
         if (await declaresLightDark(page)) {
           await page.emulateMedia({ colorScheme: 'light' })
-          await contract(page)
-          await page.emulateMedia({ colorScheme: 'dark' })
+          try {
+            await contract(page)
+          } finally {
+            await page.emulateMedia({ colorScheme: 'dark' })
+          }
         }
       })
     }

@@ -218,9 +218,13 @@ async function setAdvanced(page: Page, open: boolean): Promise<void> {
 export const skinText = (page: Page) =>
   page.evaluate(() => document.getElementById('skin')?.textContent ?? '')
 
-/** A Skin picker radio's `value` is the registered id (Picker.tsx). */
-const skinRadio = (page: Page, id: string) =>
-  page.locator(`.picker--skin .picker__radio[value="${id}"]`)
+/** The Skin picker's radios, pill order; each `value` is the id (Picker.tsx). */
+export const skinRadios = (page: Page) =>
+  page.locator('.picker--skin .picker__radio')
+
+/** The Skin picker's radio for a registered id. */
+export const skinRadio = (page: Page, id: string) =>
+  skinRadios(page).and(page.locator(`[value="${id}"]`))
 
 /**
  * The registered skins as the page offers them — the Skin picker's
@@ -229,14 +233,12 @@ const skinRadio = (page: Page, id: string) =>
 export async function skinList(
   page: Page,
 ): Promise<{ id: string; label: string }[]> {
-  const skins = await page
-    .locator('.picker--skin .picker__radio')
-    .evaluateAll((radios) =>
-      radios.map((radio) => ({
-        id: (radio as HTMLInputElement).value,
-        label: (radio as HTMLInputElement).labels?.[0]?.textContent ?? '',
-      })),
-    )
+  const skins = await skinRadios(page).evaluateAll((radios) =>
+    radios.map((radio) => ({
+      id: (radio as HTMLInputElement).value,
+      label: (radio as HTMLInputElement).labels?.[0]?.textContent ?? '',
+    })),
+  )
   // An empty loop would pass every contract vacuously.
   expect(skins.length).toBeGreaterThan(1)
   return skins
@@ -297,7 +299,8 @@ export const declaresLightDark = (page: Page) =>
  * (`pointer-events: none` — a hidden radio painted through its pill).
  * Visible means not folded away (`display` / `visibility`):
  * opacity-hidden chrome must still take the pointer (ADR-0011).
- * Disabled controls and roving members (`tabindex=-1`: band editors,
+ * Disabled controls (`disabled`, or `aria-disabled` dropping a Slider
+ * to `tabindex=-1`) and roving members (`tabindex=-1`: band editors,
  * opened through their band) are reached through their owner, not the
  * pointer, and are skipped.
  */
@@ -305,7 +308,7 @@ export async function expectReachable(page: Page): Promise<void> {
   const unreachable = await page.evaluate(() => {
     const misses: string[] = []
     const controls = document.querySelectorAll<HTMLElement>(
-      'button, [role=switch], input[type=radio], [role=slider], input[type=text], textarea',
+      'button, [role=switch], input[type=radio], [role=radio], [role=slider], input[type=text], textarea, [role=textbox]',
     )
     for (const el of controls) {
       if (!el.checkVisibility({ visibilityProperty: true })) continue

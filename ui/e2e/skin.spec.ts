@@ -10,12 +10,18 @@
  */
 import { writeFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
-import { expect, openAt, skinText, test } from './fixtures'
+import {
+  expect,
+  openAt,
+  skinRadio,
+  skinRadios,
+  skinText,
+  test,
+} from './fixtures'
 
 const classicPill = (page: Page) =>
   page.getByRole('radiogroup', { name: 'Skin' }).getByText('Classic')
-const classicRadio = (page: Page) =>
-  page.getByRole('radio', { name: 'Classic', exact: true })
+const classicRadio = (page: Page) => skinRadio(page, 'classic')
 
 // Behavior 2: a pick is ack-then-apply at the originator and a `state`
 // broadcast at the peer — both pages end up checked and painted alike.
@@ -54,9 +60,7 @@ test('a config.toml skin the registry does not ship paints the default with no p
   const bootstrap = await page.evaluate(() => window.__BOOTSTRAP__)
   expect(bootstrap?.state.skin).toBe('nope')
   expect(await skinText(page)).toBe(fallback)
-  await expect(
-    page.locator('.picker--skin .picker__radio:checked'),
-  ).toHaveCount(0)
+  await expect(skinRadios(page).and(page.locator(':checked'))).toHaveCount(0)
 })
 
 // Behavior 2: the chosen skin's text is already in the document — the
