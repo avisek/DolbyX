@@ -261,7 +261,7 @@ _Avoid_: restore defaults, factory reset (reset isn't factory-only).
 **GEQ editor**:
 The EQ editing surface inside the visualizer — the EQ sliders and curve
 riding the `vis` feed; revealed and hidden per skin policy (Classic:
-hover / focus / drag, 5 s linger).
+hover / focus / drag with a 5 s linger; Remastered: no linger).
 _Avoid_: eq overlay ("overlay" is taken — an EQ preset shadowing a
 profile's params); GEQ overlay.
 
@@ -276,11 +276,33 @@ _Avoid_: basic param, basic switch, "Basic panel".
 A CSS-only visual variant of the whole UI — all visual policy
 (quantization, colors, z-order, state looks) lives in skin CSS;
 components expose data as CSS variables and state as BEM modifier
-classes, never appearance.
+classes, never appearance. The chosen skin is a root scalar (`skin`)
+resolved through the Cascade like LAN access, so every connected UI
+paints the same one; an id the UI doesn't ship paints the default.
 _Avoid_: theme (reads as light/dark color scheme).
 
+**Remastered skin**:
+The default skin — DolbyX's own look: follows the system Colour scheme,
+continuous (capsule) visualizer, remastered GEQ editor with no linger.
+_Avoid_: default skin (say Remastered), modern skin, new skin.
+
 **Classic skin**:
-The factory skin — the faithful transcription of the original DDP look.
+The faithful transcription of the original DDP look — dark only, brick
+visualizer; forked from the pre-switching skin, awaiting its
+faithful-DDP pass.
+_Avoid_: factory skin, default skin (that's Remastered).
+
+**Colour scheme**:
+The system's light / dark preference, which a skin follows or pins —
+each skin declares what it supports (Remastered: both; Classic: dark).
+Never a setting in the UI.
+_Avoid_: theme, dark mode (a toggle the UI doesn't have).
+
+**Skin registry**:
+The UI's list of shipped skins — id, label, entry point — the single
+source of truth for what can be chosen; the daemon stores only the
+chosen id, unchecked.
+_Avoid_: skin list, manifest, catalogue.
 
 **Skeleton**:
 The fixed component structure a skin styles — semantic elements, BEM
@@ -289,20 +311,15 @@ every skin.
 _Avoid_: markup, template, layout (that's the skin's).
 
 **Skin entry point**:
-The single stylesheet that imports every component's skin styles;
-swapping it swaps the skin.
+A skin's single stylesheet, importing every one of its sheets — the
+text the UI loads for that skin and swaps live when the choice changes.
 _Avoid_: stylesheet bundle, theme file.
-
-**Token**:
-A skin-level CSS custom property naming a design value — spacing step,
-control height, access hue; components never read one.
-_Avoid_: variable (ambiguous with published data vars), theme value.
 
 **Lattice**:
 The per-column chrome surface whose separator lines carve the column's
 fill into bricks; the pieces tile into the field-wide grid (the
 original's per-cell brick insets, not a global overlay). Skin-painted
-quantization chrome.
+quantization chrome; Remastered repurposes it as the guide-line carrier.
 _Avoid_: grid (taken — the band layouts: Native grid, custom vis grid).
 
 **Pip**:
@@ -419,9 +436,9 @@ _Avoid_: inline input, cell.
 ### Main screen
 
 **Main screen**:
-Everything above the Advanced panel — header, LAN Access row, the two
-Pickers, the visualizer, the Master controls — laid into the Shell by
-the skin.
+Everything above the Advanced panel — header, the two Pickers, the
+visualizer, the Master controls, then the LAN Access row and the Skin
+picker — laid into the Shell by the skin.
 _Avoid_: dashboard, home, basic view.
 
 **Shell**:
@@ -438,10 +455,18 @@ their own focus (the card rule).
 _Avoid_: card (the Advanced panel's), tile, bar.
 
 **Picker**:
-The one shared item chooser behind the profile and EQ preset rows: a
-label, a radio group of pills (arrow keys move, ack-then-apply), the
-rename field inside the checked pill, and the four Picker actions.
+The one shared item chooser behind the profile, EQ preset and Skin
+rows: a label, a radio group of pills (arrow keys move, ack-then-apply),
+and — for items that are editable — the rename field inside the checked
+pill and the four Picker actions.
 _Avoid_: tabs, tablist, segmented control, preset bar.
+
+**Skin picker**:
+The Picker choosing the Skin — label plus one pill per Skin registry
+entry, no rename, no Picker actions; a pick changes the root scalar for
+every connected UI. No pill is checked while the stored id is unknown.
+_Avoid_: skin switcher, theme switcher, dropdown (one skin's look for
+it, not the thing).
 
 **Picker action**:
 One of Add · Rename · Delete · Reset on a Picker — a plain button named
@@ -457,10 +482,12 @@ and returns focus) — while placement and motion are the skin's. The QR
 code is one.
 _Avoid_: modal, dialog, tooltip, overlay (taken — EQ preset).
 
-**Icon token**:
-A Token holding an SVG mask the skin paints onto an otherwise empty,
-`aria-label`-named button; components never carry glyphs.
-_Avoid_: icon font, inline SVG (the QR code is data, not an icon).
+**Icon mask**:
+An SVG the skin paints as a mask onto an otherwise empty,
+`aria-label`-named button — a custom property or an asset file, the
+skin's business; components never carry glyphs.
+_Avoid_: icon token (a skin's custom properties are its own, never
+contract), icon font, inline SVG (the QR code is data, not an icon).
 
 **Off-look**:
 The whole-UI dimming under the root `app--off` modifier — one Shell
