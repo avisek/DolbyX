@@ -45,7 +45,9 @@ export interface PickerRename {
  * blur-commit). Options
  * render by position (`Index`): callers rebuild the array every
  * snapshot, and identity keying would recreate every radio — and drop
- * the one holding focus. Modifiers: `--profile` / `--eq` / `--skin`
+ * the one holding focus. Each radio's `value` is its item's id (`''`
+ * for None) — the DOM's own statement of what a pill picks, which the
+ * e2e skin loop reads. Modifiers: `--profile` / `--eq` / `--skin`
  * (the kind), `--diverged` (Reset means something).
  */
 const Picker: Component<{
@@ -84,6 +86,7 @@ const Picker: Component<{
                   id={radioId(option().id)}
                   class="picker__radio"
                   name={`picker-${props.kind}`}
+                  value={option().id ?? ''}
                   checked={option().checked}
                   onClick={(event) => {
                     event.preventDefault()

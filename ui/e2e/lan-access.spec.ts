@@ -1,19 +1,12 @@
 /**
  * Slice 15 (#118): the LAN Access Row in a real browser — the fold
- * landing the tools in and out of the tab order, no sideways overflow
- * off or on, and the QR Popover reachable at its centre. jsdom sees
- * only the modifier / focus seam (ADR-0011). Real daemon: flipping LAN
- * on binds the LAN listener for real (ADR-0012).
+ * landing the tools in and out of the tab order. jsdom sees only the
+ * modifier / focus seam (ADR-0011). Real daemon: flipping LAN on binds
+ * the LAN listener for real (ADR-0012). Overflow off / on and the QR
+ * Popover's hit test live in contract.spec, looped over every skin.
  */
 import type { Page } from '@playwright/test'
-import {
-  expect,
-  expectNoOverflow,
-  flipLan,
-  foldSettled,
-  openAt,
-  test,
-} from './fixtures'
+import { expect, flipLan, foldSettled, openAt, test } from './fixtures'
 
 const lanSwitch = (page: Page) =>
   page.getByRole('switch', { name: 'LAN access' })
@@ -43,38 +36,4 @@ test('flipping LAN reveals the tools; off lands them hidden and out of the tab o
   await page.keyboard.press('Tab')
   await expect(url).not.toBeFocused()
   await expect(page.locator('.lan-access :focus')).toHaveCount(0)
-})
-
-// Behavior 6: nothing overflows sideways with LAN off or on, narrow or
-// wide — the folded tools and the closed popover add no scroll width.
-for (const width of [390, 1280]) {
-  test(`at ${String(width)}px the Row never widens the page, LAN off or on`, async ({
-    page,
-  }) => {
-    await openAt(page, width)
-    await expectNoOverflow(page)
-
-    await flipLan(page, true)
-    await foldSettled(page)
-    await expectNoOverflow(page)
-  })
-}
-
-// Behavior 6: the open Popover escapes the tools' clip and stacks
-// above the rows below — a hit at its centre lands inside the figure.
-test('the open QR popover is hit-testable at its centre', async ({ page }) => {
-  await openAt(page, 1280)
-  await flipLan(page, true)
-
-  await page.getByRole('button', { name: 'Show QR code' }).click()
-  const figure = page.locator('.lan-access__qr')
-  await expect(figure).toBeVisible()
-  await expect(figure).toBeFocused()
-
-  const hit = await figure.evaluate((el) => {
-    const { left, top, width, height } = el.getBoundingClientRect()
-    const target = document.elementFromPoint(left + width / 2, top + height / 2)
-    return target !== null && el.contains(target)
-  })
-  expect(hit).toBe(true)
 })

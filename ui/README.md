@@ -145,9 +145,16 @@ subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
   import outside the registry; skin directories ↔ registry 1:1; every
   sheet reachable from its skin's `index.css`; `color-scheme` on
   `:root`; no viewport unit; the registry's default = `defaults.toml`'s.
-- Screen-level (`e2e/main-screen.spec.ts`): no sideways overflow at
-  390 / 700 / 1280 with every region open, a visible focus indicator on
-  every tab stop, the badge's `--connected` following the socket.
+- Contract (`e2e/contract.spec.ts`), looped over every registered skin
+  at 390 / 700 / 1280 and again under the light scheme where the skin
+  declares `light dark`: no sideways overflow with every region open,
+  every control hit-testable at its centre (or its label's).
+- Switching (`e2e/skin.spec.ts`): a pick reaches a peer page, an unknown
+  `config.toml` id paints the default with no pill checked, a reload
+  paints from Bootstrap with no extra request.
+- `e2e/main-screen.spec.ts`: a visible focus indicator on every tab stop
+  (interim, until #138 Part 2), the badge's `--connected` following the
+  socket.
 
 Never checked: a skin's custom properties, literal colours or lengths,
 timings, screenshots, hover tints, thumb scale, reveal timing, popover

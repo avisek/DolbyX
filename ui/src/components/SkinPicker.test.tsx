@@ -50,6 +50,11 @@ it('renders one radio per registry entry, in order, labelled from the registry',
   expect(radios().map((radio) => radio.labels?.[0]?.textContent)).toEqual(
     skins.map((skin) => skin.label),
   )
+  // The radio's `value` is the id — what the contract suite's skin
+  // loop reads from the DOM (#138).
+  expect(radios().map((radio) => radio.value)).toEqual(
+    skins.map((skin) => skin.id),
+  )
   expect(screen.getByRole('radiogroup', { name: 'Skin' })).toBeTruthy()
   expect(option('Classic').closest('.picker--skin')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
