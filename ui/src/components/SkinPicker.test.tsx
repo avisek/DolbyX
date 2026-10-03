@@ -97,14 +97,12 @@ it('clicking Classic sends set_skin and checks it only on the ack', async () => 
 })
 
 // Behavior 2 (#137): Arrow keys move natively within the group — in a
-// browser ArrowRight checks the next radio, focuses it and dispatches
-// its click, which asks the store; happy-dom has no radio roving, so
-// the test dispatches what Chromium would. Positional keying keeps the
-// focused node alive across the rebuilt options: focus stays on it
-// through the ack.
-it('ArrowRight moves to the next skin and keeps focus on it', async () => {
+// browser ArrowRight focuses and clicks the next radio, which asks the
+// store (e2e picker.spec walks the real key; happy-dom has no radio
+// roving). What the skeleton owns: positional keying keeps the focused
+// node alive across the rebuilt options, so focus survives the ack.
+it('a pick keeps focus on the picked pill through the ack', async () => {
   const socket = renderConnected()
-  option('Remastered').focus()
   option('Classic').focus()
   option('Classic').click()
 

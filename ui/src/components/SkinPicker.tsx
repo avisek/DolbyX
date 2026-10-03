@@ -10,7 +10,8 @@ import Picker from './Picker'
  * no rename; a pick is `set_skin`, ack-then-apply, moving the root
  * scalar for every connected UI (ADR-0013). `checked` is the store's
  * `skin`: an id the registry doesn't ship checks nothing — the default
- * paints, no pill claims to be it. Every entry is a Factory item.
+ * paints, no pill claims to be it. `factory: true` throughout — no skin
+ * is editable.
  */
 const SkinPicker: Component = () => (
   <Picker

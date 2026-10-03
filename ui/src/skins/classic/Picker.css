@@ -1,5 +1,7 @@
-/* The Picker (#119): profiles and EQ presets on one skeleton — a Row
-   surface holding a label, radio pills and the four Picker actions.
+/* The Picker (#119, #137): profiles, EQ presets and the Skin on one
+   skeleton — a Row surface holding a label, radio pills and, where the
+   items are editable, the four Picker actions (the Skin picker has
+   none; its empty actions column collapses).
    Pills speak the Tristate segment language: the radio hides with
    `opacity` (still focusable, ADR-0011) behind its label, `:checked +
    label` fills accent, hover lifts the text under focus weight, the

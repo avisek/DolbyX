@@ -313,6 +313,14 @@ it('publishes --count and --bands on .eq-sliders, following genb', () => {
   expect(publishedCounts()).toEqual({ count: '3', bands: '3' })
 })
 
+// Behavior 4 (#137): `--count` is the visible-slider pref, not `genb` —
+// the two move apart.
+it("publishes the pref's visible count under a wider genb", () => {
+  localStorage.setItem('dolbyx.geq.sliders', '3')
+  renderConnected()
+  expect(publishedCounts()).toEqual({ count: '3', bands: '20' })
+})
+
 // — Part C: the editor's hand. The pointer surface is the field (the
 // editor layer): down/move resolve x → the nearest visible Slider
 // (splat center = round of its fractional index), y → dB via the

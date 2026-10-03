@@ -33,15 +33,16 @@ export interface PickerRename {
  * behind the profile, EQ preset and Skin rows. A label, a native radio
  * group of pills (the Tristate idiom — one Tab stop, Arrow keys move
  * natively, the click cancels the native check and asks the store;
- * re-picking the checked one asks nothing), then — for editable items
- * — the four Picker actions (`actions`) — Add / Rename / Delete / Reset
- * — rendered empty and named by `aria-label`, glyphs from the skin
- * (ADR-0011 addendum 2); Rename / Delete / Reset `disabled` when they
- * mean nothing. Renaming (`rename`) keeps the checked pill in place
- * (`--renaming`) and mounts the field inside it beside the name — the
- * skin swaps one for the other; the label's card rule keeps a click in
- * the field from forwarding to the radio (which would steal its focus
- * and blur-commit). Either group omitted renders nothing of it. Options
+ * re-picking the checked one asks nothing). Editable items add two
+ * optional groups, each rendering nothing when omitted. `actions`: the
+ * four Picker actions — Add / Rename / Delete / Reset — rendered empty
+ * and named by `aria-label`, glyphs from the skin (ADR-0011 addendum
+ * 2); Rename / Delete / Reset `disabled` when they mean nothing.
+ * `rename`: renaming keeps the checked pill in place (`--renaming`) and
+ * mounts the field inside it beside the name — the skin swaps one for
+ * the other; the label's card rule keeps a click in the field from
+ * forwarding to the radio (which would steal its focus and
+ * blur-commit). Options
  * render by position (`Index`): callers rebuild the array every
  * snapshot, and identity keying would recreate every radio — and drop
  * the one holding focus. Modifiers: `--profile` / `--eq` / `--skin`
@@ -99,7 +100,7 @@ const Picker: Component<{
                   on:click={cardRule('.picker__field')}
                 >
                   <span class="picker__name">{option().name}</span>
-                  <Show when={renaming() ? props.rename : undefined}>
+                  <Show when={renaming() && props.rename}>
                     {(rename) => (
                       <RenameInput
                         label={`${props.label} name`}

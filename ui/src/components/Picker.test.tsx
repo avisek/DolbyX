@@ -1,10 +1,3 @@
-/**
- * #137: the Picker's optional prop groups. `actions` and `rename` are
- * each all-or-nothing: omitted, the skeleton renders no Picker actions
- * (and never sets `picker--diverged`) and no rename field; passed, the
- * profile / EQ preset behaviour pinned in ProfileTabs.test and
- * EqPresetPicker.test is unchanged.
- */
 import { cleanup, render, screen } from '@solidjs/testing-library'
 import { afterEach, expect, it, vi } from 'vitest'
 import Picker, { type PickerOption } from './Picker'
@@ -40,8 +33,9 @@ const picker = () => {
   return el
 }
 
-// Behavior 1 (#137): no `actions` ⇒ no `.picker__actions`, no buttons,
-// and `picker--diverged` never set — there is no Reset to mean anything.
+// Behavior 1 (#137): the optional prop groups, each all-or-nothing. No
+// `actions` ⇒ no `.picker__actions`, no buttons, and `picker--diverged`
+// never set — there is no Reset to mean anything.
 it('renders no Picker actions and never --diverged without the actions group', () => {
   render(() => (
     <Picker
@@ -75,7 +69,9 @@ it('renders no rename field without the rename group', () => {
 })
 
 // Behavior 1 (#137): both groups ⇒ the four actions, `--diverged` on an
-// enabled Reset, the rename field inside the checked pill — unchanged.
+// enabled Reset, the rename field inside the checked pill — the
+// profile / EQ preset behaviour ProfileTabs.test and EqPresetPicker.test
+// pin, unchanged.
 it('renders the actions, --diverged and the rename field with both groups', () => {
   render(() => (
     <Picker

@@ -484,13 +484,13 @@ it('orders Master controls → LAN Access → Skin → Advanced, in DOM and Tab 
   ])
   expect(regions.at(-2)?.classList.contains('picker--skin')).toBe(true)
 
-  const tabbables = [
+  const focusables = [
     ...document.querySelectorAll<HTMLElement>(
       'input:not([disabled]), button:not([disabled]), [tabindex]',
     ),
   ]
-  expect(tabbables.filter((el) => el.tabIndex > 0)).toEqual([])
-  const at = (el: Element) => tabbables.indexOf(el as HTMLElement)
+  expect(focusables.filter((el) => el.tabIndex > 0)).toEqual([])
+  const at = (el: Element) => focusables.indexOf(el as HTMLElement)
   const master = screen.getByRole('region', { name: 'Master controls' })
   const lastMasterStop = Math.max(
     ...[...master.querySelectorAll('input, button')].map(at),
