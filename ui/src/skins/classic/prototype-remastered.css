@@ -115,22 +115,62 @@
 }
 
 /* Hover follows the hand: the pointer logic snaps to the nearest
-   visible slider anywhere in the field (EqCurve.tsx), so each slider's
-   box is its share of the field — one slider spacing wide, centred on
-   its x (the component's `left`) — and `:hover` lands on the nearest
-   one. Spacing = (bands − 1) / (sliders − 1) columns; 20 bands is the
-   shipped grid (`vcnb = genb = 20`), the slider count is
-   sibling-count() (Chrome 138+; a `--n` hop keeps the minifier off
-   it). The dot grows with a soft ring, the track lights. Hover under
-   focus weight; the drag state outranks both. */
+   visible slider anywhere in the field (EqCurve.tsx), so the slider
+   boxes partition the field the same way — each box runs from the
+   midpoint before its x to the midpoint after, the first and last
+   from / to the field's edge — and `:hover` lands on the nearest one,
+   never outside the field. Fractions of the field: `--pitch` one
+   column, `--span` one slider spacing = (bands − 1) / (sliders − 1)
+   columns; `--box` this box's width, `--anchor` its slider's x inside
+   it. The component's `left` is the x; the margin pulls the box back
+   by the anchor; thumb and track sit at the anchor. 20 bands is the
+   shipped grid (`vcnb = genb = 20`); the slider count is
+   sibling-count() (Chrome 138+). */
+/* Registered, so each computes to a number on the slider; the thumb
+   inherits numbers. Unregistered, the thumb would inherit the token
+   stream and evaluate sibling-count() for itself (two siblings). */
+@property --n {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 2;
+}
+
+@property --box {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --anchor {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.5;
+}
+
 [data-variant='a'] .eq-slider {
   --eq-bands: 20;
   --n: sibling-count();
+  --pitch: calc(1 / var(--eq-bands));
+  --span: calc((var(--eq-bands) - 1) / var(--eq-bands) / (var(--n) - 1));
+  --box: var(--span);
+  --anchor: calc(var(--span) / 2);
 
-  inline-size: calc(
-    100% * (var(--eq-bands) - 1) / var(--eq-bands) / (var(--n) - 1)
-  );
-  translate: -50% 0;
+  inline-size: calc(100% * var(--box));
+  margin-inline-start: calc(-100% * var(--anchor));
+}
+
+[data-variant='a'] .eq-slider:first-child {
+  --box: calc(var(--span) / 2 + var(--pitch) / 2);
+  --anchor: calc(var(--pitch) / 2);
+}
+
+[data-variant='a'] .eq-slider:last-child {
+  --box: calc(var(--span) / 2 + var(--pitch) / 2);
+}
+
+[data-variant='a'] .eq-slider__track,
+[data-variant='a'] .eq-slider__thumb {
+  left: calc(100% * var(--anchor) / var(--box));
 }
 
 [data-variant='a'] .eq-slider:where(:hover) .eq-slider__thumb,

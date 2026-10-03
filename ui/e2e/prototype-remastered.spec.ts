@@ -129,6 +129,55 @@ for (const variant of VARIANTS) {
       if (variant === 'a') {
         expect(await thumbScale(1)).toBe('1.3')
         expect(await thumbScale(2)).toBe('none')
+        // The boxes partition the field exactly: edges at 0 and 100 %,
+        // adjacent boxes meet, and each thumb's centre is its slider's x.
+        const geo = await page.evaluate(() => {
+          const field = document
+            .querySelector('.eq-sliders')
+            ?.getBoundingClientRect()
+          if (!field) throw new Error('no field')
+          return [...document.querySelectorAll('.eq-slider')].map((s) => {
+            const r = s.getBoundingClientRect()
+            const t = s
+              .querySelector('.eq-slider__thumb')
+              ?.getBoundingClientRect()
+            if (!t || !(s instanceof HTMLElement)) throw new Error('no thumb')
+            return {
+              left: r.left - field.left,
+              right: r.right - field.left,
+              x: parseFloat(s.style.left),
+              thumbX: t.left + t.width / 2 - field.left,
+              width: field.width,
+            }
+          })
+        })
+        const first = geo[0]
+        const last = geo[geo.length - 1]
+        if (!first || !last) throw new Error('no sliders')
+        expect(first.left).toBeCloseTo(0, 0)
+        expect(last.right).toBeCloseTo(last.width, 0)
+        for (let i = 1; i < geo.length; i += 1) {
+          expect(geo[i]?.left).toBeCloseTo(geo[i - 1]?.right ?? NaN, 0)
+        }
+        for (const g of geo) expect(g.thumbX).toBeCloseTo(g.x, 0)
+        // Just outside the field, nothing hovers; just inside, the end slider.
+        const hovered = () =>
+          page
+            .locator('.eq-slider')
+            .evaluateAll((els) => els.findIndex((el) => el.matches(':hover')))
+        if (vis) {
+          const midY = vis.y + vis.height * 0.3
+          await page.mouse.move(vis.x - 2, midY)
+          expect(await hovered()).toBe(-1)
+          await page.mouse.move(vis.x + 1, midY)
+          expect(await hovered()).toBe(0)
+          await page.mouse.move(vis.x + vis.width - 1, midY)
+          expect(await hovered()).toBe(geo.length - 1)
+          await page.mouse.move(vis.x + vis.width + 2, midY)
+          expect(await hovered()).toBe(-1)
+          await page.mouse.move(vis.x + vis.width * 0.35, midY)
+          await page.waitForTimeout(300)
+        }
       }
       await shoot(
         page,
