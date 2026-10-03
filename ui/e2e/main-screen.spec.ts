@@ -118,10 +118,10 @@ const masterStops = (control: string, diverged = false) => [
   `${control} amount`,
 ]
 
-// Behavior 3: Tab through the whole main screen — power, the LAN Access
-// Row, both Pickers with an enabled Reset, the EQ sliders, the Master
-// control Rows with an enabled Reset marker, the Advanced header — and
-// every stop shows a focus indicator.
+// Behavior 3: Tab through the whole main screen — power, both Pickers
+// with an enabled Reset, the EQ sliders, the Master control Rows with an
+// enabled Reset marker, the LAN Access Row, the Skin picker, the
+// Advanced header — and every stop shows a focus indicator.
 test('every tab stop on the main screen shows a focus indicator', async ({
   page,
 }) => {
@@ -149,13 +149,10 @@ test('every tab stop on the main screen shows a focus indicator', async ({
   // The walk covered the screen in DOM order — a stale selector would
   // drop a whole region silently. The EQ sliders are the five default
   // ones over the shipped `gebf` (defaults.toml); the Pickers' other
-  // actions are disabled on a Factory item and never stop the walk.
+  // actions are disabled on a Factory item and never stop the walk; the
+  // LAN Access Row and the Skin picker follow the Master controls (#137).
   expect(stops.map((stop) => stop.name)).toEqual([
     'Power',
-    'LAN access',
-    'LAN URL',
-    'Copy URL',
-    'Show QR code',
     'Music', // the checked pill: one tab stop for the group
     'Add profile',
     'Reset profile',
@@ -169,6 +166,11 @@ test('every tab stop on the main screen shows a focus indicator', async ({
     ...masterStops('Surround Virtualizer'),
     ...masterStops('Dialog Enhancer', true),
     ...masterStops('Volume Leveller'),
+    'LAN access',
+    'LAN URL',
+    'Copy URL',
+    'Show QR code',
+    'Remastered', // the checked Skin pill
     'Advanced',
   ])
   expect(

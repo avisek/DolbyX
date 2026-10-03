@@ -426,6 +426,12 @@ const EqCurve: Component = () => {
       <div
         class="eq-sliders"
         ref={slidersEl}
+        // The grid's data (ADR-0011): visible sliders and `genb`, so a
+        // skin partitions hover or lays columns without hardcoding either.
+        style={{
+          '--count': String(sliderCount()),
+          '--bands': String(bandCount()),
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}

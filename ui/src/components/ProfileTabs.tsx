@@ -41,34 +41,38 @@ const ProfileTabs: Component = () => {
       onPick={(id) => {
         if (id !== null) setProfile(id)
       }}
-      onAdd={() => {
-        const profile = selected()
-        if (!profile) return
-        addProfile(
-          cloneName(
-            profile.name,
-            state.profiles.map((p) => p.name),
-          ),
-          profile.params,
-          profile.selected_eq_preset,
-        )
+      actions={{
+        onAdd: () => {
+          const profile = selected()
+          if (!profile) return
+          addProfile(
+            cloneName(
+              profile.name,
+              state.profiles.map((p) => p.name),
+            ),
+            profile.params,
+            profile.selected_eq_preset,
+          )
+        },
+        renameDisabled: selected()?.is_factory ?? true,
+        onRename: () => setRenaming(true),
+        deleteDisabled: selected()?.is_factory ?? true,
+        onDelete: () => {
+          removeProfile(state.selected_profile)
+        },
+        resetDisabled: !diverges(),
+        onReset: () => {
+          resetProfile(state.selected_profile)
+        },
       }}
-      renameDisabled={selected()?.is_factory ?? true}
-      onRename={() => setRenaming(true)}
-      deleteDisabled={selected()?.is_factory ?? true}
-      onDelete={() => {
-        removeProfile(state.selected_profile)
+      rename={{
+        renaming: renaming(),
+        onRenameCommit: (name) => {
+          setRenaming(false)
+          renameProfile(state.selected_profile, name)
+        },
+        onRenameCancel: () => setRenaming(false),
       }}
-      resetDisabled={!diverges()}
-      onReset={() => {
-        resetProfile(state.selected_profile)
-      }}
-      renaming={renaming()}
-      onRenameCommit={(name) => {
-        setRenaming(false)
-        renameProfile(state.selected_profile, name)
-      }}
-      onRenameCancel={() => setRenaming(false)}
     />
   )
 }

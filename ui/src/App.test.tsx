@@ -461,3 +461,43 @@ it('swaps the skin text on a broadcast snapshot under a transition suppressor, g
   vi.advanceTimersToNextFrame()
   expect(suppressor()).toBeNull()
 })
+
+/** The Skin picker's radio, by pill text. */
+const skinRadio = (name: string) =>
+  within(screen.getByRole('radiogroup', { name: 'Skin' })).getByRole('radio', {
+    name,
+  })
+
+// Behavior 3 (#137): the Shell's fixed DOM order places the LAN Access
+// Row and the Skin picker between the Master controls and the Advanced
+// panel, each a direct child — no wrapper (ADR-0011 skin-switching
+// addendum). Tab follows: no control carries a positive `tabindex`, so
+// the walk runs Master controls → LAN switch → Skin pill → Advanced.
+it('orders Master controls → LAN Access → Skin → Advanced, in DOM and Tab order', () => {
+  render(() => <App />)
+  const regions = [...screen.getByRole('main').children]
+  expect(regions.slice(-4).map((region) => region.classList[0])).toEqual([
+    'master-controls',
+    'lan-access',
+    'picker',
+    'advanced',
+  ])
+  expect(regions.at(-2)?.classList.contains('picker--skin')).toBe(true)
+
+  const tabbables = [
+    ...document.querySelectorAll<HTMLElement>(
+      'input:not([disabled]), button:not([disabled]), [tabindex]',
+    ),
+  ]
+  expect(tabbables.filter((el) => el.tabIndex > 0)).toEqual([])
+  const at = (el: Element) => tabbables.indexOf(el as HTMLElement)
+  const master = screen.getByRole('region', { name: 'Master controls' })
+  const lastMasterStop = Math.max(
+    ...[...master.querySelectorAll('input, button')].map(at),
+  )
+  expect(at(lanToggle())).toBeGreaterThan(lastMasterStop)
+  expect(at(skinRadio('Remastered'))).toBeGreaterThan(at(lanToggle()))
+  expect(at(screen.getByRole('button', { name: 'Advanced' }))).toBeGreaterThan(
+    at(skinRadio('Classic')),
+  )
+})

@@ -10,41 +10,53 @@ export interface PickerOption {
   readonly factory: boolean
 }
 
+/** The four Picker actions on the checked item — omitted ⇒ none render. */
+export interface PickerActions {
+  readonly onAdd: () => void
+  readonly renameDisabled: boolean
+  readonly onRename: () => void
+  readonly deleteDisabled: boolean
+  readonly onDelete: () => void
+  readonly resetDisabled: boolean
+  readonly onReset: () => void
+}
+
+/** Renaming the checked item in place — omitted ⇒ no field ever mounts. */
+export interface PickerRename {
+  readonly renaming: boolean
+  readonly onRenameCommit: (name: string) => void
+  readonly onRenameCancel: () => void
+}
+
 /**
- * The shared Picker (#119, CONTEXT.md): the one item chooser behind the
- * profile and EQ preset rows. A label, a native radio group of pills
- * (the Tristate idiom — one Tab stop, Arrow keys move natively, the
- * click cancels the native check and asks the store; re-picking the
- * checked one asks nothing), then the four Picker actions — Add /
- * Rename / Delete / Reset — rendered empty and named by `aria-label`,
- * glyphs from the skin (ADR-0011 addendum 2); Rename / Delete / Reset
- * `disabled` when they mean nothing. Renaming keeps the checked pill in
- * place (`--renaming`) and mounts the field inside it beside the name —
- * the skin swaps one for the other; the label's card rule keeps a click
- * in the field from forwarding to the radio (which would steal its
- * focus and blur-commit). Options render by position (`Index`): callers
- * rebuild the array every snapshot, and identity keying would recreate
- * every radio — and drop the one holding focus. Modifiers: `--profile`
- * / `--eq` (the kind), `--diverged` (Reset means something).
+ * The shared Picker (#119, #137, CONTEXT.md): the one item chooser
+ * behind the profile, EQ preset and Skin rows. A label, a native radio
+ * group of pills (the Tristate idiom — one Tab stop, Arrow keys move
+ * natively, the click cancels the native check and asks the store;
+ * re-picking the checked one asks nothing), then — for editable items
+ * — the four Picker actions (`actions`) — Add / Rename / Delete / Reset
+ * — rendered empty and named by `aria-label`, glyphs from the skin
+ * (ADR-0011 addendum 2); Rename / Delete / Reset `disabled` when they
+ * mean nothing. Renaming (`rename`) keeps the checked pill in place
+ * (`--renaming`) and mounts the field inside it beside the name — the
+ * skin swaps one for the other; the label's card rule keeps a click in
+ * the field from forwarding to the radio (which would steal its focus
+ * and blur-commit). Either group omitted renders nothing of it. Options
+ * render by position (`Index`): callers rebuild the array every
+ * snapshot, and identity keying would recreate every radio — and drop
+ * the one holding focus. Modifiers: `--profile` / `--eq` / `--skin`
+ * (the kind), `--diverged` (Reset means something).
  */
 const Picker: Component<{
-  kind: 'profile' | 'eq'
-  /** Visible label: "Profile" | "EQ Preset". */
+  kind: 'profile' | 'eq' | 'skin'
+  /** Visible label: "Profile" | "EQ Preset" | "Skin". */
   label: string
-  /** Accessible-name qualifier: "profile" | "EQ preset". */
+  /** Accessible-name qualifier: "profile" | "EQ preset" | "skin". */
   noun: string
   options: readonly PickerOption[]
   onPick: (id: string | null) => void
-  onAdd: () => void
-  renameDisabled: boolean
-  onRename: () => void
-  deleteDisabled: boolean
-  onDelete: () => void
-  resetDisabled: boolean
-  onReset: () => void
-  renaming: boolean
-  onRenameCommit: (name: string) => void
-  onRenameCancel: () => void
+  actions?: PickerActions
+  rename?: PickerRename
 }> = (props) => {
   const radioId = (id: string | null) =>
     `picker-${props.kind}-${id === null ? 'none' : encodeURIComponent(id)}`
@@ -54,14 +66,16 @@ const Picker: Component<{
       classList={{
         'picker--profile': props.kind === 'profile',
         'picker--eq': props.kind === 'eq',
-        'picker--diverged': !props.resetDisabled,
+        'picker--skin': props.kind === 'skin',
+        'picker--diverged': props.actions?.resetDisabled === false,
       }}
     >
       <span class="picker__label">{props.label}</span>
       <div class="picker__options" role="radiogroup" aria-label={props.label}>
         <Index each={props.options}>
           {(option) => {
-            const renaming = () => props.renaming && option().checked
+            const renaming = () =>
+              props.rename?.renaming === true && option().checked
             return (
               <>
                 <input
@@ -85,14 +99,16 @@ const Picker: Component<{
                   on:click={cardRule('.picker__field')}
                 >
                   <span class="picker__name">{option().name}</span>
-                  <Show when={renaming()}>
-                    <RenameInput
-                      label={`${props.label} name`}
-                      name={option().name}
-                      class="picker__field"
-                      onCommit={props.onRenameCommit}
-                      onCancel={props.onRenameCancel}
-                    />
+                  <Show when={renaming() ? props.rename : undefined}>
+                    {(rename) => (
+                      <RenameInput
+                        label={`${props.label} name`}
+                        name={option().name}
+                        class="picker__field"
+                        onCommit={rename().onRenameCommit}
+                        onCancel={rename().onRenameCancel}
+                      />
+                    )}
                   </Show>
                 </label>
               </>
@@ -100,47 +116,51 @@ const Picker: Component<{
           }}
         </Index>
       </div>
-      <div class="picker__actions">
-        <button
-          type="button"
-          class="picker__action picker__add"
-          aria-label={`Add ${props.noun}`}
-          title={`Add ${props.noun}`}
-          onClick={() => {
-            props.onAdd()
-          }}
-        />
-        <button
-          type="button"
-          class="picker__action picker__rename"
-          aria-label={`Rename ${props.noun}`}
-          title={`Rename ${props.noun}`}
-          disabled={props.renameDisabled}
-          onClick={() => {
-            props.onRename()
-          }}
-        />
-        <button
-          type="button"
-          class="picker__action picker__delete"
-          aria-label={`Delete ${props.noun}`}
-          title={`Delete ${props.noun}`}
-          disabled={props.deleteDisabled}
-          onClick={() => {
-            props.onDelete()
-          }}
-        />
-        <button
-          type="button"
-          class="picker__action picker__reset"
-          aria-label={`Reset ${props.noun}`}
-          title={`Reset ${props.noun}`}
-          disabled={props.resetDisabled}
-          onClick={() => {
-            props.onReset()
-          }}
-        />
-      </div>
+      <Show when={props.actions}>
+        {(actions) => (
+          <div class="picker__actions">
+            <button
+              type="button"
+              class="picker__action picker__add"
+              aria-label={`Add ${props.noun}`}
+              title={`Add ${props.noun}`}
+              onClick={() => {
+                actions().onAdd()
+              }}
+            />
+            <button
+              type="button"
+              class="picker__action picker__rename"
+              aria-label={`Rename ${props.noun}`}
+              title={`Rename ${props.noun}`}
+              disabled={actions().renameDisabled}
+              onClick={() => {
+                actions().onRename()
+              }}
+            />
+            <button
+              type="button"
+              class="picker__action picker__delete"
+              aria-label={`Delete ${props.noun}`}
+              title={`Delete ${props.noun}`}
+              disabled={actions().deleteDisabled}
+              onClick={() => {
+                actions().onDelete()
+              }}
+            />
+            <button
+              type="button"
+              class="picker__action picker__reset"
+              aria-label={`Reset ${props.noun}`}
+              title={`Reset ${props.noun}`}
+              disabled={actions().resetDisabled}
+              onClick={() => {
+                actions().onReset()
+              }}
+            />
+          </div>
+        )}
+      </Show>
     </div>
   )
 }

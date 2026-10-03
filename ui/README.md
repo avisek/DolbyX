@@ -92,7 +92,7 @@ default. The daemon never validates the id.
 masks and step values are its own — nothing outside the skin reads one;
 no shared token table exists. Only the skeleton is contract: classes,
 modifiers, and the published data vars (`--value`, `--norm`, `--count`,
-`--exc`, `--gain`, …).
+`--bands`, `--exc`, `--gain`, …).
 
 **Assets** live in the skin's directory, referenced by relative `url()`
 (`url('./icons/plus.svg')`, `url('./Inter.woff2')`); the build inlines

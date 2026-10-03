@@ -289,6 +289,30 @@ it('re-renders sliders, vertices, and the visible cap on a genb change', () => {
   ])
 })
 
+/** The counts `.eq-sliders` publishes — the skin's grid data (#137). */
+const publishedCounts = () => {
+  const style = document.querySelector<HTMLElement>('.eq-sliders')?.style
+  return {
+    count: style?.getPropertyValue('--count'),
+    bands: style?.getPropertyValue('--bands'),
+  }
+}
+
+// Behavior 4 (#137): `.eq-sliders` publishes `--count` (the visible EQ
+// slider count) and `--bands` (`genb`) so no skin hardcodes the grid
+// (ADR-0011 skin-switching addendum) — both re-derive on a change: the
+// pref caps at `genb`, so `genb` 3 moves both.
+it('publishes --count and --bands on .eq-sliders, following genb', () => {
+  renderConnected()
+  expect(publishedCounts()).toEqual({ count: '5', bands: '20' })
+
+  applySnapshot(fixtureStateWithParams({ genb: [10] }))
+  expect(publishedCounts()).toEqual({ count: '5', bands: '10' })
+
+  applySnapshot(fixtureStateWithParams({ genb: [3] }))
+  expect(publishedCounts()).toEqual({ count: '3', bands: '3' })
+})
+
 // — Part C: the editor's hand. The pointer surface is the field (the
 // editor layer): down/move resolve x → the nearest visible Slider
 // (splat center = round of its fractional index), y → dB via the
