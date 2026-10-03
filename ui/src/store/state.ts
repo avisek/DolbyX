@@ -79,6 +79,11 @@ export function applyLanAccess(on: boolean): void {
   setState('lan_access', on)
 }
 
+/** Applies the originator's own acked skin choice (local-first). */
+export function applySkinChoice(id: string): void {
+  setState('skin', id)
+}
+
 /** Applies the originator's own acked profile switch (local-first). */
 export function applyProfile(id: string): void {
   setState('selected_profile', id)

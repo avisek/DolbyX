@@ -6,6 +6,7 @@ import {
   within,
 } from '@solidjs/testing-library'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { findSkin } from './skins'
 import { MockWebSocket } from './test/mock-ws'
 import { FIXTURE_LAN_URL, fixtureBootstrap, fixtureState } from './test/fixture'
 
@@ -15,13 +16,17 @@ window.__BOOTSTRAP__ = fixtureBootstrap()
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 const { default: App } = await import('./App')
-const { applySnapshot } = await import('./store/state')
-const { startWs, stopWs } = await import('./store/ws')
+const { applySnapshot, state } = await import('./store/state')
+const { setSkin, startWs, stopWs } = await import('./store/ws')
 
 beforeEach(() => {
   MockWebSocket.reset()
   // The store module is a singleton — re-seed it between tests.
   applySnapshot(fixtureState())
+  // The skin <style> (and a swap's suppressor, pending a real rAF)
+  // outlive an unmount — every test starts before the first paint.
+  document.getElementById('skin')?.remove()
+  document.getElementById('skin-swap')?.remove()
 })
 
 afterEach(() => {
@@ -199,10 +204,12 @@ it('updates the LAN toggle on a broadcast state event', () => {
   expect(lanToggle().checked).toBe(true)
 })
 
-const lanUrlField = () =>
-  screen.queryByRole<HTMLInputElement>('textbox', { name: 'LAN URL' })
-const copyButton = () => screen.queryByRole('button', { name: 'Copy URL' })
-const qrButton = () => screen.queryByRole('button', { name: 'Show QR code' })
+// By label, not role: the Shell paints the skin, and the skin folds the
+// tools out of the accessibility tree while off (a hidden node has no
+// accessible name) — what these tests pin is the mount, not the fold.
+const lanUrlField = () => screen.queryByLabelText<HTMLInputElement>('LAN URL')
+const copyButton = () => screen.queryByLabelText('Copy URL')
+const qrButton = () => screen.queryByLabelText('Show QR code')
 /** Whether the Row publishes `--on` — the skin folds the tools by it. */
 const lanOn = () => lanRow().classList.contains('lan-access--on')
 
@@ -368,4 +375,91 @@ it('updates the checked profile on a broadcast state event', () => {
   })
   expect(isSelected('Game')).toBe(true)
   expect(isSelected('Music')).toBe(false)
+})
+
+/** The active skin's text — what `<style id="skin">` holds. */
+const skinText = () => document.getElementById('skin')?.textContent
+
+/** The `set_skin` frames the client sent. */
+const sentSetSkin = (socket: MockWebSocket) =>
+  socket.sentCommands().filter((frame) => frame.cmd === 'set_skin')
+
+// Behaviour 5 (#136): `setSkin` → `set_skin` on the wire; the choice
+// lands local-first on the daemon's ack (the broadcast goes to *other*
+// clients — ADR-0005), and the Shell's effect swaps the `<style>` text.
+it('sends set_skin and swaps the skin text on the ack', async () => {
+  const socket = renderConnected()
+  expect(skinText()).toBe(findSkin('remastered').css)
+
+  setSkin('classic')
+  const sent = sentSetSkin(socket)
+  expect(sent).toEqual([
+    {
+      cmd: 'set_skin',
+      request_id: expect.any(String) as string,
+      id: 'classic',
+    },
+  ])
+
+  // Not yet acked — still daemon truth.
+  expect(state.skin).toBe('remastered')
+  expect(skinText()).toBe(findSkin('remastered').css)
+
+  socket.serverMessage({ type: 'ack', request_id: sent[0]?.request_id })
+  await waitFor(() => {
+    expect(state.skin).toBe('classic')
+  })
+  expect(skinText()).toBe(findSkin('classic').css)
+})
+
+// Behaviour 5 (#136): a refused `set_skin` never moves the choice — the
+// error-path reconcile restores daemon truth; the text stays put.
+it('leaves the skin text unchanged when set_skin errors', async () => {
+  const socket = renderConnected()
+
+  setSkin('classic')
+  socket.serverMessage({
+    type: 'error',
+    request_id: sentSetSkin(socket)[0]?.request_id,
+    code: 'INVALID_REQUEST',
+    message: 'bad',
+  })
+  await waitFor(() => {
+    expect(
+      socket.sentCommands().filter((frame) => frame.cmd === 'get_state'),
+    ).toHaveLength(2)
+  })
+  expect(state.skin).toBe('remastered')
+  expect(skinText()).toBe(findSkin('remastered').css)
+})
+
+/** The swap's transition suppressor — present only during a swap. */
+const suppressor = () => document.getElementById('skin-swap')
+
+// Behaviour 4 (#136): a broadcast snapshot naming another skin swaps the
+// `<style id="skin">` text; the swap is a hard cut — a suppressor
+// `<style>` kills every transition for the frame the new sheet lands
+// and leaves after a double rAF (ADR-0013). The first paint needs none.
+it('swaps the skin text on a broadcast snapshot, transitions suppressed for two frames', () => {
+  vi.useFakeTimers({
+    toFake: ['requestAnimationFrame', 'cancelAnimationFrame'],
+  })
+  const socket = renderConnected()
+  expect(skinText()).toBe(findSkin('remastered').css)
+  expect(suppressor()).toBeNull()
+
+  socket.serverMessage({
+    type: 'state',
+    snapshot: fixtureState({ skin: 'classic' }),
+  })
+  expect(skinText()).toBe(findSkin('classic').css)
+  expect(suppressor()?.textContent).toBe(
+    '*,::before,::after{transition:none!important}',
+  )
+
+  vi.advanceTimersToNextFrame()
+  expect(suppressor()).not.toBeNull()
+  vi.advanceTimersToNextFrame()
+  expect(suppressor()).toBeNull()
+  vi.useRealTimers()
 })

@@ -15,6 +15,7 @@ import {
   applyProfileAdded,
   applyProfileEdit,
   applyProfileRename,
+  applySkinChoice,
   applySnapshot,
 } from './state'
 import { applyVisFrame } from './vis'
@@ -118,6 +119,24 @@ export function setLanAccess(on: boolean): void {
     })
     .catch(() => {
       // Rejected or errored — the reconcile restores daemon truth.
+    })
+}
+
+/**
+ * Local-first `set_skin`, exactly `set_lan_access`'s shape (ADR-0013):
+ * applied on the daemon's ack — originator suppression means this tab
+ * never sees its own snapshot, so the choice must land here; the
+ * Shell's effect on `state.skin` then swaps the `<style>` text.
+ */
+export function setSkin(id: string): void {
+  void client
+    ?.request({ cmd: 'set_skin', id })
+    .then(() => {
+      applySkinChoice(id)
+    })
+    .catch(() => {
+      // Rejected or errored — the reconcile restores daemon truth; the
+      // skin simply never moved.
     })
 }
 
