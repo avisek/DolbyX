@@ -35,7 +35,6 @@ fn scalar(profile: &Profile, name: &str) -> i16 {
 fn ships_the_four_factory_profiles() {
     let defaults = defaults();
     assert!(defaults.power);
-    assert_eq!(defaults.skin, "remastered", "issue #135: the shipped skin");
     assert_eq!(defaults.selected_profile.0, "music");
     let names: Vec<(&str, &str)> = defaults
         .profiles
@@ -60,6 +59,12 @@ fn ships_the_four_factory_profiles() {
         "behavior 7 (issue #23): the factory EQ selection ships None — the \
          original ships ieon = 0 on every profile"
     );
+}
+
+/// Issue #135 (ADR-0013): the shipped skin is Remastered.
+#[test]
+fn ships_remastered_as_the_default_skin() {
+    assert_eq!(defaults().skin, "remastered");
 }
 
 /// Behavior 1 (issue #23): the three factory EQ presets ship the XML's

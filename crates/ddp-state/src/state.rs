@@ -1224,7 +1224,7 @@ mod tests {
     /// no engine batch, no power; the id is opaque, so even the empty
     /// string lands.
     #[test]
-    fn set_skin_flips_the_scalar_and_reports_the_change() {
+    fn set_skin_moves_the_scalar_and_reports_the_change() {
         let mut state = State::new_from_defaults(&defaults());
         assert_eq!(state.skin, "remastered", "shipped default");
         let diff = state

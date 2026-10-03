@@ -465,10 +465,9 @@ pub fn resolve(defaults: &Defaults, overlay: &ConfigOverlay) -> State {
     let mut state = State::new_from_defaults(defaults);
     state.power = overlay.power.unwrap_or(defaults.power);
     state.lan_access = overlay.lan_access.unwrap_or(defaults.lan_access);
-    state.skin = overlay
-        .skin
-        .clone()
-        .unwrap_or_else(|| defaults.skin.clone());
+    if let Some(skin) = &overlay.skin {
+        state.skin.clone_from(skin);
+    }
     if let Some(selected) = &overlay.selected_profile {
         state.selected_profile = selected.clone();
     }

@@ -235,61 +235,53 @@ pub async fn connected(addr: SocketAddr) -> WsClient {
 /// blocks' frames, may interleave.
 pub async fn set_power(ws: &mut WsClient, on: bool) {
     let request_id = format!("rq-set-power-{on}");
-    send_json(
+    send_and_await_ack(
         ws,
-        &serde_json::json!({ "cmd": "set_power", "request_id": request_id, "on": on }),
+        &request_id,
+        serde_json::json!({ "cmd": "set_power", "request_id": request_id, "on": on }),
     )
     .await;
-    loop {
-        let frame = recv_json(ws).await;
-        if frame["type"] == "state" || frame["type"] == "vis" {
-            continue;
-        }
-        assert_eq!(frame["type"], "ack", "set_power must ack, got {frame}");
-        assert_eq!(frame["request_id"], request_id.as_str());
-        return;
-    }
 }
 
 /// Issues a `set_skin` and awaits its `ack` promise-style, as
-/// [`set_power`].
+/// [`set_power`]. The id is opaque (empty or kilobytes long), so it
+/// never rides in the request id.
 pub async fn set_skin(ws: &mut WsClient, id: &str) {
-    let request_id = format!("rq-set-skin-{}", id.len());
-    send_json(
+    send_and_await_ack(
         ws,
-        &serde_json::json!({ "cmd": "set_skin", "request_id": request_id, "id": id }),
+        "rq-set-skin",
+        serde_json::json!({ "cmd": "set_skin", "request_id": "rq-set-skin", "id": id }),
     )
     .await;
-    loop {
-        let frame = recv_json(ws).await;
-        if frame["type"] == "state" || frame["type"] == "vis" {
-            continue;
-        }
-        assert_eq!(frame["type"], "ack", "set_skin must ack, got {frame}");
-        assert_eq!(frame["request_id"], request_id.as_str());
-        return;
-    }
 }
 
 /// Issues an `edit_profile` patching one param and awaits its `ack`
 /// promise-style, as [`set_power`].
 pub async fn edit_param(ws: &mut WsClient, id: &str, param: &str, values: &[i16]) {
     let request_id = format!("rq-edit-{id}-{param}");
-    send_json(
+    send_and_await_ack(
         ws,
-        &serde_json::json!({
+        &request_id,
+        serde_json::json!({
             "cmd": "edit_profile", "request_id": request_id,
             "id": id, "params": { param: values },
         }),
     )
     .await;
+}
+
+/// Sends one command frame and awaits its `ack` echoing `request_id`,
+/// skipping the pub/sub `state` / `vis` events that may interleave.
+async fn send_and_await_ack(ws: &mut WsClient, request_id: &str, frame: serde_json::Value) {
+    let cmd = frame["cmd"].as_str().expect("a command frame").to_owned();
+    send_json(ws, &frame).await;
     loop {
-        let frame = recv_json(ws).await;
-        if frame["type"] == "state" || frame["type"] == "vis" {
+        let reply = recv_json(ws).await;
+        if reply["type"] == "state" || reply["type"] == "vis" {
             continue;
         }
-        assert_eq!(frame["type"], "ack", "edit_profile must ack, got {frame}");
-        assert_eq!(frame["request_id"], request_id.as_str());
+        assert_eq!(reply["type"], "ack", "{cmd} must ack, got {reply}");
+        assert_eq!(reply["request_id"], request_id);
         return;
     }
 }

@@ -256,8 +256,7 @@ async fn set_power_with_zero_sessions_makes_no_engine_call() {
 
 /// Issue #135 (ADR-0013): `set_skin` is root-scalar grammar like
 /// `set_power` — the originator hears exactly its `ack`, every other
-/// connection one `state` carrying the new `skin`; a frame without
-/// `id` fails serde and settles as `INVALID_REQUEST`.
+/// connection exactly one `state` carrying the new `skin`.
 #[tokio::test]
 async fn set_skin_acks_the_originator_and_broadcasts_to_the_others() {
     let daemon = start_daemon().await;
@@ -277,17 +276,30 @@ async fn set_skin_acks_the_originator_and_broadcasts_to_the_others() {
     );
     assert_eq!(recv_state(&mut other).await["snapshot"]["skin"], "classic");
     assert_eq!(
+        try_recv_json(&mut other, 300).await,
+        None,
+        "one broadcast per mutation"
+    );
+    assert_eq!(
         try_recv_json(&mut originator, 300).await,
         None,
         "the originator is excluded from the state broadcast (ADR-0005)"
     );
+}
+
+/// Issue #135: a `set_skin` without `id` fails serde and settles
+/// promise-style as `INVALID_REQUEST` — the only way the command fails.
+#[tokio::test]
+async fn set_skin_without_an_id_is_invalid_request() {
+    let daemon = start_daemon().await;
+    let mut ws = connected(daemon.addr()).await;
 
     send_json(
-        &mut originator,
+        &mut ws,
         &json!({ "cmd": "set_skin", "request_id": "rq-bare" }),
     )
     .await;
-    let reply = recv_json(&mut originator).await;
+    let reply = recv_json(&mut ws).await;
     assert_eq!(reply["code"], "INVALID_REQUEST");
     assert_eq!(reply["request_id"], "rq-bare");
 }
