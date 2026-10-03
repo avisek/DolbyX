@@ -13,7 +13,7 @@ export default defineConfig({
   // Unit tests only — e2e/*.spec.ts belongs to Playwright (`just e2e`).
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'vite.config.test.ts'],
     // Vitest blanks every CSS module, `?raw` and `?inline` included: the
     // audits read skin sheets as text, the Skin registry bundles entry
     // points as text.

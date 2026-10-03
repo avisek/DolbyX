@@ -114,6 +114,14 @@ export type Command =
       readonly cmd: 'set_lan_access'
       readonly on: boolean
     }
+  | {
+      /**
+       * Choose the skin (ADR-0013) — root-scalar grammar like
+       * `set_power`; the id is opaque to the daemon, never validated.
+       */
+      readonly cmd: 'set_skin'
+      readonly id: string
+    }
   | { readonly cmd: 'set_profile'; readonly id: string }
   | {
       /**
