@@ -1,5 +1,5 @@
-/* Classic skin tokens (ADR-0011): the skin's vocabulary — names are the
-   contract, values are Classic's. Components never read one; a second
+/* Remastered skin tokens (ADR-0011): the skin's vocabulary — names are the
+   contract, values are Remastered's. Components never read one; a second
    skin redefines them. */
 :root {
   /* Colour scheme (ADR-0011, switching addendum): mandatory — the

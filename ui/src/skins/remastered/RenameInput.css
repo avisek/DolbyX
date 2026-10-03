@@ -1,0 +1,9 @@
+/* The inline rename field (#26): the shared inline field (Field.css)
+   sized to its text. Its host (the Picker's pill) restyles only what
+   makes it the host's: padding, rounding, alignment. */
+
+.rename-input {
+  min-inline-size: 3ch;
+  padding: 0 var(--space-2);
+  field-sizing: content;
+}

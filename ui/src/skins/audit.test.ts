@@ -1,11 +1,14 @@
 /**
- * Slice 13 (#116): the Shell is fluid without viewport units (ADR-0011,
- * second addendum) — every skin stylesheet is audited as text. Comments
- * are stripped first: prose may name a unit, code may not. Structural
- * only: a skin's colours, lengths and layout are its own (switching
- * addendum).
+ * Structural audits over every skin stylesheet as text (ADR-0011,
+ * switching addendum): no viewport unit (#116), `color-scheme` declared,
+ * the default skin pinned to `defaults.toml` (#136). Comments are
+ * stripped first: prose may name a unit, code may not. A skin's colours,
+ * lengths and layout are its own — never audited.
  */
+import { parse } from 'smol-toml'
 import { describe, expect, it } from 'vitest'
+import defaultsToml from '../../../crates/ddp-daemon/defaults.toml?raw'
+import { defaultSkin } from './index'
 
 const sheets = import.meta.glob<string>('./**/*.css', {
   query: '?raw',
@@ -39,5 +42,31 @@ describe('the skin tree', () => {
     expect(
       offenders(/\d(vw|vh|svw|svh|lvw|lvh|dvw|dvh|vmin|vmax|vi|vb)\b/),
     ).toEqual([])
+  })
+})
+
+// #136: every skin declares its Colour scheme on `:root` — mandatory,
+// not stylistic: the build lowers `light-dark()` only where the sheet
+// declares a scheme (ADR-0011, switching addendum).
+describe('each skin', () => {
+  /** `./<dir>/…` → `<dir>`. */
+  const skinOf = (path: string) => path.split('/')[1] ?? ''
+  const dirs = [...new Set(Object.keys(sheets).map(skinOf))].sort()
+
+  it.each(dirs)('%s declares color-scheme on :root', (dir) => {
+    const css = Object.entries(sheets)
+      .filter(([path]) => skinOf(path) === dir)
+      .map(([, text]) => stripComments(text))
+      .join('\n')
+    expect(css).toMatch(/:root\s*\{[^}]*\bcolor-scheme\s*:/)
+  })
+})
+
+// The default skin has one source: the daemon's `defaults.toml` ships
+// the id, and the registry's first row must be it (ADR-0013).
+describe('the default skin', () => {
+  it('is the id defaults.toml ships', () => {
+    const { skin } = parse(defaultsToml) as { skin: string }
+    expect(defaultSkin.id).toBe(skin)
   })
 })

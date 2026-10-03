@@ -14,8 +14,9 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.{ts,tsx}'],
-    // Vitest blanks every CSS module, `?raw` included; src/skin.test.ts
-    // reads the skin's token file as text.
-    css: { include: [/\.css\?raw$/] },
+    // Vitest blanks every CSS module, `?raw` and `?inline` included: the
+    // audits read skin sheets as text, the Skin registry bundles entry
+    // points as text.
+    css: { include: [/\.css\?(raw|inline)$/] },
   },
 })

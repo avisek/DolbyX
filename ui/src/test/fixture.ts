@@ -165,6 +165,7 @@ export function fixtureState(
     power: true,
     lan_access: false,
     lan_url: FIXTURE_LAN_URL,
+    skin: 'remastered',
     selected_profile: 'music',
     profiles: [
       factoryProfile('movie', 'Movie', {

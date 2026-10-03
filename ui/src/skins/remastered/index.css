@@ -1,0 +1,24 @@
+/* Remastered skin entry point (ADR-0011): the one stylesheet the Skin
+   registry bundles for this skin (ADR-0013). Tokens, base, then one BEM
+   file per component (the order the TSX imports once produced). */
+@import './theme.css';
+@import './base.css';
+@import './Field.css';
+@import './ConnectionBadge.css';
+@import './RenameInput.css';
+@import './Picker.css';
+@import './LanToggle.css';
+@import './MasterControls.css';
+@import './AdvancedPanel.css';
+@import './CategorySection.css';
+@import './ParamCard.css';
+@import './ResetMarker.css';
+@import './Toggle.css';
+@import './Tristate.css';
+@import './NumberInput.css';
+@import './Slider.css';
+@import './BandArray.css';
+@import './PowerToggle.css';
+@import './EqCurve.css';
+@import './Visualizer.css';
+@import './App.css';

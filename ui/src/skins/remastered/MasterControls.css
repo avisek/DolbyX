@@ -1,0 +1,88 @@
+/* The Master controls (#93): one surface card, three Rows on shared
+   tracks — title | marker | switch | box | slider — the panel's subgrid
+   idiom, beside the visualizer when the Shell has two tracks. Below the
+   one-line width each Row is its own two-line grid: title · marker ·
+   switch, then the amount region (box + slider) stretched to the Row's
+   edge. Hover chrome on the switch, box and thumb is the widgets' own
+   `label:hover` rule. The Reset marker's morph lives in ResetMarker.css. */
+
+.master-controls {
+  display: grid;
+  grid-template-columns: auto var(--reset-w) auto auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  container-type: inline-size;
+}
+
+.master-control {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: default;
+  transition: background var(--hover-ms) ease;
+}
+
+/* Hover under focus weight: a Row holding focus always wins. */
+.master-control:where(:hover) {
+  background: var(--hover-bg);
+}
+
+.master-control:has(:focus-visible) {
+  background: var(--focus-tint);
+}
+
+.master-control__label {
+  min-width: 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  user-select: none;
+}
+
+/* The Reset marker's slot. */
+.master-control__reset {
+  width: var(--reset-w);
+  height: var(--reset-w);
+  padding: 0;
+  background: none;
+}
+
+/* Wide: the amount region carries no state and clips nothing, so its
+   members lay out on the Row's own tracks — the one wrapper #93 allows
+   `contents` on (ADR-0011 otherwise forbids it). */
+.master-control__control {
+  display: contents;
+}
+
+/* Below the one-line width (a literal: size queries take no tokens):
+   each Row is its own grid — line 1 title · marker · switch, line 2
+   the amount region as a flex line the slider fills to the right
+   edge. */
+@container (inline-size < 28rem) {
+  .master-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* No subgrid to inherit the tracks' gutter from: the Row's own. */
+  .master-control {
+    grid-template-columns: minmax(0, 1fr) var(--reset-w) auto;
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .master-control__control {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .master-control__control .adv-slider {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
