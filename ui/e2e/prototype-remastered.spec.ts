@@ -128,7 +128,7 @@ for (const variant of VARIANTS) {
           .evaluate((el) => getComputedStyle(el).scale)
       if (variant === 'a') {
         expect(await thumbScale(1)).toBe('1.3')
-        expect(await thumbScale(2)).toBe('1')
+        expect(await thumbScale(2)).toBe('none')
       }
       await shoot(
         page,
