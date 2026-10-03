@@ -155,6 +155,9 @@ async fn dispatch(app: &Arc<App>, conn_id: ConnId, text: &str) -> Vec<String> {
         WsCommand::SetLanAccess { request_id, on } => {
             set_lan_access(app, conn_id, &request_id, on).await
         }
+        WsCommand::SetSkin { request_id, id } => {
+            mutate(app, conn_id, &request_id, Command::SetSkin { id }).await
+        }
         WsCommand::SetProfile { request_id, id } => {
             mutate(app, conn_id, &request_id, Command::SetProfile { id }).await
         }

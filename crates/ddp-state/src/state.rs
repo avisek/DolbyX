@@ -21,6 +21,8 @@ pub struct Defaults {
     /// Factory LAN access — shipped `false`: a fresh install is
     /// this-PC-only (ADR-0012).
     pub lan_access: bool,
+    /// Factory skin id — shipped `"remastered"` (ADR-0013). Opaque.
+    pub skin: String,
     /// Factory selected profile.
     pub selected_profile: ProfileId,
     /// Factory profiles in declaration order, `content` fully resolved
@@ -49,6 +51,10 @@ pub struct State {
     /// daemon (ADR-0012). Pure state here: the daemon owns the
     /// listener rebind the flip drives.
     pub lan_access: bool,
+    /// The chosen skin's id (ADR-0013) — an opaque string the daemon
+    /// never validates: the Skin registry lives in the UI, and an id
+    /// it doesn't ship paints the default there. Empty is legal.
+    pub skin: String,
     /// The one active profile, applied to all sessions. Invariant: it
     /// always names an entry of `profiles`.
     pub selected_profile: ProfileId,
@@ -80,6 +86,7 @@ impl State {
         Self {
             power: defaults.power,
             lan_access: defaults.lan_access,
+            skin: defaults.skin.clone(),
             selected_profile: defaults.selected_profile.clone(),
             profiles: defaults.profiles.clone(),
             eq_presets: defaults.eq_presets.clone(),
@@ -206,6 +213,14 @@ impl State {
             Command::SetLanAccess { on } => {
                 let changed = self.lan_access != on;
                 self.lan_access = on;
+                Ok(StateDiff {
+                    changed,
+                    ..StateDiff::default()
+                })
+            }
+            Command::SetSkin { id } => {
+                let changed = self.skin != id;
+                self.skin = id;
                 Ok(StateDiff {
                     changed,
                     ..StateDiff::default()
@@ -675,6 +690,12 @@ pub enum Command {
         /// The requested LAN access state.
         on: bool,
     },
+    /// Chooses the skin (ADR-0013) — the scalar moves, nothing else:
+    /// no engine batch, no validation (the id is opaque here).
+    SetSkin {
+        /// The skin id, as the UI's Skin registry names it.
+        id: String,
+    },
     /// Selects the active profile (global — all sessions follow).
     SetProfile {
         /// The profile to select.
@@ -1102,6 +1123,7 @@ mod tests {
         Defaults {
             power: true,
             lan_access: false,
+            skin: "remastered".into(),
             selected_profile: ProfileId("music".into()),
             profiles: vec![profile("movie", "Movie", &table), music],
             eq_presets: vec![
@@ -1195,6 +1217,48 @@ mod tests {
             .apply(Command::SetLanAccess { on: false }, &defs())
             .unwrap();
         assert!(!state.lan_access);
+        assert!(diff.is_empty());
+    }
+
+    /// Issue #135: `set_skin` moves the root scalar and nothing else —
+    /// no engine batch, no power; the id is opaque, so even the empty
+    /// string lands.
+    #[test]
+    fn set_skin_moves_the_scalar_and_reports_the_change() {
+        let mut state = State::new_from_defaults(&defaults());
+        assert_eq!(state.skin, "remastered", "shipped default");
+        let diff = state
+            .apply(
+                Command::SetSkin {
+                    id: "classic".into(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        assert_eq!(state.skin, "classic");
+        assert!(!diff.is_empty());
+        assert_eq!(diff.power, None, "the engine hears nothing");
+        assert_eq!(diff.params, None);
+
+        let diff = state
+            .apply(Command::SetSkin { id: String::new() }, &defs())
+            .unwrap();
+        assert_eq!(state.skin, "", "empty is a legal opaque value");
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn set_skin_to_the_current_value_is_a_no_op() {
+        let mut state = State::new_from_defaults(&defaults());
+        let diff = state
+            .apply(
+                Command::SetSkin {
+                    id: "remastered".into(),
+                },
+                &defs(),
+            )
+            .unwrap();
+        assert_eq!(state.skin, "remastered");
         assert!(diff.is_empty());
     }
 

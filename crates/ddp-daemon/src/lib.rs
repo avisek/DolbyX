@@ -282,6 +282,7 @@ impl App {
         serde_json::json!({
             "power": state.power,
             "lan_access": state.lan_access,
+            "skin": state.skin,
             "lan_url": http_server::lan_url(self.port),
             "selected_profile": state.selected_profile,
             "profiles": profiles,

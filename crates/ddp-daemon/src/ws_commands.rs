@@ -35,6 +35,14 @@ pub(crate) enum WsCommand {
         /// The requested LAN access state.
         on: bool,
     },
+    /// Choose the skin (issue #135, ADR-0013) — root-scalar grammar
+    /// like `set_power`; the id is opaque, never validated.
+    SetSkin {
+        /// Correlation id echoed on the reply.
+        request_id: String,
+        /// The skin id, as the UI's Skin registry names it.
+        id: String,
+    },
     /// Select the active profile.
     SetProfile {
         /// Correlation id echoed on the reply.

@@ -61,6 +61,12 @@ fn ships_the_four_factory_profiles() {
     );
 }
 
+/// Issue #135 (ADR-0013): the shipped skin is Remastered.
+#[test]
+fn ships_remastered_as_the_default_skin() {
+    assert_eq!(defaults().skin, "remastered");
+}
+
 /// Behavior 1 (issue #23): the three factory EQ presets ship the XML's
 /// IEQ target curves, each resolving standalone — the `[eq_preset]`
 /// shared band structure completes the full nine preset-carried params.

@@ -108,10 +108,10 @@ async fn own_flushes_never_echo_back_as_reloads() {
     );
 }
 
-/// Root keys (`power`, `selected_profile`) apply like any mutation:
-/// one hand-edit flips power on the live session and lands the
-/// switched profile's batch — engine first, broadcast after, so both
-/// asserts run unpolled.
+/// Root keys (`power`, `skin`, `selected_profile`) apply like any
+/// mutation: one hand-edit flips power on the live session, fans out
+/// the skin, and lands the switched profile's batch — engine first,
+/// broadcast after, so both asserts run unpolled.
 #[tokio::test]
 async fn root_key_edits_apply_like_mutations() {
     let daemon = start_daemon().await;
@@ -123,11 +123,18 @@ async fn root_key_edits_apply_like_mutations() {
     let config = daemon.dir.path().join("data").join("config.toml");
     let mut ws = connected(daemon.addr()).await;
 
-    std::fs::write(&config, "power = false\nselected_profile = \"movie\"\n")
-        .expect("hand-edit lands");
+    std::fs::write(
+        &config,
+        "power = false\nskin = \"classic\"\nselected_profile = \"movie\"\n",
+    )
+    .expect("hand-edit lands");
 
     let snapshot = recv_state(&mut ws).await;
     assert_eq!(snapshot["snapshot"]["power"], false);
+    assert_eq!(
+        snapshot["snapshot"]["skin"], "classic",
+        "issue #135: a hand-edited skin fans out like any mutation"
+    );
     assert_eq!(snapshot["snapshot"]["selected_profile"], "movie");
     assert!(
         daemon

@@ -7,7 +7,8 @@
 mod common;
 
 use common::{
-    connected, recv_json, send_json, send_text, set_power, start_daemon, try_recv_json, ws_connect,
+    assert_config_becomes, connected, recv_json, recv_state, send_json, send_text, set_power,
+    set_skin, start_daemon, try_recv_json, ws_connect,
 };
 use ddp_engine::Call;
 use serde_json::json;
@@ -251,4 +252,74 @@ async fn set_power_with_zero_sessions_makes_no_engine_call() {
         daemon.stub.calls().is_empty(),
         "state-only: no engine call with zero sessions"
     );
+}
+
+/// Issue #135 (ADR-0013): `set_skin` is root-scalar grammar like
+/// `set_power` — the originator hears exactly its `ack`, every other
+/// connection exactly one `state` carrying the new `skin`.
+#[tokio::test]
+async fn set_skin_acks_the_originator_and_broadcasts_to_the_others() {
+    let daemon = start_daemon().await;
+    let mut originator = connected(daemon.addr()).await;
+    let mut other = connected(daemon.addr()).await;
+
+    send_json(
+        &mut originator,
+        &json!({ "cmd": "set_skin", "request_id": "rq-skin", "id": "classic" }),
+    )
+    .await;
+    let reply = recv_json(&mut originator).await;
+    assert_eq!(
+        (reply["type"].as_str(), reply["request_id"].as_str()),
+        (Some("ack"), Some("rq-skin")),
+        "the ack is the originator's only feedback: {reply}"
+    );
+    assert_eq!(recv_state(&mut other).await["snapshot"]["skin"], "classic");
+    assert_eq!(
+        try_recv_json(&mut other, 300).await,
+        None,
+        "one broadcast per mutation"
+    );
+    assert_eq!(
+        try_recv_json(&mut originator, 300).await,
+        None,
+        "the originator is excluded from the state broadcast (ADR-0005)"
+    );
+}
+
+/// Issue #135: a `set_skin` without `id` fails serde and settles
+/// promise-style as `INVALID_REQUEST` — the only way the command fails.
+#[tokio::test]
+async fn set_skin_without_an_id_is_invalid_request() {
+    let daemon = start_daemon().await;
+    let mut ws = connected(daemon.addr()).await;
+
+    send_json(
+        &mut ws,
+        &json!({ "cmd": "set_skin", "request_id": "rq-bare" }),
+    )
+    .await;
+    let reply = recv_json(&mut ws).await;
+    assert_eq!(reply["code"], "INVALID_REQUEST");
+    assert_eq!(reply["request_id"], "rq-bare");
+}
+
+/// Issue #135 (ADR-0013): the id is opaque — no validation, no length
+/// cap, no charset. The empty string and a 1 KB id both ack and land
+/// in `config.toml` verbatim.
+#[tokio::test]
+async fn set_skin_never_validates_the_id() {
+    let daemon = start_daemon().await;
+    let config = daemon.dir.path().join("data").join("config.toml");
+    let mut ws = connected(daemon.addr()).await;
+
+    set_skin(&mut ws, "").await;
+    assert_config_becomes(&config, "skin = \"\"\n").await;
+
+    let long = "x".repeat(1024);
+    set_skin(&mut ws, &long).await;
+    assert_config_becomes(&config, &format!("skin = \"{long}\"\n")).await;
+
+    send_json(&mut ws, &json!({ "cmd": "get_state", "request_id": "r1" })).await;
+    assert_eq!(recv_json(&mut ws).await["snapshot"]["skin"], long);
 }

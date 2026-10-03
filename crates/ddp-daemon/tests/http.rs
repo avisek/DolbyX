@@ -64,6 +64,8 @@ async fn get_root_serves_html_with_a_valid_bootstrap() {
     let state = &bootstrap["state"];
     assert_eq!(state["power"], true);
     assert_eq!(state["selected_profile"], "music");
+    // Issue #135: first paint reads the skin from Bootstrap (ADR-0013).
+    assert_eq!(state["skin"], "remastered");
     // The bootstrap state is the same snapshot the WS serves — readouts
     // included, so the first paint is fully populated (ADR-0006).
     assert_eq!(state["readouts"]["vnnb"], serde_json::json!([20]));
