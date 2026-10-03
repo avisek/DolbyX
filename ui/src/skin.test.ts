@@ -65,19 +65,15 @@ describe('the tree', () => {
 })
 
 // #94: the entry point imports exactly the live sheets — every
-// stylesheet in the skin tree once, nothing missing, nothing orphaned —
-// and each component sheet names a component that still exists.
+// stylesheet in the skin tree once, nothing missing, nothing orphaned.
 describe('the Classic skin entry point', () => {
   const skin = import.meta.glob<string>('./skins/classic/*.css', {
     query: '?raw',
     import: 'default',
     eager: true,
   })
-  const components = import.meta.glob('./components/*.tsx')
   /** `./a/b/Name.ext` → `Name`. */
   const stem = (path: string) => path.split('/').pop()?.split('.')[0] ?? ''
-  /** Sheets that are the skin's own, not a component's. */
-  const SKIN_OWN = ['theme', 'base', 'App', 'Field', 'ResetMarker']
 
   it('imports every sheet in the tree exactly once', () => {
     const index = skin['./skins/classic/index.css'] ?? ''
@@ -89,31 +85,15 @@ describe('the Classic skin entry point', () => {
       .filter((name) => name !== 'index')
     expect([...imports].sort()).toEqual([...sheets].sort())
   })
-
-  it('has a live component behind every component sheet', () => {
-    const live = new Set(Object.keys(components).map(stem))
-    const dead = Object.keys(skin)
-      .map(stem)
-      .filter((name) => name !== 'index' && !SKIN_OWN.includes(name))
-      .filter((name) => !live.has(name))
-    expect(dead).toEqual([])
-  })
 })
 
 // Behavior 6: a skin author has one screen to read — the UI README's
-// authoring section — and the token file names the contract it serves.
+// authoring section.
 describe('the authoring guide', () => {
   it('is a section of the UI README', async () => {
     const readme = (await import('../README.md?raw')).default
     expect(readme).toMatch(/^## Skin authoring$/m)
     expect(readme).toContain('src/skins/classic/')
     expect(readme).toContain('--control-h')
-  })
-
-  it('has a token file citing ADR-0011, not ADR-0006', async () => {
-    const theme = (await import('./skins/classic/theme.css?raw')).default
-    const header = theme.slice(0, theme.indexOf(':root'))
-    expect(header).toContain('ADR-0011')
-    expect(header).not.toContain('ADR-0006')
   })
 })

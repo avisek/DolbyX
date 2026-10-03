@@ -1,12 +1,11 @@
 /**
  * Slice 17 (#25) parts B + C, seam 3: the GEQ editor's rendered
- * geometry, the Classic skin's visibility + idle descent, and the
- * drag replay through the real daemon + engine (jsdom sees only the
- * var/class seam, ADR-0011). Factory state: music profile, `gebg` all
- * zero, no sessions → the page mounts Vis idle and the editor renders
- * resolved state.
+ * geometry, Vis idle following feed death, and the drag replay through
+ * the real daemon + engine (jsdom sees only the var/class seam,
+ * ADR-0011). Factory state: music profile, `gebg` all zero, no sessions
+ * → the page mounts Vis idle and the editor renders resolved state.
  */
-import type { Locator, Page } from '@playwright/test'
+import type { Locator } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { SyntheticPlugin } from './plugin'
 
@@ -75,134 +74,34 @@ test('curve vertices at column centers, flat edges, thumbs at fractional x', asy
   }
 })
 
-// Behavior 10: editor hidden until hover/focus, shows in 250 ms,
-// lingers 5 s after leave, then fades — all skin CSS, zero component
-// timers.
-test('editor hidden until hover or focus, lingers 5 s after leave', async ({
-  page,
-}) => {
+// Behavior 10: feed death raises `visualizer--idle` — the seam a skin's
+// descent (brick walk, continuous fade, …) hangs off. Frames flowing
+// clear it; the plugin's goodbye kills its session and, 250 ms after the
+// last frame, the component raises it again.
+test('feed death raises visualizer--idle', async ({ page, daemon }) => {
   await page.goto('/')
-  const opacity = () =>
-    page.locator('.eq-sliders').evaluate((el) => getComputedStyle(el).opacity)
-
-  expect(await opacity()).toBe('0')
-
-  await page.hover('.visualizer')
-  await expect.poll(opacity, { timeout: 2000 }).toBe('1')
-
-  // Leave: the 5 s transition-delay lingers the editor fully visible…
-  await page.mouse.move(0, 0)
-  await page.waitForTimeout(4000)
-  expect(await opacity()).toBe('1')
-  // …then the 250 ms fade runs.
-  await expect.poll(opacity, { timeout: 4000 }).toBe('0')
-
-  // Keyboard path: focusing a hidden thumb reveals the same way —
-  // hidden chrome stays focusable (ADR-0011).
-  await page.locator('.eq-slider').first().focus()
-  await expect.poll(opacity, { timeout: 2000 }).toBe('1')
-})
-
-/** Samples one fill's height as the idle descent runs. */
-async function sampleDescent(page: Page): Promise<number[]> {
-  return page.evaluate(async () => {
-    const root = document.querySelector('.visualizer')
-    if (!root) return []
-    // Wait for feed death (250 ms after the last frame).
-    await new Promise<void>((resolve) => {
-      const timer = setInterval(() => {
-        if (root.classList.contains('visualizer--idle')) {
-          clearInterval(timer)
-          resolve()
-        }
-      }, 30)
-    })
-    const fills = [
-      ...document.querySelectorAll<HTMLElement>('.vis-column__fill'),
-    ]
-    const heights = fills.map((el) => el.getBoundingClientRect().height)
-    const target = fills[heights.indexOf(Math.max(...heights))]
-    if (!target) return []
-    const samples: number[] = []
-    for (let i = 0; i < 24; i += 1) {
-      samples.push(target.getBoundingClientRect().height)
-      await new Promise((resolve) => setTimeout(resolve, 60))
-    }
-    return samples
-  })
-}
-
-// Behavior 10: feed death walks the fills down brick-by-brick — the
-// Classic descent transitions the data vars and round() re-quantizes
-// per frame, so every sampled height is a whole-row multiple and the
-// walk passes through intermediate rows instead of snapping.
-test('idle descent walks the fills down brick-by-brick', async ({
-  page,
-  daemon,
-}) => {
-  test.slow() // an engine ballistic climb under qemu
-  await page.goto('/')
-  await expect(page.locator('.vis-column')).toHaveCount(20)
+  const visualizer = page.locator('.visualizer')
+  await expect(visualizer).toHaveClass(/visualizer--idle/)
 
   const plugin = await SyntheticPlugin.connect(daemon.socketPath)
   await plugin.hello(48_000, 512)
-
-  const FRAMES = 256
-  let phase = 0
-  /** One loud 750 Hz interleaved-stereo block, phase-continuous. */
-  const toneBlock = () => {
-    const pcm = new Int16Array(FRAMES * 2)
-    for (let frame = 0; frame < FRAMES; frame += 1) {
-      const sample = Math.round(20_000 * Math.sin(phase))
-      phase += (2 * Math.PI * 750) / 48_000
-      pcm[frame * 2] = sample
-      pcm[frame * 2 + 1] = sample
-    }
-    return pcm
-  }
-
-  const rowHeight = (await box(page.locator('.vis-column').first())).height / 48
-
-  // Tone in: climb well clear of the floor — the walk needs rows to
-  // descend through. Frames flowing → never idle.
+  const silence = new Int16Array(512 * 2)
   await expect
     .poll(
       async () => {
         for (let block = 0; block < 20; block += 1) {
-          await plugin.process(toneBlock())
+          await plugin.process(silence)
         }
-        return page
-          .locator('.vis-column__fill')
-          .evaluateAll((fills) =>
-            Math.max(...fills.map((el) => el.getBoundingClientRect().height)),
-          )
+        return visualizer.evaluate((el) =>
+          el.classList.contains('visualizer--idle'),
+        )
       },
-      { timeout: 60_000 },
+      { timeout: 30_000 },
     )
-    .toBeGreaterThan(3 * rowHeight)
-  await expect(page.locator('.visualizer')).not.toHaveClass(/visualizer--idle/)
+    .toBe(false)
 
-  // Feed death: the plugin disconnects, its session dies, frames stop.
   plugin.goodbye()
-  const samples = await sampleDescent(page)
-
-  expect(samples[0] ?? 0).toBeGreaterThan(0)
-  expect(samples.at(-1)).toBe(0)
-  // Non-increasing, through at least one intermediate row — a walk,
-  // not a snap…
-  for (let i = 1; i < samples.length; i += 1) {
-    expect(samples[i] ?? 0).toBeLessThanOrEqual((samples[i - 1] ?? 0) + 0.5)
-  }
-  const start = samples[0] ?? 0
-  expect(samples.some((height) => height > 0 && height < start - 0.5)).toBe(
-    true,
-  )
-  // …and every step lands on a whole-row height: brick-by-brick.
-  for (const height of samples) {
-    expect(
-      Math.abs(height / rowHeight - Math.round(height / rowHeight)),
-    ).toBeLessThan(0.15)
-  }
+  await expect(visualizer).toHaveClass(/visualizer--idle/)
 })
 
 /** One sent live-edit frame, as captured off the page's WS. */

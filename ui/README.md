@@ -76,9 +76,8 @@ paints it. v2.0 ships one skin, **Classic**, and no switcher.
 `@import` it from `index.css`. Never import CSS from `.tsx` — ESLint
 rejects it everywhere but `main.tsx` (`src/skin.test.ts` pins the rule).
 
-**Tokens** (`theme.css`) — names are the contract, values are Classic's;
-components never read them. Every colour and every `px` length but the
-`1px` hairline lives here (`src/skins/audit.test.ts` pins it):
+**Tokens** (`theme.css`) — the skin's private vocabulary; components and
+tests never read them:
 
 | Token                                                                                                           | Meaning                                                              |
 | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -120,19 +119,16 @@ components never read them. Every colour and every `px` length but the
   dot at rest, morph to ↺ on hover / `:focus-visible`.
 - Chromium is the target: subgrid, `:has`, anchor positioning,
   `@property`, `overflow: clip` are fair game.
-- **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`,
-  no width `@media`, no `!important`, and outside `theme.css` no
-  literal colour and no `px` but the `1px` hairline
-  (`src/skins/audit.test.ts` pins all five). `100%` height chains;
-  wrapping and container queries reflow regions (thresholds are rem
-  literals — size queries can't read tokens). The **Off-look** is one
-  Shell rule dimming everything but the header by `opacity`, never
-  `filter`.
+- **Shell**: fluid without viewport units — no `vw`/`vh`/`svh`/`dvh`
+  (`src/skins/audit.test.ts` pins it). `100%` height chains; wrapping
+  and container queries reflow regions (thresholds are rem literals —
+  size queries can't read tokens). The **Off-look** is one Shell rule
+  dimming everything but the header by `opacity`, never `filter`.
 - **Screen-level checks** (`e2e/main-screen.spec.ts`): no sideways
   overflow at 390 / 700 / 1280 with every region open, a skin-painted
   focus ring on every tab stop, the badge's `--connected` following
-  the socket. `e2e/baselines/*.png` are for eyeballing, never compared;
-  refresh them with `REFRESH_BASELINES=1 pnpm e2e -g screenshot`.
+  the socket. Tests pin behaviour and reachability, never taste: no
+  token reads, literal colours or lengths, timings, or screenshots.
 - **Icons**: buttons render empty, named by `aria-label`; paint an
   Icon token as a mask in `currentColor`:
 

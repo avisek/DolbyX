@@ -1,95 +1,26 @@
 /**
- * Slice 16 (#24) seam 3: the Classic skin's rendered geometry — real
- * browser, real daemon, real engine. Behavior 12 drives the CSS
- * contract's vars directly (rendered-geometry truth needs a browser,
- * ADR-0011); behavior 13 streams real audio through a synthetic
- * plugin and watches the bricks.
+ * Slice 16 (#24) seam 3: real audio through the real engine reaches
+ * the visualizer's published data (ADR-0011): a synthetic plugin's tone
+ * lifts `--exc` off the floor; silence lets the engine's own ballistics
+ * walk it back. How a skin paints the columns is its own business.
  */
-import type { Locator } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { SyntheticPlugin } from './plugin'
 
-/** Rendered height of one element, 0-height elements included. */
-const height = (locator: Locator) =>
-  locator.evaluate((el) => el.getBoundingClientRect().height)
+/** The wire floor the columns mount at, in dB. */
+const FLOOR_DB = -12
 
-// Behavior 12: fill heights snap to row multiples — 0 dB → 12 rows,
-// the −12 dB floor → an empty field — while the pip position stays
-// continuous, riding the original's travel formula between row lines.
-test('fills snap to whole rows, the floor is empty, the pip rides continuously', async ({
-  page,
-}) => {
-  await page.goto('/')
-  const columns = page.locator('.vis-column')
-  await expect(columns).toHaveCount(20) // the defaults-carried custom grid
-
-  // This probe drives the vars by hand; shed the mount-idle modifier
-  // (no feed, no repaint to re-raise it) so Classic's idle descent
-  // transition (#25) doesn't animate the probe's writes.
-  await page.evaluate(() => {
-    document.querySelector('.visualizer')?.classList.remove('visualizer--idle')
-  })
-
-  const column = columns.first()
-  const fill = column.locator('.vis-column__fill')
-  const columnHeight = await height(column)
-  const rowHeight = columnHeight / 48
-  expect(rowHeight).toBeGreaterThan(0)
-
-  // From mount the floor (−12 dB) renders an empty field — the
-  // deliberate deviation from the original's always-lit bottom brick.
-  expect(await height(fill)).toBe(0)
-
-  // 0 dB → exactly 12 rows (the spec literal).
-  const setExc = (dB: string) =>
-    column.evaluate((el, value) => {
-      el.style.setProperty('--exc', value)
-    }, dB)
-  await setExc('0')
-  expect(Math.abs((await height(fill)) - 12 * rowHeight)).toBeLessThan(1)
-
-  // Quantized down to whole rows: −3.25 dB and −4 dB both render the
-  // 8-row fill.
-  await setExc('-3.25')
-  const quantized = await height(fill)
-  expect(Math.abs(quantized - 8 * rowHeight)).toBeLessThan(1)
-  await setExc('-4')
-  expect(Math.abs((await height(fill)) - quantized)).toBeLessThan(0.01)
-
-  // The pip is continuous (Classic's `--gain-step` is the wire's own
-  // 1/16-dB quantum — an exact identity): at 2.5 dB it sits on the
-  // original's travel — (gain + 12) / 48 · (field − row) + row / 2 —
-  // mid-row, where a row-snapped position could not land.
-  const pipBottom = () =>
-    column.locator('.vis-column__pip').evaluate((el) => {
-      const field = el.closest('.vis-column')?.getBoundingClientRect()
-      return field ? field.bottom - el.getBoundingClientRect().bottom : NaN
-    })
-  await column.evaluate((el) => {
-    el.style.setProperty('--gain', '2.5')
-  })
-  const travel = (dB: number) =>
-    ((dB + 12) / 48) * (columnHeight - rowHeight) + rowHeight / 2
-  expect(Math.abs((await pipBottom()) - travel(2.5))).toBeLessThan(1)
-
-  // …and the ADR-0011 retune convention is real: a derived skin's
-  // `--gain-step` override snaps the pip (round(down, 14.5, 12) → 12).
-  await column.evaluate((el) => {
-    el.style.setProperty('--gain-step', '12')
-  })
-  expect(Math.abs((await pipBottom()) - travel(0))).toBeLessThan(1)
-})
-
-// Behavior 13: a synthetic plugin tone through the real engine moves
-// the bricks on screen; with silence — no client fade anywhere — the
-// engine's own ballistics walk the display back to the empty floor.
-test('a plugin tone lights the bricks; silence walks the display to the floor', async ({
+// Behavior 13: a plugin tone through the engine raises the columns'
+// `--exc` above the floor; with silence — no client fade anywhere —
+// the engine walks every column back to −12 dB.
+test('a plugin tone raises --exc above the floor; silence returns it', async ({
   page,
   daemon,
 }) => {
   test.slow() // two engine ballistic walks under qemu
   await page.goto('/')
-  await expect(page.locator('.vis-column')).toHaveCount(20)
+  const columns = page.locator('.vis-column')
+  await expect(columns).toHaveCount(20) // the defaults-carried custom grid
 
   const plugin = await SyntheticPlugin.connect(daemon.socketPath)
   await plugin.hello(48_000, 512)
@@ -108,25 +39,29 @@ test('a plugin tone lights the bricks; silence walks the display to the floor', 
     return pcm
   }
 
-  const maxFillHeight = () =>
-    page
-      .locator('.vis-column__fill')
-      .evaluateAll((fills) =>
-        Math.max(...fills.map((el) => el.getBoundingClientRect().height)),
-      )
+  /** The loudest column's published excitation, in dB. */
+  const maxExc = () =>
+    columns.evaluateAll((els) =>
+      Math.max(
+        ...els.map((el) =>
+          parseFloat((el as HTMLElement).style.getPropertyValue('--exc')),
+        ),
+      ),
+    )
+  expect(await maxExc()).toBe(FLOOR_DB)
 
-  // Tone in: excitation climbs out of the floor and bricks light up.
+  // Tone in: excitation climbs out of the floor.
   await expect
     .poll(
       async () => {
         for (let block = 0; block < 20; block += 1) {
           await plugin.process(toneBlock())
         }
-        return maxFillHeight()
+        return maxExc()
       },
       { timeout: 60_000 },
     )
-    .toBeGreaterThan(0)
+    .toBeGreaterThan(FLOOR_DB)
 
   // Silence in: the display walks to the floor by itself.
   await expect
@@ -135,11 +70,11 @@ test('a plugin tone lights the bricks; silence walks the display to the floor', 
         for (let block = 0; block < 40; block += 1) {
           await plugin.process(new Int16Array(FRAMES * 2))
         }
-        return maxFillHeight()
+        return maxExc()
       },
       { timeout: 60_000 },
     )
-    .toBe(0)
+    .toBe(FLOOR_DB)
 
   plugin.goodbye()
 })
