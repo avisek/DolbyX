@@ -1,11 +1,10 @@
 /**
  * #94: the main screen as one product — real browser, real daemon, the
- * Classic skin. Screen-level invariants jsdom can't see (ADR-0011): no
+ * default skin. Screen-level invariants jsdom can't see (ADR-0011): no
  * sideways overflow with every region open, a visible focus indicator
  * on every tab stop, the connection badge's modifier following the
- * socket, and two screenshot baselines for eyeballing.
+ * socket.
  */
-import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import {
   expandAdvanced,
@@ -15,7 +14,6 @@ import {
   foldSettled,
   openAt,
   test,
-  tokenColor,
 } from './fixtures'
 
 // Behavior 2: with the panel open and LAN on, nothing widens the page at
@@ -48,16 +46,33 @@ interface Stop {
   readonly last: boolean
 }
 
+/** The page-side slot holding every field's idle border colour. */
+type RestWindow = Window & { __restBorder?: WeakMap<Element, string> }
+
+/**
+ * Records every field's border colour while nothing is focused, so the
+ * walk can tell a focus line from the field's own idle border without
+ * reading a skin token. Call with the pointer parked, before Tab 1.
+ */
+const recordRestBorders = (page: Page) =>
+  page.evaluate(() => {
+    const rest = new WeakMap<Element, string>()
+    for (const el of document.querySelectorAll('input, textarea')) {
+      rest.set(el, getComputedStyle(el).borderColor)
+    }
+    ;(window as RestWindow).__restBorder = rest
+  })
+
 /**
  * The focused element, named by its accessible name / text; `indicated`
  * when a ring the skin painted (an outline, never the browser's `auto`
  * fallback) sits on it, its `::before`, a descendant (a thumb), or its
- * next sibling (a hidden radio's pill), or its border is the accent
- * line — the skin's focus mark on fields. `last` on the Advanced
- * header, the main screen's end.
+ * next sibling (a hidden radio's pill), or its border differs from its
+ * own idle border — the skin's focus mark on fields. `last` on the
+ * Advanced header, the main screen's end.
  */
-const describeFocus = (page: Page, accent: string) =>
-  page.evaluate(async (accentColor): Promise<Stop> => {
+const describeFocus = (page: Page) =>
+  page.evaluate(async (): Promise<Stop> => {
     const el = document.activeElement
     if (!(el instanceof HTMLElement)) throw new Error('nothing focused')
     // A field's focus line transitions in: read it once it has landed.
@@ -73,12 +88,14 @@ const describeFocus = (page: Page, accent: string) =>
       )
     }
     const sibling = el.nextElementSibling
+    const restBorder = (window as RestWindow).__restBorder?.get(el)
     const indicated =
       ring(el) ||
       ring(el, '::before') ||
       [...el.querySelectorAll('*')].some((child) => ring(child)) ||
       (sibling !== null && ring(sibling)) ||
-      getComputedStyle(el).borderColor === accentColor
+      (restBorder !== undefined &&
+        getComputedStyle(el).borderColor !== restBorder)
     // A hidden radio is named by its pill — its label.
     const label = el instanceof HTMLInputElement ? el.labels?.[0] : undefined
     return {
@@ -86,7 +103,7 @@ const describeFocus = (page: Page, accent: string) =>
       indicated,
       last: el.classList.contains('advanced__header'),
     }
-  }, accent)
+  })
 
 /**
  * The Master control Rows' stops in DOM order: the Reset marker only
@@ -121,12 +138,12 @@ test('every tab stop on the main screen shows a focus indicator', async ({
   // focus starts from the top, nothing hovered — the indicator seen is
   // focus's alone.
   await openAt(page, 1280)
-  const accent = await tokenColor(page, '--color-accent')
   await page.mouse.move(0, 0)
+  await recordRestBorders(page)
   const stops: Stop[] = []
   for (let i = 0; i < 60 && !stops.at(-1)?.last; i++) {
     await page.keyboard.press('Tab')
-    stops.push(await describeFocus(page, accent))
+    stops.push(await describeFocus(page))
   }
 
   // The walk covered the screen in DOM order — a stale selector would
@@ -173,31 +190,3 @@ test('the connection badge drops --connected when the daemon closes the socket',
   await expect(badge).toHaveText('Reconnecting…')
   await expect(badge).not.toHaveClass(/connection-badge--connected/)
 })
-
-// Screenshot baselines for eyeballing — never compared: a visual drift
-// shows up as a binary diff in review, not as a red test. Every run
-// writes them beside its results; `REFRESH_BASELINES=1` writes the
-// checked-in ones (`e2e/baselines/`). LAN on so the tools are in frame —
-// the URL masked, its host and port being this machine's and this
-// run's; the Advanced panel stays collapsed (the main screen ends above
-// it).
-for (const width of [390, 1280]) {
-  test(`screenshot baseline at ${String(width)}px`, async ({ page }, info) => {
-    await openAt(page, width)
-    await flipLan(page, true)
-    await foldSettled(page)
-    await page.mouse.move(0, 0)
-    const file = `main-screen-${String(width)}.png`
-    const shot = await page.screenshot({
-      path: process.env.REFRESH_BASELINES
-        ? join(import.meta.dirname, 'baselines', file)
-        : info.outputPath(file),
-      mask: [page.getByRole('textbox', { name: 'LAN URL' })],
-      maskColor: await tokenColor(page, '--color-bg'),
-      fullPage: true,
-      animations: 'disabled',
-      caret: 'hide',
-    })
-    expect(shot.length).toBeGreaterThan(0)
-  })
-}

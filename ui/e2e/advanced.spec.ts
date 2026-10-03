@@ -1,6 +1,8 @@
 /**
- * #85: the Advanced panel's geometry — what jsdom can't see (ADR-0011).
- * Real browser, real daemon, the shipped parameter table.
+ * #85: the Advanced panel in a real browser — what jsdom can't see
+ * (ADR-0011): folds leaving the tab order, keyboard commits, the
+ * pointer lock, real drags, the daemon round trips. Real daemon, the
+ * shipped parameter table, the default skin.
  */
 import type { Page } from '@playwright/test'
 import { expandAdvanced, expect, test } from './fixtures'
@@ -12,25 +14,6 @@ async function openAdvanced(page: Page): Promise<void> {
   await expect(page.locator('.connection-badge')).toHaveText('Connected')
   await expandAdvanced(page)
 }
-
-// Behavior 5: the fold toggle IS the header's box — on every category,
-// its bounding box equals the header's, so the whole header is the hit
-// area, edge to edge.
-test('every category toggle fills its header box', async ({ page }) => {
-  await openAdvanced(page)
-  const heads = page.locator('.adv-cat__head')
-  await expect(heads).toHaveCount(15) // the shipped `[[category]]` rows
-
-  const rects = await heads.evaluateAll((elements) =>
-    elements.map((head) => {
-      const toggle = head.querySelector('.adv-cat__toggle')
-      if (!toggle) throw new Error('header without toggle')
-      const box = (el: Element) => el.getBoundingClientRect().toJSON() as object
-      return { head: box(head), toggle: box(toggle) }
-    }),
-  )
-  for (const { head, toggle } of rects) expect(toggle).toEqual(head)
-})
 
 // Behavior 5: once folded, the body is `visibility: hidden` and Tab
 // skips its content — the first card's switch (`geon`, #86) included.
@@ -60,40 +43,6 @@ test('a folded category hides its body and takes it out of the tab order', async
   await page.keyboard.press('Tab')
   await expect(page.locator(':focus')).toHaveClass(/adv-cat__toggle/)
   await expect(page.locator(':focus')).toHaveText(/^Dialog Enhancer/)
-})
-
-// Behavior 10: at 1280 px no label truncates — every `adv-card__label`
-// fits its track (wrapping is fine, overflow is not) — and the shared
-// tracks hold: within one category every control starts at the same x.
-test('labels never overflow and controls align within a category', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await openAdvanced(page)
-  const labels = page.locator('.adv-card__label')
-  await expect(labels).toHaveCount(64) // the shipped `[[param]]` rows
-
-  const overflowing = await labels.evaluateAll((elements) =>
-    elements
-      .filter((label) => label.scrollWidth > label.clientWidth)
-      .map((label) => label.textContent),
-  )
-  expect(overflowing).toEqual([])
-
-  const controlXs = await page
-    .locator('.adv-cat')
-    .evaluateAll((sections) =>
-      sections.map((section) =>
-        [...section.querySelectorAll('.adv-card__control')].map(
-          (control) => control.getBoundingClientRect().x,
-        ),
-      ),
-    )
-  expect(controlXs).toHaveLength(15)
-  for (const xs of controlXs) {
-    expect(xs.length).toBeGreaterThan(0)
-    expect(new Set(xs).size).toBe(1)
-  }
 })
 
 // — Discrete controls (#86, behavior 9) —
@@ -161,42 +110,17 @@ test('Arrow keys on a tristate move the selection and commit', async ({
 
 // — Numeric input (#87 part 1, behavior 9) —
 
-// Every numeric box measures the same width whether or not it carries a
-// unit — `dhsb` (dB) and `dvla` (unit-less) — and the unit overlay is
-// inert chrome: `pointer-events: none`, a click on it lands in the field.
-test('a unit-bearing and a unit-less box measure the same width; the unit is inert', async ({
-  page,
-}) => {
+// The unit overlay is inert chrome: a click on `dhsb`'s `dB` lands in
+// the field.
+test('a click on the unit lands in its field', async ({ page }) => {
   await openAdvanced(page)
   const boost = page.getByRole('textbox', {
     name: 'Headphone Virtualizer Surround Boost',
   })
-  const amount = page.getByRole('textbox', { name: 'Volume Leveler Amount' })
-  const boxWidth = async (input: typeof boost) =>
-    input.locator('..').evaluate((box) => box.getBoundingClientRect().width)
-  expect(await boxWidth(boost)).toBeGreaterThan(0)
-  expect(await boxWidth(amount)).toBe(await boxWidth(boost))
-
   const unit = boost.locator('..').locator('.adv-input__unit')
   await expect(unit).toHaveText('dB')
-  await expect(unit).toHaveCSS('pointer-events', 'none')
   await unit.click({ force: true })
   await expect(boost).toBeFocused()
-})
-
-// Focus beats hover: with the card hovered, the focused field paints the
-// focus line, not the hover line.
-test('a focused numeric field outranks the card hover', async ({ page }) => {
-  await openAdvanced(page)
-  const boost = page.getByRole('textbox', {
-    name: 'Headphone Virtualizer Surround Boost',
-  })
-  const card = boost.locator('xpath=ancestor::label[1]')
-  await card.hover()
-  const hovered = await boost.evaluate((el) => getComputedStyle(el).borderColor)
-  await boost.focus()
-  await expect(boost).toHaveCSS('border-color', 'rgb(0, 180, 255)')
-  expect(hovered).not.toBe('rgb(0, 180, 255)')
 })
 
 // — Numeric input (#87 part 2, behavior 16) —
@@ -258,12 +182,11 @@ test('typing out of range into vol sends the clamped raw, which a reload resolve
 // The real lock: a press-drag on `dhsb` locks the pointer on the box
 // (`document.pointerLockElement` is the `adv-input` wrapper) with the
 // field focused; the release exits the lock leaving the field focused
-// with its text selected under the scrub cursor, and the peer page's
-// next snapshot carries the changed value. The step count stays
-// unasserted: under a lock, CDP-synthesized mouse input carries
-// cursor-warp artifacts in `movementY` (the engagement alone fires one),
-// so only a real mouse can drive exact locked deltas — jsdom covers the
-// arithmetic.
+// with its text selected, and the peer page's next snapshot carries the
+// changed value. The step count stays unasserted: under a lock,
+// CDP-synthesized mouse input carries cursor-warp artifacts in
+// `movementY` (the engagement alone fires one), so only a real mouse
+// can drive exact locked deltas — jsdom covers the arithmetic.
 test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focus + selection', async ({
   page,
   context,
@@ -275,12 +198,6 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   const boost = page.getByRole('textbox', { name })
   const wrapper = boost.locator('..')
   await expect(boost).toHaveValue('3') // Music ships dhsb=48
-  await expect(boost).toHaveCSS('cursor', 'ns-resize')
-  // Focused, the box reads as a text field; idle again, as a knob.
-  await boost.focus()
-  await expect(boost).toHaveCSS('cursor', 'text')
-  await boost.blur()
-  await expect(boost).toHaveCSS('cursor', 'ns-resize')
   const lockedOn = () =>
     page.evaluate(() => document.pointerLockElement?.className ?? null)
 
@@ -304,7 +221,6 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
   await expect.poll(lockedOn).toBeNull()
   await expect(wrapper).not.toHaveClass(/adv-input--scrubbing/)
   await expect(boost).toBeFocused()
-  await expect(boost).toHaveCSS('cursor', 'text')
   const after = await boost.evaluate((el: HTMLInputElement) => ({
     value: el.value,
     selection: [el.selectionStart, el.selectionEnd],
@@ -315,13 +231,11 @@ test('press-drag on dhsb locks the pointer on the box, scrubs, and restores focu
 
 // — Slider (#89, behavior 10) —
 
-// Geometry truth: the thumb's rendered centre sits where `--norm` says
-// on the track — at the midpoint for Music's 3 dB of 0–6 — and a real
-// press-drag from the thumb past the track's right end lands `max`:
-// the slider reads 6 dB with focus held, `--norm` is 1, the thumb sits
-// at the track's right edge, and the peer page's next snapshot carries
-// the value.
-test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm", async ({
+// A real press-drag from the thumb past the track's right end lands
+// `max`: the slider reads 6 dB with focus held, `--norm` is 1, and the
+// peer page's next snapshot carries the value. The thumb's box is read
+// only to start the drag — where it sits is skin policy.
+test("dragging dhsb's thumb to the track end lands max", async ({
   page,
   context,
 }) => {
@@ -342,7 +256,6 @@ test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm"
     return box.x + box.width / 2
   }
   const y = rect.y + rect.height / 2
-  expect(Math.abs((await thumbX()) - (rect.x + rect.width / 2))).toBeLessThan(1)
 
   await page.mouse.move(await thumbX(), y)
   await page.mouse.down()
@@ -355,7 +268,6 @@ test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm"
   expect(
     await slider.evaluate((el) => el.style.getPropertyValue('--norm')),
   ).toBe('1')
-  expect(Math.abs((await thumbX()) - (rect.x + rect.width))).toBeLessThan(1)
   await expect(page.getByRole('textbox', { name })).toHaveValue('6')
   await expect(peer.getByRole('slider', { name })).toHaveAttribute(
     'aria-valuenow',
@@ -365,12 +277,12 @@ test("dragging dhsb's thumb to the track end lands max; the thumb tracks --norm"
 
 // — Band editing (#91, behavior 9) —
 
-// Geometry truth for the Band editor popover: opened on band 1 and on
-// band 20 of `gebg` (Home / End, Enter), the editor renders above its
-// band and inside the strip's box — `anchor-center` keeps the edge
-// bands' editors from overflowing. A digit typed on the strip lands as
-// the editor's whole text once (the strip consumes the keydown).
-test('the band editor of band 1 and of band 20 opens above its band, inside the strip', async ({
+// The Band editor popover: opened on band 1 and on band 20 of `gebg`
+// (Home / End, Enter), the editor is visible with its field focused;
+// Escape closes it and hands focus back to the strip. A digit typed on
+// the strip lands as the editor's whole text once (the strip consumes
+// the keydown). Where the editor renders is skin policy.
+test('the band editor of band 1 and of band 20 opens, and the strip keys drive it', async ({
   page,
 }) => {
   await openAdvanced(page)
@@ -379,8 +291,6 @@ test('the band editor of band 1 and of band 20 opens above its band, inside the 
   })
   await strip.scrollIntoViewIfNeeded()
   await strip.focus()
-  const stripBox = await strip.boundingBox()
-  if (!stripBox) throw new Error('strip not laid out')
 
   for (const [key, slot] of [
     ['Home', 0],
@@ -392,17 +302,7 @@ test('the band editor of band 1 and of band 20 opens above its band, inside the 
     const editor = band.locator('.adv-bands__editor')
     await expect(band).toHaveClass(/adv-bands__band--editing/)
     await expect(band.getByRole('textbox')).toBeFocused()
-    await expect(editor).toHaveCSS('opacity', '1')
-    const [bandBox, editorBox] = await Promise.all([
-      band.boundingBox(),
-      editor.boundingBox(),
-    ])
-    if (!bandBox || !editorBox) throw new Error('band not laid out')
-    expect(editorBox.y + editorBox.height).toBeLessThanOrEqual(bandBox.y)
-    expect(editorBox.x).toBeGreaterThanOrEqual(stripBox.x)
-    expect(editorBox.x + editorBox.width).toBeLessThanOrEqual(
-      stripBox.x + stripBox.width,
-    )
+    await expect(editor).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(strip).toBeFocused()
     await expect(band).not.toHaveClass(/adv-bands__band--editing/)
@@ -494,55 +394,34 @@ test('a fast 4-event drag across gebg leaves no band at its pre-drag value', asy
 
 // — Divergence + Reset (#92, behavior 9) —
 
-// The Classic morph: a diverged card's marker rests as the dot (glyph
-// `::after` at opacity 0) and shows ↺ on card hover; a clean card's
-// marker is invisible and not hit-testable — the slot stays. Then the
-// real round trip: the click resets that one 4-CC on the daemon.
-test('a diverged reset marker rests as a dot, morphs to ↺ on hover; a clean one is inert', async ({
+// The real round trip: flipping `dvle` off its Baseline enables the
+// card's Reset marker (`disabled` while clean), and its click sends one
+// scoped `reset_profile` — the daemon falls the 4-CC back and the
+// reconcile lands it. How the marker looks at rest or on hover is skin
+// policy.
+test('a diverged reset marker enables, and its click lands reset_profile', async ({
   page,
 }) => {
+  const resets: unknown[] = []
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (frame) => {
+      const command = JSON.parse(String(frame.payload)) as { cmd: string }
+      if (command.cmd === 'reset_profile') resets.push(command)
+    })
+  })
   await openAdvanced(page)
   const enable = page.getByRole('switch', { name: 'Volume Leveler Enable' })
   const reset = page.getByRole('button', {
     name: 'Reset Volume Leveler Enable',
   })
-  const cleanReset = page.getByRole('button', {
-    name: 'Reset Volume Leveler Amount',
-  })
-  const glyphOpacity = () =>
-    reset.evaluate((el) => getComputedStyle(el, '::after').opacity)
 
   await expect(reset).toBeDisabled()
   await enable.click() // Music ships dvle=0 — now off its Baseline
   await expect(enable).toBeChecked()
   await expect(reset).toBeEnabled()
 
-  // At rest (pointer parked on the panel header): the dot, no glyph.
-  await page.getByRole('button', { name: 'Advanced' }).hover()
-  await expect.poll(glyphOpacity, { timeout: 2000 }).toBe('0')
-  await expect(reset).toHaveCSS('opacity', '1')
-
-  // Card hover: the glyph.
-  await page.locator('.adv-card', { has: enable }).hover()
-  await expect.poll(glyphOpacity, { timeout: 2000 }).toBe('1')
-
-  // Clean: invisible, and a pointer at its centre lands elsewhere.
-  await expect(cleanReset).toBeDisabled()
-  await expect(cleanReset).toHaveCSS('opacity', '0')
-  await expect(cleanReset).toHaveCSS('pointer-events', 'none')
-  const hit = await cleanReset.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    const under = document.elementFromPoint(
-      box.x + box.width / 2,
-      box.y + box.height / 2,
-    )
-    return under === el
-  })
-  expect(hit).toBe(false)
-
-  // The click: one scoped `reset_profile` — the daemon falls `dvle`
-  // back to its Baseline and the reconcile lands it.
   await reset.click()
   await expect(enable).not.toBeChecked()
   await expect(reset).toBeDisabled()
+  expect(resets).toMatchObject([{ cmd: 'reset_profile', only: ['dvle'] }])
 })
