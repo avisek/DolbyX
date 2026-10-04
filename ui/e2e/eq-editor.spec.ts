@@ -62,14 +62,17 @@ test('curve vertices at column centers, flat edges, thumbs at fractional x', asy
     expect(point.y).toBeCloseTo(flatY, 1)
   }
 
-  // Five sliders at the fractional column centers, thumb centers on
-  // the same mapping.
+  // Five thumbs centred on the fractional column centers, on the same
+  // mapping. The thumb, not the slider box: a skin may widen the box
+  // around its x (Remastered tiles the field for nearest-slider hover).
   const sliders = page.locator('.eq-slider')
   await expect(sliders).toHaveCount(5)
   for (const [i, index] of SLIDER_INDICES.entries()) {
-    const slider = await box(sliders.nth(i))
-    expect(slider.x - field.x).toBeCloseTo((index + 0.5) * pitch, 1)
     const thumb = await box(sliders.nth(i).locator('.eq-slider__thumb'))
+    expect(thumb.x + thumb.width / 2 - field.x).toBeCloseTo(
+      (index + 0.5) * pitch,
+      1,
+    )
     expect(thumb.y + thumb.height / 2 - field.y).toBeCloseTo(flatY, 1)
   }
 })

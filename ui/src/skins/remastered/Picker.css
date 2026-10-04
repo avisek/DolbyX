@@ -1,7 +1,7 @@
 /* The Picker (#119, #137): profiles, EQ presets and the Skin on one
    skeleton — a Row surface holding a label, radio pills and, where the
    items are editable, the four Picker actions (the Skin picker has
-   none; its empty actions column collapses).
+   none: plain pills, no actions track).
    Pills speak the Tristate segment language: the radio hides with
    `opacity` (still focusable, ADR-0011) behind its label, `:checked +
    label` fills accent, hover lifts the text under focus weight, the
@@ -32,6 +32,13 @@
 
 .picker:has(:focus-visible) {
   background-image: linear-gradient(var(--focus-tint), var(--focus-tint));
+}
+
+/* The Skin picker: no actions, so no actions track — an empty `auto`
+   track would still cost its gap. */
+.picker--skin {
+  grid-template-areas: 'label options';
+  grid-template-columns: var(--label-w) minmax(0, 1fr);
 }
 
 .picker__label {
@@ -199,5 +206,12 @@
       'label actions'
       'options options';
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .picker--skin {
+    grid-template-areas:
+      'label'
+      'options';
+    grid-template-columns: minmax(0, 1fr);
   }
 }

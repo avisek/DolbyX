@@ -3,7 +3,7 @@
    which sit side by side when both fit (`--vis-min` each) and stack
    otherwise. Regions land in DOM order: header, the two Pickers, the
    visualizer + master controls, then the LAN Access Row and the Skin
-   picker as full-width rows, the Advanced panel last. Fluid at every
+   picker stacked as full-width Rows (#129), the Advanced panel last. Fluid at every
    width with no viewport unit: the column is the `app` query container
    the regions reflow against. */
 
