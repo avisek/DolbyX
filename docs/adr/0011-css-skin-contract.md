@@ -179,14 +179,15 @@ subset; subsetting is manual, documented in the authoring guide).
 
 **Tests pin behaviour and reachability, never taste.** The contract
 suite — no horizontal overflow across widths with every region open, a
-visible focus indicator on every tab stop, every control hit-testable
+focus mark on every tab stop (the stop's pixels focused vs blurred must
+differ, so any mark a skin chooses counts), every control hit-testable
 at its centre — runs over every registered skin, in both colour
 schemes where the skin supports both. Behavioural suites (drag, scrub,
 paint, WS, folds leaving tab order) run on the default skin only.
 Nothing reads a skin's custom properties, pins a literal colour or
-length, times a linger, or compares a screenshot: off-look dimming,
-popover placement, hover tints, thumb scale and reveal timing are skin
-policy. The unit audits that survive are structural (components import
+length, times a linger, or compares a screenshot against a stored
+image: off-look dimming, popover placement, hover tints, thumb scale
+and reveal timing are skin policy. The unit audits that survive are structural (components import
 no CSS, no viewport units, `color-scheme` declared, skin directories ↔
 registry 1:1).
 
