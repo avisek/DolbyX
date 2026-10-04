@@ -96,8 +96,10 @@ modifiers, and the published data vars (`--value`, `--norm`, `--count`,
 
 **Assets** live in the skin's directory, referenced by relative `url()`
 (`url('./icons/plus.svg')`, `url('./Inter.woff2')`); the build inlines
-them as data URIs, so a skin never adds a route; in dev a serve-only
-plugin (`vite.config.ts`, tested by `vite.config.test.ts`) does the same.
+them as data URIs, so a skin never adds a route; in dev Vite inlines SVG
+itself and a serve-only plugin (`vite.config.ts`, tested by
+`vite.config.test.ts`) does the same for fonts and bitmaps. Remastered's
+icon masks are `remastered/icons/*.svg`.
 Budget: ≤ 2 font weights per skin (~30 KB each inlined, Latin subset —
 subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
 
@@ -152,9 +154,10 @@ subset manually, e.g. `pyftsubset --unicodes=U+0000-00FF --flavor=woff2`).
   focus walk — every tab stop of the main screen and the open panel
   paints a mark, judged by pixel diff (the stop's clip focused vs
   blurred), so any mark a skin chooses counts and no property is read.
-- Switching (`e2e/skin.spec.ts`): a pick reaches a peer page, an unknown
-  `config.toml` id paints the default with no pill checked, a reload
-  paints from Bootstrap with no extra request.
+- Switching (`e2e/skin.spec.ts`): a pick swaps the `<style>` text and
+  reaches a peer page, an unknown `config.toml` id paints the default
+  with no pill checked, a reload paints from Bootstrap with no extra
+  request.
 
 Never checked: a skin's custom properties, literal colours or lengths,
 timings, golden screenshots, hover tints, thumb scale, reveal timing, popover

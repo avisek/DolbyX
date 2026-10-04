@@ -1,7 +1,7 @@
 /* Structure (ADR-0008 markup tree): the wrapper and the SVG span the
    field; the component sets pixel geometry only — `left` per slider,
    `top` per thumb, `points` on both polylines. Everything below the
-   Classic banner is skin policy (ADR-0011). */
+   Remastered banner is skin policy (ADR-0011). */
 
 .eq-sliders {
   position: absolute;
@@ -37,85 +37,106 @@
   pointer-events: none;
 }
 
-/* — Classic: the faithful DDP editor look. Constants from
-   GraphicEqualizerPainter (ADR-0008); HITL-eyeballed against
-   docs/ui-reference/original-ui-visualizer-eq-overlay.png; the paints
-   and stroke widths are the `--eq-*` tokens (theme.css). — */
+/* — Remastered (#129): a hairline track, a solid dot thumb cut out of
+   the field (the Slider's own idiom), a clean 2-px curve with a faint
+   wide halo, no blur. No linger — the editor fades the moment the
+   pointer leaves. — */
 
-/* z — the painter's own order: tracks < thumbs < curve, above all vis
-   layers. One shared stacking context (`contain: layout` does *not*
-   create per-column ones), so these sit above the columns' fill/
-   lattice/pip z 1–3. Within a slider, DOM order paints track then
-   thumb — the painter's per-slider pass; sliders sit a pitch apart,
-   so cross-slider overlap never arises. */
+/* z — tracks < thumbs < curve, above every vis layer: each column is a
+   stacking context at z 0 (Visualizer.css), so these sit above every
+   lattice / fill / pip. Within a slider, DOM order paints track then
+   thumb. */
 .eq-sliders {
   z-index: 4;
 }
 
 .eq-curve {
   z-index: 5;
-  /* The glow bleeds past the vertices and the flat edge extensions —
+  /* The halo bleeds past the vertices and the flat edge extensions —
      never clip it to the viewport box. */
   overflow: visible;
 }
 
 /* Visibility is skin policy (ADR-0011): hidden base state in opacity —
-   thumbs stay focusable, screen readers keep working sliders — and
-   asymmetric transitions: show 250 ms with 0 s delay, hide 250 ms
-   after a 5 s linger (the original's SHOW_HIDE_ANIMATION_DURATION and
-   IDLE_HIDE_DELAY as pure CSS). Part C raises `visualizer--eq-drag`
+   thumbs stay focusable, screen readers keep working sliders — a
+   200 ms fade either way, no linger. Part C raises `visualizer--eq-drag`
    while a pointer is captured. */
 .eq-sliders,
 .eq-curve {
   opacity: 0;
-  transition: opacity 250ms linear 5s;
+  transition: opacity 200ms linear;
 }
 
 .visualizer:hover :is(.eq-sliders, .eq-curve),
 .visualizer:focus-within :is(.eq-sliders, .eq-curve),
 .visualizer--eq-drag :is(.eq-sliders, .eq-curve) {
   opacity: 1;
-  transition-delay: 0s;
 }
 
-/* The track (their `eq_bar`): a full-height light-blue line, two
-   passes like the curve — a soft wide glow under a sharp core, the
-   core's edges softened by a hairline. */
-.eq-slider__track {
-  left: 50%;
-  inline-size: var(--eq-track-w);
-  translate: -50%;
-  background:
-    linear-gradient(
-      to right,
-      transparent calc(50% - var(--eq-track-core-w) / 2 - 1px),
-      var(--eq-track-core) calc(50% - var(--eq-track-core-w) / 2)
-        calc(50% + var(--eq-track-core-w) / 2),
-      transparent calc(50% + var(--eq-track-core-w) / 2 + 1px)
-    ),
-    linear-gradient(
-      to right,
-      transparent,
-      var(--eq-track-glow) 30% 70%,
-      transparent
-    );
+/* Hover follows the hand: the pointer logic snaps to the nearest
+   visible slider anywhere in the field (EqCurve.tsx), so the slider
+   boxes partition the field the same way — each runs from the midpoint
+   before its x to the midpoint after, the first and last from / to the
+   field's edge — and `:hover` lands on the nearest slider, never
+   outside the field. Fractions of the field, from the published counts
+   (`--count` sliders, `--bands` columns on `.eq-sliders` — never
+   sibling-count()): `--pitch` one column, `--span` one slider spacing,
+   `--box` this box's width, `--anchor` its slider's x inside it. The
+   component's `left` is the x; the margin pulls the box back by the
+   anchor; thumb and track sit at the anchor. */
+.eq-slider {
+  --pitch: calc(1 / var(--bands));
+  --span: calc((var(--bands) - 1) / var(--bands) / (var(--count) - 1));
+  --box: var(--span);
+  --anchor: calc(var(--span) / 2);
+
+  inline-size: calc(100% * var(--box));
+  margin-inline-start: calc(-100% * var(--anchor));
 }
 
-/* The thumb (`eq_thumb`): a hollow cyan ring with a soft bloom,
-   centered on its vertex — the component's `top` is the vertex y, the
-   `thumbHeight/4` track padding rides its rendered size. */
+.eq-slider:first-child {
+  --box: calc(var(--span) / 2 + var(--pitch) / 2);
+  --anchor: calc(var(--pitch) / 2);
+}
+
+.eq-slider:last-child {
+  --box: calc(var(--span) / 2 + var(--pitch) / 2);
+}
+
+.eq-slider__track,
 .eq-slider__thumb {
-  left: 50%;
+  left: calc(100% * var(--anchor) / var(--box));
+}
+
+/* The track: a full-height hairline, lit under the hand. */
+.eq-slider__track {
+  inline-size: 2px;
+  translate: -50%;
+  border-radius: 1px;
+  background: var(--eq-track);
+  transition: background var(--hover-ms) ease;
+}
+
+/* The thumb: a solid dot ringed in the field's colour, centred on its
+   vertex — the component's `top` is the vertex y, the `thumbHeight/4`
+   track padding rides its rendered size (border-box, base.css). */
+.eq-slider__thumb {
   inline-size: var(--eq-thumb-size);
   block-size: var(--eq-thumb-size);
   translate: -50% -50%;
+  border: 2px solid var(--vis-field);
   border-radius: 50%;
-  background: var(--eq-thumb);
+  background: var(--eq-ink);
+  box-shadow: 0 0 6px var(--vis-glow);
+  transition:
+    scale var(--hover-ms) ease,
+    box-shadow var(--hover-ms) ease,
+    background var(--hover-ms) ease;
 }
 
 /* Keyboard focus: the ring rides the thumb, as the Slider's does
-   (Slider.css); the slider box itself is a zero-width strip, where the
-   browser's fallback ring would draw a hairline down the field. */
+   (Slider.css); the slider box is a strip of the field, where the
+   browser's fallback ring would draw a frame down the field. */
 .eq-slider:focus-visible {
   outline: none;
 }
@@ -125,32 +146,43 @@
   outline-offset: var(--ring-offset);
 }
 
-/* The snapped Slider under a drag (`eq-slider--active` →
-   `eq_thumb_touch_state`): the original's Bright1/2/3 cascade
-   collapses — only distance 0 is distinct. A hotter core, a solid
-   ring, a wider bloom; HITL-eyeballed like the rest of the pass. */
-.eq-slider--active .eq-slider__thumb {
-  background: var(--eq-thumb-active);
+/* Hover (under focus weight) and focus: the dot grows with a soft ring,
+   the track lights. */
+.eq-slider:where(:hover) .eq-slider__thumb,
+.eq-slider:focus-visible .eq-slider__thumb {
+  scale: 1.3;
+  box-shadow:
+    0 0 0 4px var(--eq-ring),
+    0 0 10px var(--vis-glow);
 }
 
-/* The curve — two passes over shared points, one cyan. Glow: wide,
-   α 0x80, blurred, round caps. Sharp: thin, α 0xD0, round joins
-   (CornerPathEffect(10) at these widths — not a spline), butt caps
-   (the glow's round ends swallow them). */
+.eq-slider:where(:hover) .eq-slider__track,
+.eq-slider:focus-visible .eq-slider__track,
+.eq-slider--active .eq-slider__track {
+  background: var(--eq-track-lit);
+}
+
+/* The snapped slider under a drag (`eq-slider--active`): larger still,
+   a hotter dot. */
+.eq-slider--active .eq-slider__thumb {
+  scale: 1.35;
+  background: var(--eq-ink-hot);
+}
+
+/* The curve — two passes over shared points, one ink: a faint wide halo
+   under a clean stroke, round caps and joins, no blur. */
 .eq-curve__glow {
-  stroke: var(--eq-curve);
-  stroke-opacity: 0.45; /* painter α 0x80, eased in the HITL pass */
-  stroke-width: var(--eq-glow-w);
+  stroke: var(--eq-ink);
+  stroke-opacity: 0.18;
+  stroke-width: 8px;
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: blur(var(--eq-glow-blur));
 }
 
 .eq-curve__stroke {
-  stroke: var(--eq-curve);
-  stroke-opacity: 0.816;
-  stroke-width: var(--eq-stroke-w);
-  stroke-linecap: butt;
+  stroke: var(--eq-ink);
+  stroke-width: 2px;
+  stroke-linecap: round;
   stroke-linejoin: round;
 }
 

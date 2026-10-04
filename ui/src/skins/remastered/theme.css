@@ -1,16 +1,21 @@
 /* Remastered skin custom properties (ADR-0011): the skin's private
-   vocabulary — nothing outside the skin reads one (switching addendum). */
+   vocabulary — nothing outside the skin reads one (switching addendum).
+   Colours as properties, column-riding gradients as rules: a property
+   must never read a var declared below it (`--row` lives on the
+   column). */
 :root {
-  /* Colour scheme (ADR-0011, switching addendum): mandatory — the
-     build lowers light-dark() only where the sheet declares one */
-  color-scheme: dark;
+  /* Colour scheme (ADR-0011, switching addendum): both — the build
+     lowers light-dark() only where the sheet declares a scheme. Every
+     colour flips; nothing is scheme-invariant. */
+  color-scheme: light dark;
 
   /* Color + type */
-  --color-bg: #0c1420; /* dark navy */
-  --color-surface: #16222f;
-  --color-accent: #00b4ff; /* Dolby cyan */
-  --color-text: #e8eef5;
-  --color-text-muted: #8fa1b3;
+  --color-bg: light-dark(#eef2f7, #0c1420);
+  --color-surface: light-dark(#fff, #16222f);
+  /* Dolby cyan, deepened on light so it reads on white */
+  --color-accent: light-dark(#0082d8, #00b4ff);
+  --color-text: light-dark(#16232f, #e8eef5);
+  --color-text-muted: light-dark(#5f7088, #8fa1b3);
   --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
 
@@ -59,12 +64,13 @@
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
   /* The lift of a Popover off the page; the Band editor's, smaller */
-  --shadow-popover: 0 var(--space-2) var(--space-5) rgb(0 0 0 / 45%);
-  --shadow-editor: 0 var(--radius-0) var(--space-2) rgb(0 0 0 / 45%);
+  --shadow-color: light-dark(rgb(18 36 56 / 18%), rgb(0 0 0 / 45%));
+  --shadow-popover: 0 var(--space-2) var(--space-5) var(--shadow-color);
+  --shadow-editor: 0 var(--radius-0) var(--space-2) var(--shadow-color);
 
   /* Access hues: the skin color-codes the 4-CC by settability bucket */
   --hue-settable: var(--color-accent);
-  --hue-experimental: #dcae5e; /* amber */
+  --hue-experimental: light-dark(#a9741c, #dcae5e); /* amber */
   --hue-readonly: var(--color-text-muted);
 
   /* Fold motion (category / panel disclosure) */
@@ -81,7 +87,7 @@
   /* Disabled action buttons */
   --disabled-opacity: 0.3;
   /* Surface lift on hover (cards, rows) */
-  --hover-bg: rgb(255 255 255 / 3%);
+  --hover-bg: light-dark(rgb(16 32 48 / 4%), rgb(255 255 255 / 3%));
   /* Tinted surfaces (badge pill, focused card) */
   --tint: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --focus-tint: color-mix(in srgb, var(--color-accent) 7%, transparent);
@@ -93,74 +99,56 @@
   --ring-offset: 0.125rem;
 
   /* Band strip: row lines, the hovered column, the Live arrays' bars */
-  --bands-lines: rgb(255 255 255 / 4%);
-  --bands-hover: rgb(255 255 255 / 7%);
-  --bands-live: color-mix(in srgb, var(--color-accent) 75%, #fff);
+  --bands-lines: light-dark(rgb(16 32 48 / 6%), rgb(255 255 255 / 4%));
+  --bands-hover: light-dark(rgb(16 32 48 / 7%), rgb(255 255 255 / 7%));
+  --bands-live: light-dark(
+    #2b9be3,
+    color-mix(in srgb, var(--color-accent) 75%, #fff)
+  );
 
-  /* Visualizer paints (ADR-0008) — the DsUI drawables: each bitmap
-     asset is one image token, like the icon masks; flat colours are
-     colour tokens. The rendering rules (rows, quantization, zones)
-     stay in Visualizer.css */
+  /* Visualizer paints — Capsule (#129): the field follows the scheme
+     (a deep blue well in dark, cool paper in light); the bars ride a
+     blue → cyan → amber → red ramp by row (the gradient is a rule in
+     Visualizer.css — `--row` only resolves in a column); the pip is a
+     thin bright line; the lattice carries the guides. */
   --vis-bg: radial-gradient(
-    58% 130% at 50% 108%,
-    #2a82cc 0%,
-    #0e5490 42%,
-    #022f56 68%,
-    #001322 88%,
-    #000 100%
-  ); /* eq_background.png: blue glow at bottom centre, black-edged */
-  --vis-lattice: #000; /* the brick insets */
-  /* mock_gv_brick_{blue,yellow,red}: the fill's zones, all 60% alpha */
-  --vis-brick-blue: rgb(102 197 220 / 60%);
-  --vis-brick-yellow: rgb(202 181 145 / 60%);
-  --vis-brick-red: rgb(184 145 147 / 60%);
-  --vis-pip: radial-gradient(
-    ellipse closest-side,
-    #2bc9fd 0%,
-    rgb(105 236 255 / 45%) 55%,
-    transparent 100%
-  ); /* brick_blue_light: a soft glow */
-  --vis-off: rgb(2 10 18 / 55%); /* `ven` off: fills + pips dark */
+    90% 120% at 50% 110%,
+    light-dark(#cfe0f3, #0f2d4a) 0%,
+    light-dark(#e4edf7, #0a1a2c) 55%,
+    light-dark(#f3f7fb, #060c14) 100%
+  );
+  --vis-field: light-dark(#e9f0f8, #0a1a2c); /* the thumb's cut-out */
+  --vis-guide: light-dark(rgb(16 32 48 / 9%), rgb(255 255 255 / 6%));
+  --vis-ramp-0: light-dark(#0b5fb8, #0a6ec4);
+  --vis-ramp-1: light-dark(#1a9de6, #19c1ff);
+  --vis-ramp-2: light-dark(#e0a020, #ffd166);
+  --vis-ramp-3: light-dark(#e04a40, #ff5d5d);
+  --vis-glow: light-dark(rgb(0 130 216 / 22%), rgb(0 180 255 / 35%));
+  --vis-pip: light-dark(#0b3a5c, #e6fbff);
+  --vis-pip-glow: light-dark(rgb(11 58 92 / 35%), rgb(120 230 255 / 80%));
+  --vis-off: light-dark(rgb(16 32 48 / 18%), rgb(120 140 160 / 30%));
 
-  /* EQ editor paints — GraphicEqualizerPainter (ADR-0008), HITL-eyeballed
-     in px, the painter's own unit: the thumb drawables as image tokens,
-     the track's two passes as colours + widths (its geometry is a rule,
-     EqCurve.css) */
-  --eq-track-w: 12px; /* eq_bar: the soft glow's width… */
-  --eq-track-glow: rgb(110 190 255 / 16%);
-  --eq-track-core-w: 1.5px; /* …and the sharp core's */
-  --eq-track-core: rgb(158 216 255 / 55%);
-  --eq-thumb-size: 28px;
-  --eq-thumb: radial-gradient(
-    circle,
-    rgb(170 225 255 / 45%) 0 12%,
-    rgb(117 210 255 / 12%) 26% 34%,
-    #8fd2ff 44% 60%,
-    rgb(90 180 255 / 28%) 72%,
-    transparent 80%
-  ); /* eq_thumb: a hollow cyan ring with a soft bloom */
-  --eq-thumb-active: radial-gradient(
-    circle,
-    rgb(225 245 255 / 85%) 0 14%,
-    rgb(150 225 255 / 25%) 26% 32%,
-    #c2e9ff 42% 62%,
-    rgb(120 200 255 / 45%) 76%,
-    transparent 88%
-  ); /* eq_thumb_touch_state: hotter core, solid ring, wider bloom */
-  --eq-curve: #75d2ff;
-  --eq-glow-w: 10px;
-  --eq-glow-blur: 2.8px; /* BlurMaskFilter radius 4 as Skia σ = 0.577 · r + 0.5 */
-  --eq-stroke-w: 1.5px; /* the painter's 3 px, canvas-scale, HITL-halved */
+  /* GEQ editor paints (#129): one ink for track, thumb and curve; the
+     thumb's size yields the component's track pad (`thumbHeight / 4`,
+     EqCurve.tsx) — pip, guides and thumbs share that padded mapping. */
+  --eq-ink: light-dark(#0b5fb8, #8fd2ff);
+  --eq-ink-hot: color-mix(in srgb, var(--eq-ink) 60%, #fff);
+  --eq-ring: color-mix(in srgb, var(--eq-ink) 22%, transparent);
+  --eq-track: light-dark(rgb(16 32 48 / 14%), rgb(255 255 255 / 14%));
+  --eq-track-lit: color-mix(in srgb, var(--eq-ink) 50%, transparent);
+  --eq-thumb-size: 14px;
+  --eq-pad: calc(var(--eq-thumb-size) / 4);
 
-  /* Icons: 24-grid outline glyphs (stroke 2, round caps / joins), used
-     as masks painted in currentColor on a --icon-size square; the
-     stroke colour is a placeholder a mask ignores */
+  /* Icon masks: 24-grid outline glyphs (stroke 2, round caps / joins)
+     as files beside this sheet, painted in currentColor on a
+     --icon-size square — the stroke colour is a placeholder a mask
+     ignores. Relative url(): the build inlines them (ADR-0013). */
   --icon-size: 1rem;
-  --icon-plus: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14M12 5v14'/></svg>");
-  --icon-pencil: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21.17 6.83a2.12 2.12 0 0 0-3-3L4 18l-1 4 4-1Z'/><path d='m15 5 3 3'/></svg>");
-  --icon-trash: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/></svg>");
-  --icon-rotate-ccw: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8'/><path d='M3 3v5h5'/></svg>");
-  --icon-copy: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='8' y='8' width='14' height='14' rx='2'/><path d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/></svg>");
-  --icon-check: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>");
-  --icon-qr-code: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='5' height='5' rx='1'/><rect x='16' y='3' width='5' height='5' rx='1'/><rect x='3' y='16' width='5' height='5' rx='1'/><path d='M21 16h-3a2 2 0 0 0-2 2v3M21 21v.01M12 7v3a2 2 0 0 1-2 2H7M3 12h.01M12 3h.01M12 16v.01M16 12h1M21 12v.01M12 21v-1'/></svg>");
+  --icon-plus: url('./icons/plus.svg');
+  --icon-pencil: url('./icons/pencil.svg');
+  --icon-trash: url('./icons/trash.svg');
+  --icon-rotate-ccw: url('./icons/rotate-ccw.svg');
+  --icon-copy: url('./icons/copy.svg');
+  --icon-check: url('./icons/check.svg');
+  --icon-qr-code: url('./icons/qr-code.svg');
 }

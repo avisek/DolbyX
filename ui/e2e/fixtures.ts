@@ -248,14 +248,15 @@ export async function skinList(
  * Switches the daemon's skin from a probe socket the page opens — a
  * second client, so the daemon's fan-out reaches the page's own socket
  * (the picking tab never sees its own snapshot) — and waits for the
- * pill: the Shell swaps the `<style>` text in the same synchronous
- * effect that checks it (and two skins' texts may be byte-identical —
- * Classic is Remastered's copy until #139). Already the page's skin:
- * nothing to send.
+ * pill and for the `<style>` text to move off the previous skin's: the
+ * Shell swaps the text in the same synchronous effect that checks the
+ * pill, and two registered skins never share a text. Already the
+ * page's skin: nothing to send.
  */
 export async function setSkin(page: Page, id: string): Promise<void> {
   const radio = skinRadio(page, id)
   if (await radio.isChecked()) return
+  const before = await skinText(page)
   await page.evaluate(
     (id) =>
       new Promise<void>((resolve, reject) => {
@@ -282,6 +283,7 @@ export async function setSkin(page: Page, id: string): Promise<void> {
     id,
   )
   await expect(radio).toBeChecked()
+  expect(await skinText(page)).not.toBe(before)
 }
 
 /** Whether the painted skin declares both schemes on `:root`. */
