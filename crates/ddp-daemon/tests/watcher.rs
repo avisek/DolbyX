@@ -162,18 +162,28 @@ async fn a_sustained_external_writer_tracks_at_window_cadence() {
     // 41 distinct documents, 20 ms apart (~800 ms; a loaded runner
     // stretches it, so the bound below uses the measured span). Last
     // write `dvla = 10`: the max, written once — the true last reload.
+    //
+    // Each document lands by rename-replace, never truncate-then-write:
+    // 20 ms divides the 100 ms window, so a window fire phase-locks
+    // onto the writes and can read a truncated (empty) file — equal to
+    // the fresh config's synced bytes, hence "Clean", no reload — for
+    // the whole stream (the CI flake this test had).
     let path = config.clone();
     let t0 = std::time::Instant::now(); // [DEBUG-w7f3]
     let (span, write_times) = tokio::task::spawn_blocking(move || {
+        let tmp = path.with_extension("toml.external");
+        let replace = |document: String| {
+            std::fs::write(&tmp, document).expect("external write");
+            std::fs::rename(&tmp, &path).expect("external replace");
+        };
         let started = std::time::Instant::now();
         let mut write_times = Vec::with_capacity(41); // [DEBUG-w7f3]
         for value in (0..40).map(|i| i % 10) {
-            std::fs::write(&path, format!("[profile.music]\ndvla = {value}\n"))
-                .expect("external write");
+            replace(format!("[profile.music]\ndvla = {value}\n"));
             write_times.push((started.elapsed().as_secs_f64() * 1000.0, value));
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        std::fs::write(&path, "[profile.music]\ndvla = 10\n").expect("external write");
+        replace("[profile.music]\ndvla = 10\n".to_owned());
         write_times.push((started.elapsed().as_secs_f64() * 1000.0, 10));
         (started.elapsed(), write_times)
     })
