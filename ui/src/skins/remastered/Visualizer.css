@@ -25,7 +25,7 @@
 .visualizer {
   background: var(--vis-bg);
   inline-size: 100%; /* fills its Shell cell */
-  aspect-ratio: 885 / 390;
+  aspect-ratio: 885 / 390; /* the original field's proportions */
   border-radius: var(--radius-2);
   /* Vis idle descent duration */
   --idle-descent: 700ms;
@@ -67,13 +67,14 @@
 .vis-column {
   /* The per-band coordinate device: cqh below measures the column.
      Unregistered vars are inherited as tokens and resolve in the leaf,
-     where `cqh` is the column. (No stacking context here, so the
-     leaves' z 0–2 interleave across columns in the shared context;
-     harmless, columns never overlap. The editor rides above at z 4–5,
-     EqCurve.css.) */
+     where `cqh` is the column. (Layout containment makes each column
+     a stacking context at z 0, holding its leaves' z 0–2; the editor
+     rides above all columns at z 4–5, EqCurve.css.) */
   container-type: size;
   /* One row: 1 dB of the 48-dB window. */
   --row: calc(100cqh / 48);
+  /* The capsule: fill and pip inset from both column edges. */
+  --capsule-inset: 24%;
   /* Quantization steps (ADR-0011), in dB: both the wire's own 1/16-dB
      quantum — every `vis` value is a multiple of it, so round() is an
      exact identity and both displays stay continuous (a literal `none`
@@ -84,6 +85,8 @@
      component pads the track by thumb / 4 (EqCurve.tsx), so the pip and
      the guides land on the thumbs' and the curve's y. */
   --usable: calc(100cqh - 2 * var(--eq-pad));
+  --floor: calc(100cqh - var(--eq-pad));
+  --quarter: calc(var(--usable) / 4); /* 12 dB */
 }
 
 /* The fill displays `--exc`: linear (--exc + 12) / 48 of the field — a
@@ -93,7 +96,7 @@
    amber at 33, red from 42. */
 .vis-column__fill {
   position: absolute;
-  inset: auto 24% 0;
+  inset: auto var(--capsule-inset) 0;
   z-index: 1;
   height: calc(
     clamp(0, round(down, var(--exc) + 12, var(--exc-step)), 48) * var(--row)
@@ -121,9 +124,9 @@
   z-index: 0;
   background-image: var(--guide), var(--guide), var(--guide);
   background-position:
-    0 calc(100cqh - var(--eq-pad) - var(--usable) * 1 / 4),
-    0 calc(100cqh - var(--eq-pad) - var(--usable) * 2 / 4),
-    0 calc(100cqh - var(--eq-pad) - var(--usable) * 3 / 4);
+    0 calc(var(--floor) - 1 * var(--quarter)),
+    0 calc(var(--floor) - 2 * var(--quarter)),
+    0 calc(var(--floor) - 3 * var(--quarter));
   background-size: 100% 1px;
   background-repeat: no-repeat;
 }
@@ -132,7 +135,7 @@
    over the padded mapping, as wide as the fill. */
 .vis-column__pip {
   position: absolute;
-  inset-inline: 24%;
+  inset-inline: var(--capsule-inset);
   bottom: calc(
     var(--eq-pad) + round(down, var(--gain) + 12, var(--gain-step)) / 48 *
       var(--usable) - 1px

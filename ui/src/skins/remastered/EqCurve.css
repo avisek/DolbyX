@@ -42,10 +42,10 @@
    wide halo, no blur. No linger — the editor fades the moment the
    pointer leaves. — */
 
-/* z — tracks < thumbs < curve, above every vis layer. One shared
-   stacking context (`container-type` creates none), so these sit above
-   the columns' lattice / fill / pip z 0–2. Within a slider, DOM order
-   paints track then thumb. */
+/* z — tracks < thumbs < curve, above every vis layer: each column is a
+   stacking context at z 0 (Visualizer.css), so these sit above every
+   lattice / fill / pip. Within a slider, DOM order paints track then
+   thumb. */
 .eq-sliders {
   z-index: 4;
 }
@@ -110,9 +110,9 @@
 
 /* The track: a full-height hairline, lit under the hand. */
 .eq-slider__track {
-  inline-size: var(--eq-track-w);
+  inline-size: 2px;
   translate: -50%;
-  border-radius: calc(var(--eq-track-w) / 2);
+  border-radius: 1px;
   background: var(--eq-track);
   transition: background var(--hover-ms) ease;
 }
@@ -174,14 +174,14 @@
 .eq-curve__glow {
   stroke: var(--eq-ink);
   stroke-opacity: 0.18;
-  stroke-width: var(--eq-glow-w);
+  stroke-width: 8px;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .eq-curve__stroke {
   stroke: var(--eq-ink);
-  stroke-width: var(--eq-stroke-w);
+  stroke-width: 2px;
   stroke-linecap: round;
   stroke-linejoin: round;
 }

@@ -64,9 +64,9 @@
   /* Stacking: the one layer above the flow (QR popover) */
   --z-popover: 10;
   /* The lift of a Popover off the page; the Band editor's, smaller */
-  --shadow-ink: light-dark(rgb(18 36 56 / 18%), rgb(0 0 0 / 45%));
-  --shadow-popover: 0 var(--space-2) var(--space-5) var(--shadow-ink);
-  --shadow-editor: 0 var(--radius-0) var(--space-2) var(--shadow-ink);
+  --shadow-color: light-dark(rgb(18 36 56 / 18%), rgb(0 0 0 / 45%));
+  --shadow-popover: 0 var(--space-2) var(--space-5) var(--shadow-color);
+  --shadow-editor: 0 var(--radius-0) var(--space-2) var(--shadow-color);
 
   /* Access hues: the skin color-codes the 4-CC by settability bucket */
   --hue-settable: var(--color-accent);
@@ -136,11 +136,8 @@
   --eq-ring: color-mix(in srgb, var(--eq-ink) 22%, transparent);
   --eq-track: light-dark(rgb(16 32 48 / 14%), rgb(255 255 255 / 14%));
   --eq-track-lit: color-mix(in srgb, var(--eq-ink) 50%, transparent);
-  --eq-track-w: 2px;
   --eq-thumb-size: 14px;
   --eq-pad: calc(var(--eq-thumb-size) / 4);
-  --eq-stroke-w: 2px;
-  --eq-glow-w: 8px;
 
   /* Icon masks: 24-grid outline glyphs (stroke 2, round caps / joins)
      as files beside this sheet, painted in currentColor on a
