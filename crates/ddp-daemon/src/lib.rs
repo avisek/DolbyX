@@ -202,6 +202,7 @@ impl App {
     /// (issue #70): a failed rebind keeps the previous address *and*
     /// the previous scalar, logged, with no reply (ADR-0012).
     pub(crate) async fn apply_external_reload(self: &Arc<Self>, mut reloaded: State) {
+        eprintln!("[DEBUG-w7f3] bridge: apply_external_reload enter");
         let mut state = self.state.write().await;
         if state.lan_access != reloaded.lan_access
             && let Err(error) = http_server::rebind(self, reloaded.lan_access).await
@@ -225,6 +226,10 @@ impl App {
         let params = (!batch.is_empty()).then_some((batch, after));
         let _ = self.push_to_engine(power, params);
         self.queue_state_broadcast(&state, self.fresh_conn_id());
+        eprintln!(
+            "[DEBUG-w7f3] bridge: broadcast queued (receivers={})",
+            self.updates.receiver_count()
+        );
         drop(state);
     }
 

@@ -167,7 +167,15 @@ impl SyncedFile {
     /// it rather than stranding in memory.
     pub(crate) fn ingest(&self, accept: impl FnOnce(&[u8]) -> bool) -> ReadOutcome {
         let mut inner = self.inner.lock().expect("file sync lock");
-        match std::fs::read(&self.path) {
+        let read = std::fs::read(&self.path);
+        if let Ok(bytes) = &read {
+            eprintln!(
+                "[DEBUG-w7f3] ingest read {:?} (synced {:?})",
+                String::from_utf8_lossy(bytes).replace('\n', " "),
+                String::from_utf8_lossy(&inner.bytes).replace('\n', " ")
+            );
+        }
+        match read {
             Ok(bytes) if bytes == inner.bytes => ReadOutcome::Clean,
             Ok(bytes) => {
                 if accept(&bytes) {

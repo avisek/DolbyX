@@ -55,18 +55,30 @@ async fn run(
     let _hold = watcher;
     let mut deadline = Instant::now();
     let mut armed = false;
+    // [DEBUG-w7f3] diagnostic timeline for the flaky cadence test.
+    let t0 = std::time::Instant::now();
+    let ms = |t0: std::time::Instant| t0.elapsed().as_secs_f64() * 1000.0;
     loop {
         tokio::select! {
             event = rx.recv() => {
                 let Some(event) = event else { return };
-                if touches_config(&event) && !armed {
+                let touches = touches_config(&event);
+                if let Ok(e) = &event {
+                    let name = e.paths.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+                    eprintln!("[DEBUG-w7f3] {:>8.1}ms event {:?} {:?} touches={touches} armed={armed}", ms(t0), e.kind, name);
+                }
+                if touches && !armed {
                     armed = true;
                     deadline = Instant::now() + WINDOW;
+                    eprintln!("[DEBUG-w7f3] {:>8.1}ms ARM", ms(t0));
                 }
             }
             () = tokio::time::sleep_until(deadline), if armed => {
                 armed = false;
-                if let Some(state) = reload(&shared) {
+                let fired = ms(t0);
+                let state = reload(&shared);
+                eprintln!("[DEBUG-w7f3] {:>8.1}ms FIRE -> {} (reload took {:.1}ms)", fired, if state.is_some() { "reload" } else { "none" }, ms(t0) - fired);
+                if let Some(state) = state {
                     on_reload(state);
                 }
             }
@@ -121,6 +133,16 @@ fn reload(shared: &Shared) -> Option<State> {
             }
         }
     });
+    eprintln!(
+        "[DEBUG-w7f3] ingest -> {} accepted={}",
+        match &outcome {
+            ReadOutcome::Clean => "Clean".to_string(),
+            ReadOutcome::Foreign => "Foreign".to_string(),
+            ReadOutcome::Absent => "Absent".to_string(),
+            ReadOutcome::Unreadable(e) => format!("Unreadable({e})"),
+        },
+        accepted.is_some()
+    );
     match outcome {
         ReadOutcome::Clean | ReadOutcome::Foreign => {}
         ReadOutcome::Absent => {

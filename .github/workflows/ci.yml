@@ -30,6 +30,10 @@ jobs:
       # rustup picks up rust-toolchain.toml (pinned channel + components)
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
+      # [DIAG-w7f3] flaky `a_sustained_external_writer_tracks_at_window_cadence`:
+      # loop the watcher suite until it trips; the tagged timeline prints on failure.
+      - if: matrix.os == 'ubuntu-latest'
+        run: for i in $(seq 1 80); do echo "== iteration $i"; cargo test -p ddp-daemon --test watcher || exit 1; done
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo fmt --all --check
 
@@ -48,6 +52,9 @@ jobs:
       - run: cargo test -p ddp-engine --features qemu
       # The daemon e2e suite against the real engine (issue #16)
       - run: cargo test -p ddp-daemon --features qemu
+      # [DIAG-w7f3] flaky `a_sustained_external_writer_tracks_at_window_cadence`
+      # (every failure so far landed in this job): loop the watcher suite until it trips.
+      - run: for i in $(seq 1 80); do echo "== iteration $i"; cargo test -p ddp-daemon --features qemu --test watcher || exit 1; done
       - run: cargo clippy -p ddp-engine --features qemu --all-targets -- -D warnings
       - run: cargo clippy -p ddp-daemon --features qemu --all-targets -- -D warnings
       # The documented engine behaviors the design load-bears on

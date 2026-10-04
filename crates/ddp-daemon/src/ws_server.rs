@@ -109,12 +109,16 @@ async fn connection(mut socket: WebSocket, peer: SocketAddr, app: Arc<App>) {
                     Ok((origin, _)) if origin == conn_id => continue,
                     Ok((_, text)) => text,
                     // Lagged: resync with a fresh snapshot.
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("[DEBUG-w7f3] ws conn {conn_id:?}: LAGGED by {n}, resyncing");
                         state_event(&app, None).await.into()
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
                 };
-                if send(&mut socket, &text).await.is_err() {
+                let started = std::time::Instant::now();
+                let sent = send(&mut socket, &text).await;
+                eprintln!("[DEBUG-w7f3] ws conn {conn_id:?}: sent {} bytes in {:.1}ms ok={}", text.len(), started.elapsed().as_secs_f64() * 1000.0, sent.is_ok());
+                if sent.is_err() {
                     return;
                 }
             }

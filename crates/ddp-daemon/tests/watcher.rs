@@ -163,18 +163,26 @@ async fn a_sustained_external_writer_tracks_at_window_cadence() {
     // stretches it, so the bound below uses the measured span). Last
     // write `dvla = 10`: the max, written once — the true last reload.
     let path = config.clone();
-    let span = tokio::task::spawn_blocking(move || {
+    let t0 = std::time::Instant::now(); // [DEBUG-w7f3]
+    let (span, write_times) = tokio::task::spawn_blocking(move || {
         let started = std::time::Instant::now();
+        let mut write_times = Vec::with_capacity(41); // [DEBUG-w7f3]
         for value in (0..40).map(|i| i % 10) {
             std::fs::write(&path, format!("[profile.music]\ndvla = {value}\n"))
                 .expect("external write");
+            write_times.push((started.elapsed().as_secs_f64() * 1000.0, value));
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         std::fs::write(&path, "[profile.music]\ndvla = 10\n").expect("external write");
-        started.elapsed()
+        write_times.push((started.elapsed().as_secs_f64() * 1000.0, 10));
+        (started.elapsed(), write_times)
     })
     .await
     .expect("writer thread");
+    eprintln!(
+        "[DEBUG-w7f3] test: writer done at {:.1}ms; writes (ms, value): {write_times:?}",
+        t0.elapsed().as_secs_f64() * 1000.0
+    );
 
     // Collect reloads until the final value lands. Bounded by time, not
     // by inter-frame gaps: a loaded runner can stall the socket past
@@ -190,12 +198,22 @@ async fn a_sustained_external_writer_tracks_at_window_cadence() {
             "the final value lands (got {} reloads)",
             reloads.len()
         );
-        reloads.push(recv_state(&mut ws).await);
+        let frame = recv_state(&mut ws).await;
+        eprintln!(
+            "[DEBUG-w7f3] test: state frame at {:.1}ms dvla={}",
+            t0.elapsed().as_secs_f64() * 1000.0,
+            profile(&frame, "music")["params"]["dvla"]
+        );
+        reloads.push(frame);
     }
     assert_eq!(
         try_recv_json(&mut ws, 400).await,
         None,
         "the final value wins: nothing trails its reload"
+    );
+    eprintln!(
+        "[DEBUG-w7f3] test: {} reloads over writer span {span:?}",
+        reloads.len()
     );
 
     // The window rule over the writer's span: far fewer than 41 writes
