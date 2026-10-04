@@ -4,9 +4,8 @@
  * page over the daemon's fan-out; a `config.toml` naming a skin the
  * registry doesn't ship paints the default with no pill checked; a
  * reload paints the chosen skin straight from Bootstrap, nothing
- * fetched. Note: Classic is Remastered's verbatim copy until #139, so
- * the two texts are byte-identical today — the swap is pinned through
- * the pill and the peer's text matching the originator's.
+ * fetched. A swap is judged by the `<style>` text moving: two
+ * registered skins never share a text (#139).
  */
 import { writeFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
@@ -24,7 +23,7 @@ const classicPill = (page: Page) =>
 const classicRadio = (page: Page) => skinRadio(page, 'classic')
 
 // Behavior 2: a pick is ack-then-apply at the originator and a `state`
-// broadcast at the peer — both pages end up checked and painted alike.
+// broadcast at the peer — both pages end up checked and repainted alike.
 test('a pill pick lands on its ack and a second page follows', async ({
   page,
   context,
@@ -34,12 +33,14 @@ test('a pill pick lands on its ack and a second page follows', async ({
   await peer.goto('/')
   await expect(peer.getByRole('status')).toHaveText('Connected')
   await expect(classicRadio(peer)).not.toBeChecked()
+  const before = await skinText(page)
+  expect(before).not.toBe('')
 
   await classicPill(page).click()
   await expect(classicRadio(page)).toBeChecked()
   await expect(classicRadio(peer)).toBeChecked()
   const painted = await skinText(page)
-  expect(painted).not.toBe('')
+  expect(painted).not.toBe(before)
   expect(await skinText(peer)).toBe(painted)
 })
 
@@ -70,9 +71,11 @@ test('a reload paints the chosen skin from Bootstrap with no extra request', asy
   page,
 }) => {
   await openAt(page, 1280)
+  const remastered = await skinText(page)
   await classicPill(page).click()
   await expect(classicRadio(page)).toBeChecked()
   const classic = await skinText(page)
+  expect(classic).not.toBe(remastered)
 
   const subresources: string[] = []
   page.on('request', (request) => {
